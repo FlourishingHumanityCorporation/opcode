@@ -2778,4 +2778,29 @@ mod tests {
         let path = result.unwrap();
         assert!(path == "/path1" || path == "/path2");
     }
+
+    #[test]
+    fn test_build_provider_args_codex_includes_reasoning_effort() {
+        let args = build_provider_args(
+            "codex",
+            "Refactor this module",
+            "gpt-5.3-codex",
+            Some("xhigh"),
+        );
+
+        assert!(args.contains(&"-c".to_string()));
+        assert!(args.contains(&"model_reasoning_effort=\"xhigh\"".to_string()));
+    }
+
+    #[test]
+    fn test_build_provider_args_codex_ignores_invalid_reasoning_effort() {
+        let args = build_provider_args(
+            "codex",
+            "Refactor this module",
+            "gpt-5.3-codex",
+            Some("banana"),
+        );
+
+        assert!(!args.iter().any(|arg| arg.contains("model_reasoning_effort")));
+    }
 }
