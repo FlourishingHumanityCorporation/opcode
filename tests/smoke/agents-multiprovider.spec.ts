@@ -214,9 +214,9 @@ test.describe("Multiprovider agent smoke", () => {
     await expect(page.getByRole("heading", { name: "Agents", exact: true })).toBeVisible();
 
     const providers = [
-      { id: "claude", modelLabel: "Claude 4 Sonnet" },
+      { id: "claude", modelLabel: "Default (recommended)" },
       { id: "codex", modelLabel: "GPT-5.3-Codex" },
-      { id: "gemini", modelLabel: "Gemini 2.5 Flash" },
+      { id: "gemini", modelLabel: "Provider Default" },
     ];
 
     for (const provider of providers) {
