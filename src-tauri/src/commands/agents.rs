@@ -6,7 +6,9 @@ use reqwest;
 use rusqlite::{params, Connection, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::env;
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -100,6 +102,19 @@ pub struct AgentData {
     pub provider_id: String,
     pub model: String,
     pub hooks: Option<String>,
+}
+
+/// Runtime readiness status for a provider.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProviderRuntimeStatus {
+    pub provider_id: String,
+    pub installed: bool,
+    pub auth_ready: bool,
+    pub ready: bool,
+    pub detected_binary: Option<String>,
+    pub detected_version: Option<String>,
+    pub issues: Vec<String>,
+    pub setup_hints: Vec<String>,
 }
 
 /// Database connection state
@@ -741,6 +756,146 @@ pub async fn list_agent_runs_with_metrics(
     Ok(runs_with_metrics)
 }
 
+fn env_has_value(name: &str) -> bool {
+    env::var(name).map(|v| !v.trim().is_empty()).unwrap_or(false)
+}
+
+fn env_is_truthy(name: &str) -> bool {
+    env::var(name)
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
+fn gemini_adc_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".config/gcloud/application_default_credentials.json"));
+    }
+
+    if let Ok(appdata) = env::var("APPDATA") {
+        paths.push(
+            PathBuf::from(appdata)
+                .join("gcloud")
+                .join("application_default_credentials.json"),
+        );
+    }
+
+    paths
+}
+
+fn gemini_auth_ready() -> bool {
+    let api_key_ready = env_has_value("GEMINI_API_KEY") || env_has_value("GOOGLE_API_KEY");
+
+    let vertex_ready = env_is_truthy("GOOGLE_GENAI_USE_VERTEXAI")
+        && env_has_value("GOOGLE_CLOUD_PROJECT")
+        && (env_has_value("GOOGLE_CLOUD_LOCATION") || env_has_value("GOOGLE_CLOUD_REGION"));
+
+    let adc_ready = gemini_adc_paths().into_iter().any(|path| path.exists());
+
+    api_key_ready || vertex_ready || adc_ready
+}
+
+async fn provider_runtime_status(
+    app: &AppHandle,
+    provider_id: &str,
+) -> Result<ProviderRuntimeStatus, String> {
+    let mut status = ProviderRuntimeStatus {
+        provider_id: provider_id.to_string(),
+        installed: false,
+        auth_ready: true,
+        ready: false,
+        detected_binary: None,
+        detected_version: None,
+        issues: Vec::new(),
+        setup_hints: Vec::new(),
+    };
+
+    if provider_id == "claude" {
+        match find_claude_binary(app) {
+            Ok(path) => {
+                status.installed = true;
+                status.detected_binary = Some(path);
+            }
+            Err(_) => {
+                status.issues.push("Claude CLI is not detected on this system.".to_string());
+                status
+                    .setup_hints
+                    .push("Install Claude Code CLI and ensure `claude` is available in PATH.".to_string());
+            }
+        }
+    } else {
+        let detected = crate::agent_binary::discover_all_agents(app).await;
+        if let Some(agent) = detected.into_iter().find(|a| a.provider_id == provider_id) {
+            status.installed = true;
+            status.detected_binary = Some(agent.binary_path);
+            status.detected_version = agent.version;
+        } else {
+            status.issues.push(format!(
+                "Provider '{}' binary is not detected on this system.",
+                provider_id
+            ));
+            status
+                .setup_hints
+                .push(format!("Install the '{}' CLI and ensure it is available in PATH.", provider_id));
+        }
+    }
+
+    if provider_id == "gemini" {
+        status.auth_ready = gemini_auth_ready();
+        if !status.auth_ready {
+            status.issues.push("Gemini authentication was not detected.".to_string());
+            status.setup_hints.push(
+                "Set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) before running Gemini tasks."
+                    .to_string(),
+            );
+            status.setup_hints.push(
+                "Or configure Vertex auth with `GOOGLE_GENAI_USE_VERTEXAI=true`, `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION`."
+                    .to_string(),
+            );
+            status.setup_hints.push(
+                "Or run `gcloud auth application-default login` to create ADC credentials."
+                    .to_string(),
+            );
+        }
+    }
+
+    status.ready = status.installed && status.auth_ready;
+    Ok(status)
+}
+
+fn provider_runtime_error(status: &ProviderRuntimeStatus) -> String {
+    let mut message = format!(
+        "Provider '{}' is not ready for execution.",
+        status.provider_id
+    );
+
+    if !status.issues.is_empty() {
+        message.push_str("\nIssues:");
+        for issue in &status.issues {
+            message.push_str(&format!("\n- {}", issue));
+        }
+    }
+
+    if !status.setup_hints.is_empty() {
+        message.push_str("\nSuggested fixes:");
+        for hint in &status.setup_hints {
+            message.push_str(&format!("\n- {}", hint));
+        }
+    }
+
+    message
+}
+
+/// Check runtime readiness for a provider (binary + auth prerequisites).
+#[tauri::command]
+pub async fn check_provider_runtime(
+    app: AppHandle,
+    provider_id: String,
+) -> Result<ProviderRuntimeStatus, String> {
+    provider_runtime_status(&app, &provider_id).await
+}
+
 /// Execute a CC agent with streaming output
 #[tauri::command]
 pub async fn execute_agent(
@@ -767,6 +922,17 @@ pub async fn execute_agent(
     } else {
         format!("{}-run-{}", provider_id, chrono::Utc::now().timestamp_millis())
     };
+
+    // Fail fast on missing provider runtime prerequisites.
+    let runtime_status = provider_runtime_status(&app, &provider_id).await?;
+    if !runtime_status.ready {
+        return Err(provider_runtime_error(&runtime_status));
+    }
+
+    let binary_path = runtime_status
+        .detected_binary
+        .clone()
+        .unwrap_or(resolve_provider_binary(&app, &provider_id).await?);
 
     // Create .claude/settings.json with agent hooks for Claude providers.
     if provider_id == "claude" && agent.hooks.is_some() {
@@ -833,7 +999,6 @@ pub async fn execute_agent(
         "Running agent '{}' with provider '{}'",
         agent.name, provider_id
     );
-    let binary_path = resolve_provider_binary(&app, &provider_id).await?;
     let args = build_provider_args(
         &provider_id,
         &task,
@@ -910,20 +1075,41 @@ fn build_provider_args(
             }
             args
         }
-        "goose" => vec!["run".to_string(), "--text".to_string(), task.to_string()],
         "gemini" => {
             let mut args = vec![
                 "--prompt".to_string(),
                 task.to_string(),
                 "--approval-mode".to_string(),
                 "yolo".to_string(),
+                "--output-format".to_string(),
+                "stream-json".to_string(),
             ];
             if !model.is_empty() {
                 args.extend(["--model".to_string(), model.to_string()]);
             }
             args
         }
-        "opencode" => vec![task.to_string()],
+        "goose" => {
+            let mut args = vec![
+                "run".to_string(),
+                "--text".to_string(),
+                task.to_string(),
+                "--no-session".to_string(),
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+            ];
+            if !model.is_empty() {
+                args.extend(["--model".to_string(), model.to_string()]);
+            }
+            args
+        }
+        "opencode" => {
+            let mut args = vec!["run".to_string(), task.to_string()];
+            if !model.is_empty() {
+                args.extend(["--model".to_string(), model.to_string()]);
+            }
+            args
+        }
         _ => vec![task.to_string()],
     }
 }
@@ -2322,6 +2508,26 @@ mod tests {
                 "gpt-5-codex".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn build_provider_args_goose_uses_non_interactive_stream_mode() {
+        let args = build_provider_args("goose", "summarize repo", "gpt-5", None);
+        assert_eq!(args[0], "run");
+        assert_eq!(args[1], "--text");
+        assert!(args.contains(&"--no-session".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+        assert!(args.contains(&"--model".to_string()));
+    }
+
+    #[test]
+    fn build_provider_args_opencode_uses_run_command() {
+        let args = build_provider_args("opencode", "fix failing tests", "gpt-5", None);
+        assert_eq!(args[0], "run");
+        assert_eq!(args[1], "fix failing tests");
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"gpt-5".to_string()));
     }
 
     #[test]

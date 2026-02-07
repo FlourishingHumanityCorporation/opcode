@@ -75,6 +75,7 @@ const TabItem: React.FC<TabItemProps> = ({ tab, isActive, onClose, onClick, isDr
         isDragging && "bg-card border-primary/50 shadow-sm z-50",
         "min-w-[120px] max-w-[220px] h-8 px-3"
       )}
+      data-testid={`tab-${tab.type}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={() => onClick(tab.id)}

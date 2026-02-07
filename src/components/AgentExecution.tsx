@@ -24,9 +24,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { api, type Agent } from "@/lib/api";
+import { api, type Agent, type ProviderRuntimeStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
 import { StreamMessage } from "./StreamMessage";
 import { ExecutionControlBar } from "./ExecutionControlBar";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -81,6 +81,26 @@ export interface ClaudeStreamMessage {
   [key: string]: any;
 }
 
+async function listenToAgentEvent<T>(
+  eventName: string,
+  handler: (event: { payload: T }) => void
+): Promise<UnlistenFn> {
+  const hasTauriInternals = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
+  if (!hasTauriInternals) {
+    const listener = (event: Event) => {
+      handler({ payload: (event as CustomEvent<T>).detail });
+    };
+    window.addEventListener(eventName, listener as EventListener);
+    return () => {
+      window.removeEventListener(eventName, listener as EventListener);
+    };
+  }
+
+  return tauriListen<T>(eventName, (event) => {
+    handler({ payload: event.payload });
+  });
+}
+
 /**
  * AgentExecution component for running CC agents
  * 
@@ -107,6 +127,8 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
   const [model, setModel] = useState(initialModel);
   const [customModelInput, setCustomModelInput] = useState(initialCustomModel);
   const [isRunning, setIsRunning] = useState(false);
+  const [providerRuntime, setProviderRuntime] = useState<ProviderRuntimeStatus | null>(null);
+  const [providerRuntimeLoading, setProviderRuntimeLoading] = useState(false);
   
   // Get tab state functions
   const { updateTabStatus } = useTabState();
@@ -235,6 +257,35 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadProviderRuntime = async () => {
+      try {
+        setProviderRuntimeLoading(true);
+        const runtime = await api.checkProviderRuntime(providerId);
+        if (!isCancelled) {
+          setProviderRuntime(runtime);
+        }
+      } catch (err) {
+        console.warn("Failed to check provider runtime:", err);
+        if (!isCancelled) {
+          setProviderRuntime(null);
+        }
+      } finally {
+        if (!isCancelled) {
+          setProviderRuntimeLoading(false);
+        }
+      }
+    };
+
+    loadProviderRuntime();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [providerId]);
+
   // Check if user is at the very bottom of the scrollable container
   const isAtBottom = () => {
     const container = isFullscreenModalOpen ? fullscreenScrollRef.current : scrollContainerRef.current;
@@ -302,6 +353,11 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
   };
 
   const handleExecute = async () => {
+    if (providerRuntime && !providerRuntime.ready) {
+      setError("Provider runtime is not ready. Fix the setup hints below and try again.");
+      return;
+    }
+
     try {
       setIsRunning(true);
       // Update tab status to running
@@ -334,7 +390,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
       agentFeatureTracking.trackUsage();
       
       // Set up event listeners with run ID isolation
-      const outputUnlisten = await listen<string>(`agent-output:${executionRunId}`, (event) => {
+      const outputUnlisten = await listenToAgentEvent<string>(`agent-output:${executionRunId}`, (event) => {
         try {
           // Store raw JSONL
           setRawJsonlOutput(prev => [...prev, event.payload]);
@@ -347,7 +403,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
         }
       });
 
-      const errorUnlisten = await listen<string>(`agent-error:${executionRunId}`, (event) => {
+      const errorUnlisten = await listenToAgentEvent<string>(`agent-error:${executionRunId}`, (event) => {
         console.error("Agent error:", event.payload);
         setError(event.payload);
         
@@ -360,7 +416,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
         });
       });
 
-      const completeUnlisten = await listen<boolean>(`agent-complete:${executionRunId}`, (event) => {
+      const completeUnlisten = await listenToAgentEvent<boolean>(`agent-complete:${executionRunId}`, (event) => {
         setIsRunning(false);
         const duration = executionStartTime ? Date.now() - executionStartTime : undefined;
         setExecutionStartTime(null);
@@ -387,7 +443,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
         }
       });
 
-      const cancelUnlisten = await listen<boolean>(`agent-cancelled:${executionRunId}`, () => {
+      const cancelUnlisten = await listenToAgentEvent<boolean>(`agent-cancelled:${executionRunId}`, () => {
         setIsRunning(false);
         setExecutionStartTime(null);
         setError("Agent execution was cancelled");
@@ -604,6 +660,30 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
               </motion.div>
             )}
 
+            {!providerRuntimeLoading && providerRuntime && !providerRuntime.ready && (
+              <motion.div
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.15 }}
+                className="p-3 rounded-md bg-destructive/10 border border-destructive/50"
+              >
+                <p className="text-caption text-destructive mb-1">
+                  {getProviderDisplayName(providerId)} runtime is not ready.
+                </p>
+                {providerRuntime.issues.map((issue, index) => (
+                  <p key={`${issue}-${index}`} className="text-caption text-destructive/90">
+                    - {issue}
+                  </p>
+                ))}
+                {providerRuntime.setup_hints.map((hint, index) => (
+                  <p key={`${hint}-${index}`} className="text-caption text-destructive/80 mt-1">
+                    - {hint}
+                  </p>
+                ))}
+              </motion.div>
+            )}
+
             {/* Model Selection */}
             <div className="space-y-3">
               <Label className="text-caption text-muted-foreground">Model Selection</Label>
@@ -685,6 +765,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
               </div>
               <div className="flex gap-2">
                 <Input
+                  data-testid="agent-task-input"
                   value={task}
                   onChange={(e) => setTask(e.target.value)}
                   placeholder="What would you like the agent to do?"
@@ -706,8 +787,9 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
                   transition={{ duration: 0.15 }}
                 >
                   <Button
+                    data-testid={isRunning ? "agent-stop-button" : "agent-execute-button"}
                     onClick={isRunning ? handleStop : handleExecute}
-                    disabled={!projectPath || !task.trim()}
+                    disabled={!projectPath || !task.trim() || (!!providerRuntime && !providerRuntime.ready)}
                     variant={isRunning ? "destructive" : "default"}
                     size="default"
                   >

@@ -146,6 +146,8 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
                 whileTap={{ scale: 0.97 }}
                 transition={{ duration: 0.15 }}
                 className="p-2 rounded-md hover:bg-accent hover:text-accent-foreground transition-colors tauri-no-drag"
+                aria-label="Agents"
+                data-testid="titlebar-agents-button"
               >
                 <Bot size={16} />
               </motion.button>
@@ -159,6 +161,7 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
                 whileTap={{ scale: 0.97 }}
                 transition={{ duration: 0.15 }}
                 className="p-2 rounded-md hover:bg-accent hover:text-accent-foreground transition-colors tauri-no-drag"
+                aria-label="Usage Dashboard"
               >
                 <BarChart3 size={16} />
               </motion.button>
@@ -178,6 +181,7 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
                 whileTap={{ scale: 0.97 }}
                 transition={{ duration: 0.15 }}
                 className="p-2 rounded-md hover:bg-accent hover:text-accent-foreground transition-colors tauri-no-drag"
+                aria-label="Settings"
               >
                 <Settings size={16} />
               </motion.button>
@@ -192,6 +196,7 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
                 whileTap={{ scale: 0.97 }}
                 transition={{ duration: 0.15 }}
                 className="p-2 rounded-md hover:bg-accent hover:text-accent-foreground transition-colors flex items-center gap-1"
+                aria-label="More options"
               >
                 <MoreVertical size={16} />
               </motion.button>

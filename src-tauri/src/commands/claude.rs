@@ -2301,6 +2301,8 @@ fn build_provider_args(provider_id: &str, prompt: &str, model: &str) -> Vec<Stri
                 prompt.to_string(),
                 "--approval-mode".to_string(),
                 "yolo".to_string(),
+                "--output-format".to_string(),
+                "stream-json".to_string(),
             ];
             if !model.is_empty() {
                 args.extend_from_slice(&["--model".to_string(), model.to_string()]);
@@ -2319,7 +2321,25 @@ fn build_provider_args(provider_id: &str, prompt: &str, model: &str) -> Vec<Stri
             args
         }
         "goose" => {
-            vec!["run".to_string(), "--text".to_string(), prompt.to_string()]
+            let mut args = vec![
+                "run".to_string(),
+                "--text".to_string(),
+                prompt.to_string(),
+                "--no-session".to_string(),
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+            ];
+            if !model.is_empty() {
+                args.extend_from_slice(&["--model".to_string(), model.to_string()]);
+            }
+            args
+        }
+        "opencode" => {
+            let mut args = vec!["run".to_string(), prompt.to_string()];
+            if !model.is_empty() {
+                args.extend_from_slice(&["--model".to_string(), model.to_string()]);
+            }
+            args
         }
         _ => {
             // Generic: just pass prompt as first arg

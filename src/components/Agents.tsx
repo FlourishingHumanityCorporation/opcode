@@ -31,6 +31,7 @@ export const Agents: React.FC = () => {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [showGitHubBrowser, setShowGitHubBrowser] = useState(false);
   const { createAgentTab } = useTabState();
+  const isRealTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
 
   // Load agents on mount
   useEffect(() => {
@@ -74,11 +75,21 @@ export const Agents: React.FC = () => {
       setToast({ message: 'Agent ID is missing', type: 'error' });
       return;
     }
-    
-    // Import the dialog function
-    const { open } = await import('@tauri-apps/plugin-dialog');
-    
+
     try {
+      if (!isRealTauri) {
+        const projectPath = localStorage.getItem('opcode.smoke.projectPath') || '/tmp';
+        const tabId = `agent-exec-${agent.id}-${Date.now()}`;
+        window.dispatchEvent(new CustomEvent('open-agent-execution', {
+          detail: { agent, tabId, projectPath }
+        }));
+        setToast({ message: `Opening agent: ${agent.name}`, type: 'success' });
+        return;
+      }
+
+      // Import the dialog function only when Tauri internals are available
+      const { open } = await import('@tauri-apps/plugin-dialog');
+
       // Prompt user to select a project directory
       const projectPath = await open({
         directory: true,
@@ -232,7 +243,7 @@ export const Agents: React.FC = () => {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <Button onClick={() => setShowCreateAgent(true)}>
+              <Button onClick={() => setShowCreateAgent(true)} data-testid="agents-create-button">
                 <Plus className="w-4 h-4 mr-2" />
                 Create Agent
               </Button>
@@ -313,11 +324,11 @@ export const Agents: React.FC = () => {
         <div className="flex-1 overflow-y-auto p-6">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="grid grid-cols-2 w-full max-w-md mb-6 h-auto p-1">
-              <TabsTrigger value="agents" className="py-2.5 px-3">
+              <TabsTrigger value="agents" className="py-2.5 px-3" data-testid="agents-tab-agents">
                 <Bot className="w-4 h-4 mr-2" />
                 Agents ({agents.length})
               </TabsTrigger>
-              <TabsTrigger value="running" className="py-2.5 px-3">
+              <TabsTrigger value="running" className="py-2.5 px-3" data-testid="agents-tab-history">
                 <History className="w-4 h-4 mr-2" />
                 History ({runningAgents.length})
               </TabsTrigger>
@@ -346,6 +357,7 @@ export const Agents: React.FC = () => {
                     <Card
                       key={agent.id}
                       className="p-4 hover:shadow-md transition-shadow"
+                      data-testid={`agent-card-${agent.id}`}
                     >
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex items-center gap-2">
@@ -396,6 +408,7 @@ export const Agents: React.FC = () => {
                         <Button
                           size="sm"
                           onClick={() => handleRunAgent(agent)}
+                          data-testid={`agent-run-${agent.id}`}
                         >
                           <Play className="w-3 h-3 mr-1" />
                           Run
@@ -424,6 +437,7 @@ export const Agents: React.FC = () => {
                     <Card
                       key={run.id}
                       className="p-4"
+                      data-testid={`agents-history-run-${run.id}`}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-3">

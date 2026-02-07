@@ -43,7 +43,7 @@ const KNOWN_AGENTS: &[AgentDef] = &[
     },
     AgentDef {
         id: "goose",
-        commands: &["goose"],
+        commands: &["goose", "block-goose"],
         version_flag: "--version",
     },
     AgentDef {
@@ -144,6 +144,14 @@ fn try_find_agent(provider_id: &str, command: &str, version_flag: &str) -> Optio
                 }
             }
 
+            if !validate_agent_binary(provider_id, &resolved_path) {
+                warn!(
+                    "Ignoring '{}' binary at '{}' because it does not match expected provider CLI",
+                    provider_id, resolved_path
+                );
+                return None;
+            }
+
             let version = get_agent_version(&resolved_path, version_flag);
 
             Some(AgentInstallation {
@@ -154,6 +162,27 @@ fn try_find_agent(provider_id: &str, command: &str, version_flag: &str) -> Optio
             })
         }
         _ => None,
+    }
+}
+
+fn validate_agent_binary(provider_id: &str, binary_path: &str) -> bool {
+    match provider_id {
+        // Avoid false-positive detection for the unrelated DB migration `goose` CLI.
+        "goose" => match Command::new(binary_path).arg("--help").output() {
+            Ok(output) => {
+                let text = String::from_utf8_lossy(&output.stdout).to_lowercase();
+                text.contains("an ai agent") || text.contains("goose run [options]")
+            }
+            Err(_) => false,
+        },
+        "opencode" => match Command::new(binary_path).arg("--help").output() {
+            Ok(output) => {
+                let text = String::from_utf8_lossy(&output.stdout).to_lowercase();
+                text.contains("opencode run")
+            }
+            Err(_) => false,
+        },
+        _ => true,
     }
 }
 

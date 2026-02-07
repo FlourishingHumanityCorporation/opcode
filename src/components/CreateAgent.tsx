@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Toast, ToastContainer } from "@/components/ui/toast";
-import { api, type Agent } from "@/lib/api";
+import { api, type Agent, type ProviderRuntimeStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import MDEditor from "@uiw/react-md-editor";
 import { type AgentIconName } from "./CCAgents";
@@ -65,6 +65,8 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
   const [model, setModel] = useState(initialModel);
   const [customModelInput, setCustomModelInput] = useState(initialCustomModel);
   const [detectedProviderIds, setDetectedProviderIds] = useState<string[]>([]);
+  const [providerRuntime, setProviderRuntime] = useState<ProviderRuntimeStatus | null>(null);
+  const [providerRuntimeLoading, setProviderRuntimeLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -104,6 +106,35 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
 
     loadDetectedProviders();
   }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadProviderRuntime = async () => {
+      try {
+        setProviderRuntimeLoading(true);
+        const status = await api.checkProviderRuntime(providerId);
+        if (!isCancelled) {
+          setProviderRuntime(status);
+        }
+      } catch (err) {
+        console.warn("Failed to check provider runtime:", err);
+        if (!isCancelled) {
+          setProviderRuntime(null);
+        }
+      } finally {
+        if (!isCancelled) {
+          setProviderRuntimeLoading(false);
+        }
+      }
+    };
+
+    loadProviderRuntime();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [providerId]);
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -237,6 +268,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
                 onClick={handleSave}
                 disabled={saving || !name.trim() || !systemPrompt.trim()}
                 size="default"
+                data-testid="create-agent-save-button"
               >
                 {saving ? (
                   <>
@@ -320,6 +352,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
                   value={providerId}
                   onChange={(e) => handleProviderChange(e.target.value)}
                   className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  data-testid="create-agent-provider-select"
                 >
                   {providerOptions.map((id) => (
                     <option key={id} value={id}>
@@ -327,6 +360,21 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
                     </option>
                   ))}
                 </select>
+                {providerRuntimeLoading && (
+                  <p className="text-caption text-muted-foreground">Checking provider runtime...</p>
+                )}
+                {!providerRuntimeLoading && providerRuntime && !providerRuntime.ready && (
+                  <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2">
+                    <p className="text-caption text-destructive">
+                      Provider is not runtime-ready yet. You can still save, but executions will fail until fixed.
+                    </p>
+                    {providerRuntime.issues.map((issue, index) => (
+                      <p key={`${issue}-${index}`} className="text-caption text-destructive/90 mt-1">
+                        - {issue}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Model Selection */}
@@ -399,7 +447,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
                   Define the behavior and capabilities of your coding agent
                 </p>
               </div>
-              <div className="rounded-md border border-border overflow-hidden" data-color-mode="dark">
+              <div className="rounded-md border border-border overflow-hidden" data-color-mode="dark" data-testid="create-agent-system-prompt">
                 <MDEditor
                   value={systemPrompt}
                   onChange={(val) => setSystemPrompt(val || "")}

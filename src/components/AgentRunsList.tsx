@@ -117,6 +117,7 @@ export const AgentRunsList: React.FC<AgentRunsListProps> = ({
                   "cursor-pointer transition-all hover:shadow-md hover:scale-[1.01] active:scale-[0.99]",
                   run.status === "running" && "border-green-500/50"
                 )}
+                data-testid={`agent-history-run-${run.id}`}
                 onClick={() => handleRunClick(run)}
               >
                 <CardContent className="p-3">
@@ -166,6 +167,7 @@ export const AgentRunsList: React.FC<AgentRunsListProps> = ({
                         variant={
                           run.status === "completed" ? "default" :
                           run.status === "running" ? "secondary" :
+                          run.status === "cancelled" ? "outline" :
                           run.status === "failed" ? "destructive" :
                           "outline"
                         }
@@ -173,6 +175,7 @@ export const AgentRunsList: React.FC<AgentRunsListProps> = ({
                       >
                         {run.status === "completed" ? "Completed" :
                          run.status === "running" ? "Running" :
+                         run.status === "cancelled" ? "Cancelled" :
                          run.status === "failed" ? "Failed" :
                          "Pending"}
                       </Badge>

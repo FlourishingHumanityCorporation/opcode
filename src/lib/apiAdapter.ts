@@ -182,6 +182,7 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'import_agent_from_file': '/api/agents/import/file',
     'execute_agent': '/api/agents/{agentId}/execute',
     'list_agent_runs': '/api/agents/runs',
+    'list_agent_runs_with_metrics': '/api/agents/runs/metrics',
     'get_agent_run': '/api/agents/runs/{id}',
     'get_agent_run_with_real_time_metrics': '/api/agents/runs/{id}/metrics',
     'list_running_sessions': '/api/sessions/running',
@@ -192,6 +193,8 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'get_live_session_output': '/api/agents/sessions/{runId}/output/live',
     'stream_session_output': '/api/agents/sessions/{runId}/output/stream',
     'load_agent_session_history': '/api/agents/sessions/{sessionId}/history',
+    'list_detected_agents': '/api/agents/detected',
+    'check_provider_runtime': '/api/providers/{providerId}/runtime',
     
     // Usage commands
     'get_usage_stats': '/api/usage',

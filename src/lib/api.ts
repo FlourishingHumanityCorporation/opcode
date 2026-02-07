@@ -193,6 +193,17 @@ export interface AgentRunWithMetrics {
   output?: string; // Real-time JSONL content
 }
 
+export interface ProviderRuntimeStatus {
+  provider_id: string;
+  installed: boolean;
+  auth_ready: boolean;
+  ready: boolean;
+  detected_binary?: string;
+  detected_version?: string;
+  issues: string[];
+  setup_hints: string[];
+}
+
 // Usage Dashboard types
 export interface UsageEntry {
   project: string;
@@ -1087,6 +1098,13 @@ export const api = {
    */
   async listDetectedAgents(): Promise<any[]> {
     return apiCall("list_detected_agents");
+  },
+
+  /**
+   * Checks whether a provider is ready to run (binary + auth prerequisites).
+   */
+  async checkProviderRuntime(providerId: string): Promise<ProviderRuntimeStatus> {
+    return apiCall("check_provider_runtime", { providerId });
   },
 
   /**
