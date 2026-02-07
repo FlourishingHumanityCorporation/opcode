@@ -160,7 +160,7 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
             embedded
             paneId={paneId}
             workspaceId={workspace.id}
-            hideProjectBar
+            hideProjectBar={false}
             hideFloatingGlobalControls={false}
             previewMode="slideover"
             session={terminal.sessionState?.sessionData}

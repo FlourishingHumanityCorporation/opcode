@@ -24,10 +24,25 @@ type UnlistenFn = () => void;
 let _tauriListenPromise: Promise<any> | null = null;
 
 function getTauriListen(): Promise<any> {
+  const hasTauriBridge = typeof window !== 'undefined' && (
+    Boolean((window as any).__TAURI__) ||
+    Boolean((window as any).__TAURI_INTERNALS__) ||
+    Boolean((window as any).__TAURI_METADATA__)
+  );
+
+  if (!hasTauriBridge) {
+    return Promise.resolve(null);
+  }
+
   if (!_tauriListenPromise) {
-    _tauriListenPromise = (typeof window !== 'undefined' && (window as any).__TAURI__)
-      ? import("@tauri-apps/api/event").then(m => m.listen).catch(() => null)
-      : Promise.resolve(null);
+    _tauriListenPromise = import("@tauri-apps/api/event")
+      .then((m) => m.listen)
+      .catch((error) => {
+        // Allow retry on next call if the bridge is still initializing.
+        _tauriListenPromise = null;
+        console.warn("[ClaudeCodeSession] Failed to load Tauri event listener, falling back to DOM events", error);
+        return null;
+      });
   }
   return _tauriListenPromise;
 }
@@ -162,7 +177,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     providerId: string;
   };
 
-  const [projectPath] = useState(initialProjectPath || session?.project_path || "");
+  const [projectPath, setProjectPath] = useState(initialProjectPath || session?.project_path || "");
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -232,12 +247,18 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   // const aiTracking = useAIInteractionTracking('sonnet'); // Default model
   const workflowTracking = useWorkflowTracking('claude_session');
   
-  // Call onProjectPathChange when component mounts with initial path
+  // Keep internal project path in sync when parent workspace updates it.
+  useEffect(() => {
+    const nextPath = initialProjectPath || session?.project_path || "";
+    setProjectPath((prev) => (prev === nextPath ? prev : nextPath));
+  }, [initialProjectPath, session?.project_path]);
+
+  // Notify parent when project path is available/changes.
   useEffect(() => {
     if (onProjectPathChange && projectPath) {
       onProjectPathChange(projectPath);
     }
-  }, []); // Only run on mount
+  }, [onProjectPathChange, projectPath]);
 
   // Sync local provider state if parent tab updates provider.
   useEffect(() => {
@@ -597,12 +618,53 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
   };
 
-  // Project path selection handled by parent tab controls
+  const resolveProjectPathForPrompt = async (): Promise<string | null> => {
+    if (projectPath) {
+      return projectPath;
+    }
+
+    try {
+      const tauriAvailable = typeof window !== 'undefined' && (
+        Boolean((window as any).__TAURI__) || Boolean((window as any).__TAURI_INTERNALS__)
+      );
+
+      if (tauriAvailable) {
+        try {
+          const { open } = await import('@tauri-apps/plugin-dialog');
+          const result = await open({
+            directory: true,
+            multiple: false,
+            title: 'Select Project Folder',
+          });
+          if (typeof result === 'string' && result.trim()) {
+            return result.trim();
+          }
+        } catch (dialogError) {
+          console.error('Failed to open native directory picker:', dialogError);
+        }
+      }
+
+      const smokePath = window.localStorage.getItem('opcode.smoke.projectPath');
+      if (smokePath && smokePath.trim()) {
+        return smokePath.trim();
+      }
+
+      const typedPath = window.prompt('Enter project path', '');
+      if (typedPath && typedPath.trim()) {
+        return typedPath.trim();
+      }
+    } catch (err) {
+      console.error('Failed to resolve project path:', err);
+    }
+
+    return null;
+  };
 
   const handleSendPrompt = async (prompt: string, model: string, providerIdOverride?: string) => {
     const providerToUse = providerIdOverride || activeProviderId;
     const isClaudeProviderForRun = providerToUse === "claude";
     const modelForTracking = model || "default";
+    let runProjectPath = projectPath;
 
     console.log('[ClaudeCodeSession] handleSendPrompt called with:', {
       prompt,
@@ -612,10 +674,17 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       claudeSessionId,
       effectiveSession
     });
-    
-    if (!projectPath) {
-      setError("Please select a project directory first");
-      return;
+
+    if (!runProjectPath) {
+      const selectedProjectPath = await resolveProjectPathForPrompt();
+      if (!selectedProjectPath) {
+        setError("Please select a project directory first");
+        return;
+      }
+
+      runProjectPath = selectedProjectPath;
+      setProjectPath(selectedProjectPath);
+      onProjectPathChange?.(selectedProjectPath);
     }
 
     // If already loading, queue the prompt
@@ -704,14 +773,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
                 // If we haven't extracted session info before, do it now
                 if (!extractedSessionInfo) {
-                  const projectId = projectPath.replace(/[^a-zA-Z0-9]/g, '-');
+                  const projectId = runProjectPath.replace(/[^a-zA-Z0-9]/g, '-');
                   setExtractedSessionInfo({ sessionId: msg.session_id, projectId });
                   
                   // Save session data for restoration
                   SessionPersistenceService.saveSession(
                     msg.session_id,
                     projectId,
-                    projectPath,
+                    runProjectPath,
                     messages.length
                   );
                 }
@@ -891,14 +960,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               const settings = await api.getCheckpointSettings(
                 effectiveSession.id,
                 effectiveSession.project_id,
-                projectPath
+                runProjectPath
               );
 
               if (settings.auto_checkpoint_enabled) {
                 await api.checkAutoCheckpoint(
                   effectiveSession.id,
                   effectiveSession.project_id,
-                  projectPath,
+                  runProjectPath,
                   prompt
                 );
                 // Reload timeline to show new checkpoint
@@ -999,9 +1068,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           trackEvent.sessionResumed(effectiveSession.id);
           trackEvent.modelSelected(modelForTracking);
           if (isClaudeProviderForRun) {
-            await api.resumeClaudeCode(projectPath, effectiveSession.id, prompt, model);
+            await api.resumeClaudeCode(runProjectPath, effectiveSession.id, prompt, model);
           } else {
-            await api.resumeAgentSession(providerToUse, projectPath, effectiveSession.id, prompt, model);
+            await api.resumeAgentSession(providerToUse, runProjectPath, effectiveSession.id, prompt, model);
           }
         } else {
           console.log('[ClaudeCodeSession] Starting new session, provider:', providerToUse);
@@ -1009,9 +1078,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           trackEvent.sessionCreated(modelForTracking, 'prompt_input');
           trackEvent.modelSelected(modelForTracking);
           if (isClaudeProviderForRun) {
-            await api.executeClaudeCode(projectPath, prompt, model);
+            await api.executeClaudeCode(runProjectPath, prompt, model);
           } else {
-            await api.executeAgentSession(providerToUse, projectPath, prompt, model);
+            await api.executeAgentSession(providerToUse, runProjectPath, prompt, model);
           }
         }
       }
@@ -1740,7 +1809,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               onSend={handleSendPrompt}
               onCancel={handleCancelExecution}
               isLoading={isLoading}
-              disabled={!projectPath}
+              disabled={false}
               providerId={activeProviderId}
               defaultModel={getDefaultModelForProvider(activeProviderId)}
               projectPath={projectPath}

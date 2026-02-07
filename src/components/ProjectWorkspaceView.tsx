@@ -30,23 +30,36 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ work
 
   const openProjectPicker = async () => {
     try {
-      const tauriAvailable = typeof window !== 'undefined' && Boolean((window as any).__TAURI__);
+      const tauriAvailable = typeof window !== 'undefined' && (
+        Boolean((window as any).__TAURI__) || Boolean((window as any).__TAURI_INTERNALS__)
+      );
       let selected: string | null = null;
 
       if (tauriAvailable) {
-        const { open } = await import('@tauri-apps/plugin-dialog');
-        const result = await open({
-          directory: true,
-          multiple: false,
-          title: 'Open Project',
-        });
-        if (typeof result === 'string') {
-          selected = result;
+        try {
+          const { open } = await import('@tauri-apps/plugin-dialog');
+          const result = await open({
+            directory: true,
+            multiple: false,
+            title: 'Open Project',
+          });
+          if (typeof result === 'string') {
+            selected = result;
+          }
+        } catch (dialogError) {
+          console.error('Failed to open native directory picker:', dialogError);
         }
       }
 
       if (!selected) {
         selected = window.localStorage.getItem('opcode.smoke.projectPath') || '';
+      }
+
+      if (!selected) {
+        const typedPath = window.prompt('Enter project path', workspace.projectPath || '');
+        if (typedPath && typedPath.trim()) {
+          selected = typedPath.trim();
+        }
       }
 
       if (!selected) {
