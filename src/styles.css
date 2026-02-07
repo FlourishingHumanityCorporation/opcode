@@ -169,6 +169,30 @@ html {
 /* Theme Variations */
 /* Default is dark theme - already defined above */
 
+/* Warp-inspired default skin applied when user has no explicit saved theme */
+.warp-default {
+  --color-background: oklch(0.105 0.008 250);
+  --color-foreground: oklch(0.95 0.008 250);
+  --color-card: oklch(0.13 0.01 250);
+  --color-card-foreground: oklch(0.95 0.008 250);
+  --color-popover: oklch(0.12 0.01 250);
+  --color-popover-foreground: oklch(0.95 0.008 250);
+  --color-primary: oklch(0.78 0.05 220);
+  --color-primary-foreground: oklch(0.1 0.008 250);
+  --color-secondary: oklch(0.17 0.01 250);
+  --color-secondary-foreground: oklch(0.94 0.008 250);
+  --color-muted: oklch(0.15 0.01 250);
+  --color-muted-foreground: oklch(0.66 0.012 250);
+  --color-accent: oklch(0.2 0.01 250);
+  --color-accent-foreground: oklch(0.94 0.008 250);
+  --color-border: oklch(0.25 0.015 250);
+  --color-input: oklch(0.22 0.012 250);
+  --color-ring: oklch(0.68 0.035 220);
+  --radius-base: 0.33rem;
+  --radius-md: 0.42rem;
+  --radius-lg: 0.68rem;
+}
+
 /* Light Theme */
 .theme-light {
   --color-background: oklch(0.98 0.01 240);

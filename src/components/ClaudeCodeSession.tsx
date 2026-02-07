@@ -85,7 +85,7 @@ interface ClaudeCodeSessionProps {
   /**
    * Callback to go back
    */
-  onBack: () => void;
+  onBack?: () => void;
   /**
    * Callback to open hooks configuration
    */
@@ -110,6 +110,30 @@ interface ClaudeCodeSessionProps {
    * Callback when provider changes
    */
   onProviderChange?: (providerId: string) => void;
+  /**
+   * Whether this is rendered as an embedded pane.
+   */
+  embedded?: boolean;
+  /**
+   * Optional pane identity for multi-pane rendering.
+   */
+  paneId?: string;
+  /**
+   * Optional workspace identity for multi-workspace rendering.
+   */
+  workspaceId?: string;
+  /**
+   * Hide project/provider bar for embedded usage.
+   */
+  hideProjectBar?: boolean;
+  /**
+   * Hide floating global controls for embedded usage.
+   */
+  hideFloatingGlobalControls?: boolean;
+  /**
+   * Preview layout mode.
+   */
+  previewMode?: 'split' | 'slideover';
 }
 
 /**
@@ -126,6 +150,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   onProjectPathChange,
   providerId: initialProviderId = "claude",
   onProviderChange,
+  embedded = false,
+  hideProjectBar = false,
+  hideFloatingGlobalControls = false,
+  previewMode = 'split',
 }) => {
   type QueuedPrompt = {
     id: string;
@@ -1409,7 +1437,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   };
 
   // Provider selector bar (only shown when multiple providers detected)
-  const projectPathInput = detectedProviders.length > 0 ? (
+  const projectPathInput = !hideProjectBar && detectedProviders.length > 0 ? (
     <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border/50 text-xs">
       <div className="relative">
         <button
@@ -1446,7 +1474,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   ) : null;
 
   // If preview is maximized, render only the WebviewPreview in full screen
-  if (showPreview && isPreviewMaximized) {
+  if (showPreview && isPreviewMaximized && !embedded) {
     return (
       <AnimatePresence>
         <motion.div 
@@ -1471,15 +1499,15 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   return (
     <TooltipProvider>
-      <div className={cn("flex flex-col h-full bg-background", className)}>
-        <div className="w-full h-full flex flex-col">
+      <div className={cn("relative flex h-full flex-col bg-background", className)}>
+        <div className="relative w-full h-full flex flex-col">
 
         {/* Main Content Area */}
         <div className={cn(
           "flex-1 overflow-hidden transition-all duration-300",
           showTimeline && "sm:mr-96"
         )}>
-          {showPreview ? (
+          {showPreview && previewMode === 'split' ? (
             // Split pane layout when preview is active
             <SplitPane
               left={
@@ -1505,7 +1533,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             />
           ) : (
             // Original layout when no preview
-            <div className="h-full flex flex-col max-w-6xl mx-auto px-6">
+            <div className={cn("h-full flex flex-col", embedded ? "px-3" : "max-w-6xl mx-auto px-6")}>
               {projectPathInput}
               {messagesList}
               
@@ -1521,18 +1549,45 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               )}
             </div>
           )}
+
+          {showPreview && previewMode === 'slideover' && (
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className={cn(
+                embedded
+                  ? "absolute inset-y-0 right-0 z-40 w-[56%] min-w-[360px] border-l border-border/70 bg-background"
+                  : "fixed inset-y-0 right-0 z-50 w-[min(720px,56vw)] border-l border-border/70 bg-background shadow-2xl"
+              )}
+            >
+              <WebviewPreview
+                initialUrl={previewUrl}
+                onClose={handleClosePreview}
+                isMaximized={isPreviewMaximized}
+                onToggleMaximize={handleTogglePreviewMaximize}
+                onUrlChange={handlePreviewUrlChange}
+                className="h-full"
+              />
+            </motion.div>
+          )}
         </div>
 
         {/* Floating Prompt Input - Always visible */}
         <ErrorBoundary>
           {/* Queued Prompts Display */}
           <AnimatePresence>
-            {queuedPrompts.length > 0 && (
+            {queuedPrompts.length > 0 && !hideFloatingGlobalControls && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 20 }}
-                className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 w-full max-w-3xl px-4"
+                className={cn(
+                  embedded
+                    ? "absolute bottom-20 left-1/2 -translate-x-1/2 z-30 w-full max-w-3xl px-4"
+                    : "fixed bottom-24 left-1/2 -translate-x-1/2 z-30 w-full max-w-3xl px-4"
+                )}
               >
                 <div className="bg-background/95 backdrop-blur-md border rounded-lg shadow-lg p-3 space-y-2">
                   <div className="flex items-center justify-between">
@@ -1589,13 +1644,15 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           </AnimatePresence>
 
           {/* Navigation Arrows - positioned above prompt bar with spacing */}
-          {displayableMessages.length > 5 && (
+          {displayableMessages.length > 5 && !hideFloatingGlobalControls && (
             <motion.div
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.8 }}
               transition={{ delay: 0.5 }}
-              className="fixed bottom-32 right-6 z-50"
+              className={cn(
+                embedded ? "absolute bottom-28 right-4 z-40" : "fixed bottom-32 right-6 z-50"
+              )}
             >
               <div className="flex items-center bg-background/95 backdrop-blur-md border rounded-full shadow-lg overflow-hidden">
                 <TooltipSimple content="Scroll to top" side="top">
@@ -1673,7 +1730,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           )}
 
           <div className={cn(
-            "fixed bottom-0 left-0 right-0 transition-all duration-300 z-50",
+            embedded
+              ? "absolute bottom-0 left-0 right-0 transition-all duration-300 z-40"
+              : "fixed bottom-0 left-0 right-0 transition-all duration-300 z-50",
             showTimeline && "sm:right-96"
           )}>
             <FloatingPromptInput
@@ -1685,9 +1744,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               providerId={activeProviderId}
               defaultModel={getDefaultModelForProvider(activeProviderId)}
               projectPath={projectPath}
+              className={embedded ? "!absolute !left-0 !right-0 !bottom-0 !z-40" : undefined}
               extraMenuItems={
                 <>
-                  {effectiveSession && (
+                  {effectiveSession && !hideFloatingGlobalControls && (
                     <TooltipSimple content="Session Timeline" side="top">
                       <motion.div
                         whileTap={{ scale: 0.97 }}
@@ -1704,7 +1764,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                       </motion.div>
                     </TooltipSimple>
                   )}
-                  {messages.length > 0 && (
+                  {messages.length > 0 && !hideFloatingGlobalControls && (
                     <Popover
                       trigger={
                         <TooltipSimple content="Copy conversation" side="top">
@@ -1769,8 +1829,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           </div>
 
           {/* Token Counter - positioned under the Send button */}
-          {totalTokens > 0 && (
-            <div className="fixed bottom-0 left-0 right-0 z-30 pointer-events-none">
+          {totalTokens > 0 && !hideFloatingGlobalControls && (
+            <div className={cn(
+              embedded ? "absolute bottom-0 left-0 right-0 z-30 pointer-events-none" : "fixed bottom-0 left-0 right-0 z-30 pointer-events-none"
+            )}>
               <div className="max-w-6xl mx-auto">
                 <div className="flex justify-end px-4 pb-2">
                   <motion.div

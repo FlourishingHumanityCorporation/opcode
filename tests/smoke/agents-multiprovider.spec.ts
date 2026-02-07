@@ -223,7 +223,8 @@ test.describe("Multiprovider agent smoke", () => {
       const agentName = `Smoke ${provider.id}`;
       const systemPrompt = `You are a ${provider.id} smoke test agent.`;
 
-      await page.getByTestId("tab-agents").click();
+      await page.getByTestId("titlebar-agents-button").click();
+      await expect(page.getByRole("heading", { name: "Agents", exact: true })).toBeVisible();
       await page.getByTestId("agents-tab-agents").click();
       await page.getByTestId("agents-create-button").click();
 
@@ -242,6 +243,7 @@ test.describe("Multiprovider agent smoke", () => {
       const taskInput = page.locator('[data-testid="agent-task-input"]:visible');
       const executeButton = page.locator('[data-testid="agent-execute-button"]:visible');
       const stopButton = page.locator('[data-testid="agent-stop-button"]:visible');
+      await taskInput.fill(`Smoke task for ${provider.id}`);
       await expect(taskInput).toHaveValue(`Smoke task for ${provider.id}`);
 
       await executeButton.click();
@@ -249,7 +251,7 @@ test.describe("Multiprovider agent smoke", () => {
       await stopButton.click();
       await expect(executeButton).toBeVisible();
 
-      await page.getByTestId("tab-agents").click();
+      await page.getByTestId("titlebar-agents-button").click();
       await page.getByTestId("agents-tab-history").click();
 
       const historyRun = page.locator('[data-testid^="agents-history-run-"]').filter({ hasText: agentName }).first();

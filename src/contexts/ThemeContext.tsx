@@ -58,7 +58,7 @@ const DEFAULT_CUSTOM_COLORS: CustomThemeColors = {
 };
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setThemeState] = useState<ThemeMode>('gray');
+  const [theme, setThemeState] = useState<ThemeMode>('dark');
   const [customColors, setCustomColorsState] = useState<CustomThemeColors>(DEFAULT_CUSTOM_COLORS);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -71,12 +71,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         
         if (savedTheme) {
           const themeMode = savedTheme as ThemeMode;
+          document.documentElement.classList.remove('warp-default');
           setThemeState(themeMode);
           await applyTheme(themeMode, customColors);
         } else {
-          // No saved preference: apply gray as the default theme
-          setThemeState('gray');
-          await applyTheme('gray', customColors);
+          // No saved preference: apply Warp-inspired dark default.
+          document.documentElement.classList.add('warp-default');
+          setThemeState('dark');
+          await applyTheme('dark', customColors);
         }
 
         // Load custom colors
@@ -129,6 +131,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setTheme = useCallback(async (newTheme: ThemeMode) => {
     try {
       setIsLoading(true);
+      document.documentElement.classList.remove('warp-default');
       
       // Apply theme immediately
       setThemeState(newTheme);

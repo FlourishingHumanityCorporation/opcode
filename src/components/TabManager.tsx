@@ -1,409 +1,208 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence, Reorder } from 'framer-motion';
-import { X, Plus, MessageSquare, Bot, AlertCircle, Loader2, Folder, BarChart, Server, Settings, FileText } from 'lucide-react';
-import { useTabState } from '@/hooks/useTabState';
-import { Tab, useTabContext } from '@/contexts/TabContext';
+import React, { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, Reorder, motion } from 'framer-motion';
+import { Folder, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useTrackEvent } from '@/hooks';
-
-interface TabItemProps {
-  tab: Tab;
-  isActive: boolean;
-  onClose: (id: string) => void;
-  onClick: (id: string) => void;
-  isDragging?: boolean;
-  setDraggedTabId?: (id: string | null) => void;
-}
-
-const TabItem: React.FC<TabItemProps> = ({ tab, isActive, onClose, onClick, isDragging = false, setDraggedTabId }) => {
-  const [isHovered, setIsHovered] = useState(false);
-  
-  const getIcon = () => {
-    switch (tab.type) {
-      case 'chat':
-        return MessageSquare;
-      case 'agent':
-      case 'agents':
-        return Bot;
-      case 'projects':
-        return Folder;
-      case 'usage':
-        return BarChart;
-      case 'mcp':
-        return Server;
-      case 'settings':
-        return Settings;
-      case 'claude-md':
-      case 'claude-file':
-        return FileText;
-      case 'agent-execution':
-      case 'create-agent':
-      case 'import-agent':
-        return Bot;
-      default:
-        return MessageSquare;
-    }
-  };
-
-  const getStatusIcon = () => {
-    switch (tab.status) {
-      case 'running':
-        return <Loader2 className="w-3 h-3 animate-spin" />;
-      case 'error':
-        return <AlertCircle className="w-3 h-3 text-red-500" />;
-      default:
-        return null;
-    }
-  };
-
-  const Icon = getIcon();
-  const statusIcon = getStatusIcon();
-
-  return (
-    <Reorder.Item
-      value={tab}
-      id={tab.id}
-      dragListener={true}
-      transition={{ duration: 0.1 }} // Snappy reorder animation
-      className={cn(
-        "relative flex items-center gap-2 text-sm cursor-pointer select-none group",
-        "transition-colors duration-100 overflow-hidden border-r border-border/20",
-        "before:absolute before:bottom-0 before:left-0 before:right-0 before:h-0.5 before:transition-colors before:duration-100",
-        isActive
-          ? "bg-card text-card-foreground before:bg-primary"
-          : "bg-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground before:bg-transparent",
-        isDragging && "bg-card border-primary/50 shadow-sm z-50",
-        "min-w-[120px] max-w-[220px] h-8 px-3"
-      )}
-      data-testid={`tab-${tab.type}`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onClick={() => onClick(tab.id)}
-      onDragStart={() => setDraggedTabId?.(tab.id)}
-      onDragEnd={() => setDraggedTabId?.(null)}
-    >
-      {/* Tab Icon */}
-      <div className="flex-shrink-0">
-        <Icon className="w-4 h-4" />
-      </div>
-      
-      {/* Tab Title */}
-      <span className="flex-1 truncate text-xs font-medium min-w-0">
-        {tab.title}
-      </span>
-
-      {/* Status Indicators - always takes up space */}
-      <div className="flex items-center gap-1.5 flex-shrink-0 w-6 justify-end">
-        {statusIcon && (
-          <span className="flex items-center justify-center">
-            {statusIcon}
-          </span>
-        )}
-
-        {tab.hasUnsavedChanges && !statusIcon && (
-          <span 
-            className="w-1.5 h-1.5 bg-primary rounded-full"
-            title="Unsaved changes"
-          />
-        )}
-      </div>
-
-      {/* Close Button - Always reserves space */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose(tab.id);
-        }}
-        className={cn(
-          "flex-shrink-0 w-4 h-4 flex items-center justify-center rounded-sm",
-          "transition-all duration-100 hover:bg-destructive/20 hover:text-destructive",
-          "focus:outline-none focus:ring-1 focus:ring-destructive/50",
-          (isHovered || isActive) ? "opacity-100" : "opacity-0"
-        )}
-        title={`Close ${tab.title}`}
-        tabIndex={-1}
-      >
-        <X className="w-3 h-3" />
-      </button>
-
-    </Reorder.Item>
-  );
-};
+import { useTabState } from '@/hooks/useTabState';
+import { useTabContext, type Tab } from '@/contexts/TabContext';
 
 interface TabManagerProps {
   className?: string;
 }
 
+interface ProjectTabItemProps {
+  tab: Tab;
+  isActive: boolean;
+  onClick: (id: string) => void;
+  onClose: (id: string) => void;
+}
+
+const ProjectTabItem: React.FC<ProjectTabItemProps> = ({ tab, isActive, onClick, onClose }) => {
+  return (
+    <Reorder.Item
+      value={tab}
+      id={tab.id}
+      className={cn(
+        'group flex h-9 min-w-[170px] max-w-[260px] items-center gap-2 rounded-lg border px-3 text-sm',
+        'cursor-pointer select-none transition-colors',
+        isActive
+          ? 'border-primary/40 bg-card text-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.04)]'
+          : 'border-border/40 bg-background text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+      )}
+      onClick={() => onClick(tab.id)}
+      data-testid={`workspace-tab-${tab.id}`}
+    >
+      <Folder className="h-4 w-4 shrink-0" />
+      <span className="truncate text-center w-full">{tab.title || 'Project'}</span>
+      <button
+        className={cn(
+          'shrink-0 rounded-sm p-0.5 hover:bg-destructive/15 hover:text-destructive',
+          isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        )}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClose(tab.id);
+        }}
+        aria-label={`Close ${tab.title}`}
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </Reorder.Item>
+  );
+};
+
 export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
   const {
     tabs,
     activeTabId,
-    createChatTab,
-    createProjectsTab,
-    closeTab,
     switchToTab,
-    canAddTab
+    closeProjectWorkspaceTab,
+    createProjectWorkspaceTab,
   } = useTabState();
-
-  // Access reorderTabs from context
   const { reorderTabs } = useTabContext();
 
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showLeftScroll, setShowLeftScroll] = useState(false);
   const [showRightScroll, setShowRightScroll] = useState(false);
-  const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
-  
-  // Analytics tracking
-  const trackEvent = useTrackEvent();
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Listen for tab switch events
-  useEffect(() => {
-    const handleSwitchToTab = (event: CustomEvent) => {
-      const { tabId } = event.detail;
-      switchToTab(tabId);
-    };
-
-    window.addEventListener('switch-to-tab', handleSwitchToTab as EventListener);
-    return () => {
-      window.removeEventListener('switch-to-tab', handleSwitchToTab as EventListener);
-    };
-  }, [switchToTab]);
-
-  // Listen for keyboard shortcut events
-  useEffect(() => {
-    const handleCreateTab = () => {
-      createProjectsTab();
-      trackEvent.tabCreated('projects');
-    };
-
-    const handleCloseTab = async () => {
-      if (activeTabId) {
-        const tab = tabs.find(t => t.id === activeTabId);
-        if (tab) {
-          trackEvent.tabClosed(tab.type);
-        }
-        await closeTab(activeTabId);
-      }
-    };
-
-    const handleNextTab = () => {
-      const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
-      const nextIndex = (currentIndex + 1) % tabs.length;
-      if (tabs[nextIndex]) {
-        switchToTab(tabs[nextIndex].id);
-      }
-    };
-
-    const handlePreviousTab = () => {
-      const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
-      const previousIndex = currentIndex === 0 ? tabs.length - 1 : currentIndex - 1;
-      if (tabs[previousIndex]) {
-        switchToTab(tabs[previousIndex].id);
-      }
-    };
-
-    const handleTabByIndex = (event: CustomEvent) => {
-      const { index } = event.detail;
-      if (tabs[index]) {
-        switchToTab(tabs[index].id);
-      }
-    };
-
-    window.addEventListener('create-chat-tab', handleCreateTab);
-    window.addEventListener('close-current-tab', handleCloseTab);
-    window.addEventListener('switch-to-next-tab', handleNextTab);
-    window.addEventListener('switch-to-previous-tab', handlePreviousTab);
-    window.addEventListener('switch-to-tab-by-index', handleTabByIndex as EventListener);
-
-    return () => {
-      window.removeEventListener('create-chat-tab', handleCreateTab);
-      window.removeEventListener('close-current-tab', handleCloseTab);
-      window.removeEventListener('switch-to-next-tab', handleNextTab);
-      window.removeEventListener('switch-to-previous-tab', handlePreviousTab);
-      window.removeEventListener('switch-to-tab-by-index', handleTabByIndex as EventListener);
-    };
-  }, [tabs, activeTabId, createChatTab, closeTab, switchToTab]);
-
-  // Check scroll buttons visibility
-  const checkScrollButtons = () => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    const { scrollLeft, scrollWidth, clientWidth } = container;
-    setShowLeftScroll(scrollLeft > 0);
-    setShowRightScroll(scrollLeft + clientWidth < scrollWidth - 1);
+  const updateScrollState = () => {
+    const node = scrollRef.current;
+    if (!node) return;
+    setShowLeftScroll(node.scrollLeft > 0);
+    setShowRightScroll(node.scrollLeft + node.clientWidth < node.scrollWidth - 1);
   };
 
   useEffect(() => {
-    checkScrollButtons();
-    const container = scrollContainerRef.current;
-    if (!container) return;
+    updateScrollState();
+    const node = scrollRef.current;
+    if (!node) return;
 
-    container.addEventListener('scroll', checkScrollButtons);
-    window.addEventListener('resize', checkScrollButtons);
+    node.addEventListener('scroll', updateScrollState);
+    window.addEventListener('resize', updateScrollState);
 
     return () => {
-      container.removeEventListener('scroll', checkScrollButtons);
-      window.removeEventListener('resize', checkScrollButtons);
+      node.removeEventListener('scroll', updateScrollState);
+      window.removeEventListener('resize', updateScrollState);
     };
   }, [tabs]);
 
+  useEffect(() => {
+    const onCreateProject = () => {
+      createProjectWorkspaceTab('', `Project ${tabs.length + 1}`);
+    };
+
+    const onCloseCurrent = () => {
+      if (!activeTabId) return;
+      closeProjectWorkspaceTab(activeTabId);
+    };
+
+    const onNext = () => {
+      if (!tabs.length) return;
+      const index = tabs.findIndex((tab) => tab.id === activeTabId);
+      const next = tabs[(index + 1 + tabs.length) % tabs.length];
+      if (next) switchToTab(next.id);
+    };
+
+    const onPrev = () => {
+      if (!tabs.length) return;
+      const index = tabs.findIndex((tab) => tab.id === activeTabId);
+      const prev = tabs[(index - 1 + tabs.length) % tabs.length];
+      if (prev) switchToTab(prev.id);
+    };
+
+    const onByIndex = (event: Event) => {
+      const detail = (event as CustomEvent<{ index: number }>).detail;
+      const tab = tabs[detail?.index || 0];
+      if (tab) switchToTab(tab.id);
+    };
+
+    window.addEventListener('create-chat-tab', onCreateProject);
+    window.addEventListener('close-current-tab', onCloseCurrent);
+    window.addEventListener('switch-to-next-tab', onNext);
+    window.addEventListener('switch-to-previous-tab', onPrev);
+    window.addEventListener('switch-to-tab-by-index', onByIndex as EventListener);
+
+    return () => {
+      window.removeEventListener('create-chat-tab', onCreateProject);
+      window.removeEventListener('close-current-tab', onCloseCurrent);
+      window.removeEventListener('switch-to-next-tab', onNext);
+      window.removeEventListener('switch-to-previous-tab', onPrev);
+      window.removeEventListener('switch-to-tab-by-index', onByIndex as EventListener);
+    };
+  }, [activeTabId, closeProjectWorkspaceTab, createProjectWorkspaceTab, switchToTab, tabs]);
+
   const handleReorder = (newOrder: Tab[]) => {
-    // Find the positions that changed
-    const oldOrder = tabs.map(tab => tab.id);
-    const newOrderIds = newOrder.map(tab => tab.id);
-    
-    // Find what moved
-    const movedTabId = newOrderIds.find((id, index) => oldOrder[index] !== id);
-    if (!movedTabId) return;
-    
-    const oldIndex = oldOrder.indexOf(movedTabId);
-    const newIndex = newOrderIds.indexOf(movedTabId);
-    
-    if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-      // Use the context's reorderTabs function
-      reorderTabs(oldIndex, newIndex);
-      // Track the reorder event
-      trackEvent.featureUsed?.('tab_reorder', 'drag_drop', { 
-        from_index: oldIndex, 
-        to_index: newIndex 
-      });
-    }
-  };
-
-  const handleCloseTab = async (id: string) => {
-    const tab = tabs.find(t => t.id === id);
-    if (tab) {
-      trackEvent.tabClosed(tab.type);
-    }
-    await closeTab(id);
-  };
-
-  const handleNewTab = () => {
-    if (canAddTab()) {
-      createProjectsTab();
-      trackEvent.tabCreated('projects');
+    const nextById = newOrder.map((tab) => tab.id);
+    const oldOrder = tabs.map((tab) => tab.id);
+    const movedId = nextById.find((id, index) => oldOrder[index] !== id);
+    if (!movedId) return;
+    const startIndex = oldOrder.indexOf(movedId);
+    const endIndex = nextById.indexOf(movedId);
+    if (startIndex !== -1 && endIndex !== -1 && startIndex !== endIndex) {
+      reorderTabs(startIndex, endIndex);
     }
   };
 
   const scrollTabs = (direction: 'left' | 'right') => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    const scrollAmount = 200;
-    const newScrollLeft = direction === 'left'
-      ? container.scrollLeft - scrollAmount
-      : container.scrollLeft + scrollAmount;
-
-    container.scrollTo({
-      left: newScrollLeft,
-      behavior: 'smooth'
+    const node = scrollRef.current;
+    if (!node) return;
+    node.scrollBy({
+      left: direction === 'left' ? -220 : 220,
+      behavior: 'smooth',
     });
   };
 
   return (
-    <div className={cn("flex items-stretch bg-muted/15 relative border-b border-border/50", className)}>
-      {/* Left fade gradient */}
-      {showLeftScroll && (
-        <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-muted/15 to-transparent pointer-events-none z-10" />
-      )}
-      
-      {/* Left scroll button */}
+    <div className={cn('relative flex h-11 items-center border-b border-border/60 bg-[#0b0f14] px-2', className)}>
       <AnimatePresence>
         {showLeftScroll && (
           <motion.button
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            className="z-10 mr-1 rounded-md border border-border/40 bg-background/70 px-2 py-1 text-xs"
             onClick={() => scrollTabs('left')}
-            className={cn(
-              "p-1.5 hover:bg-muted/80 rounded-sm z-20 ml-1",
-              "transition-colors duration-200 flex items-center justify-center",
-              "bg-background/80 backdrop-blur-sm shadow-sm border border-border/50"
-            )}
-            title="Scroll tabs left"
           >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path d="M15 18l-6-6 6-6" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            {'<'}
           </motion.button>
         )}
       </AnimatePresence>
 
-      {/* Tabs container */}
-      <div
-        ref={scrollContainerRef}
-        className="flex-1 flex overflow-x-auto scrollbar-hide"
-        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-      >
-        <div className="flex items-stretch h-8">
-          <Reorder.Group
-            axis="x"
-            values={tabs}
-            onReorder={handleReorder}
-            className="flex items-stretch"
-            layoutScroll={false}
-          >
-            {tabs.map((tab) => (
-              <TabItem
-                key={tab.id}
-                tab={tab}
-                isActive={tab.id === activeTabId}
-                onClose={handleCloseTab}
-                onClick={switchToTab}
-                isDragging={draggedTabId === tab.id}
-                setDraggedTabId={setDraggedTabId}
-              />
-            ))}
-          </Reorder.Group>
-          
-          {/* New tab button - positioned right after tabs */}
-          <motion.button
-            onClick={handleNewTab}
-            disabled={!canAddTab()}
-            whileTap={canAddTab() ? { scale: 0.97 } : {}}
-            transition={{ duration: 0.15 }}
-            className={cn(
-              "px-2 mx-1 rounded-md flex items-center justify-center flex-shrink-0",
-              "bg-background/50 backdrop-blur-sm h-8",
-              canAddTab()
-                ? "hover:bg-muted/60 text-muted-foreground hover:text-foreground"
-                : "opacity-50 cursor-not-allowed text-muted-foreground"
-            )}
-            title={canAddTab() ? "New project (Ctrl+T)" : "Maximum tabs reached"}
-          >
-            <Plus className="w-4 h-4" />
-          </motion.button>
-        </div>
+      <div ref={scrollRef} className="scrollbar-hide flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+        <Reorder.Group axis="x" values={tabs} onReorder={handleReorder} className="flex items-center gap-2">
+          {tabs.map((tab) => (
+            <ProjectTabItem
+              key={tab.id}
+              tab={tab}
+              isActive={tab.id === activeTabId}
+              onClick={switchToTab}
+              onClose={closeProjectWorkspaceTab}
+            />
+          ))}
+        </Reorder.Group>
       </div>
 
-      {/* Right fade gradient */}
-      {showRightScroll && (
-        <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-muted/15 to-transparent pointer-events-none z-10" />
-      )}
-
-      {/* Right scroll button */}
       <AnimatePresence>
         {showRightScroll && (
           <motion.button
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            className="z-10 ml-1 rounded-md border border-border/40 bg-background/70 px-2 py-1 text-xs"
             onClick={() => scrollTabs('right')}
-            className={cn(
-              "p-1.5 hover:bg-muted/80 rounded-sm z-20 mr-1",
-              "transition-colors duration-200 flex items-center justify-center",
-              "bg-background/80 backdrop-blur-sm shadow-sm border border-border/50"
-            )}
-            title="Scroll tabs right"
           >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path d="M9 18l6-6-6-6" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            {'>'}
           </motion.button>
         )}
       </AnimatePresence>
 
+      <button
+        onClick={() => createProjectWorkspaceTab('', `Project ${tabs.length + 1}`)}
+        className="ml-2 flex h-8 w-8 items-center justify-center rounded-md border border-border/50 bg-card/70 hover:bg-card"
+        title="New Project Workspace"
+        data-testid="workspace-new-project"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
     </div>
   );
 };

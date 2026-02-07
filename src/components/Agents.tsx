@@ -30,7 +30,7 @@ export const Agents: React.FC = () => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [showGitHubBrowser, setShowGitHubBrowser] = useState(false);
-  const { createAgentTab } = useTabState();
+  const { createAgentTab, closeUtilityOverlay } = useTabState();
   const isRealTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
 
   // Load agents on mount
@@ -83,6 +83,7 @@ export const Agents: React.FC = () => {
         window.dispatchEvent(new CustomEvent('open-agent-execution', {
           detail: { agent, tabId, projectPath }
         }));
+        closeUtilityOverlay();
         setToast({ message: `Opening agent: ${agent.name}`, type: 'success' });
         return;
       }
@@ -107,6 +108,7 @@ export const Agents: React.FC = () => {
       window.dispatchEvent(new CustomEvent('open-agent-execution', { 
         detail: { agent, tabId, projectPath } 
       }));
+      closeUtilityOverlay();
       
       setToast({ message: `Opening agent: ${agent.name}`, type: 'success' });
     } catch (error) {
@@ -450,7 +452,10 @@ export const Agents: React.FC = () => {
                         <Button
                           size="icon"
                           variant="ghost"
-                          onClick={() => createAgentTab(run.id?.toString() || '', run.agent_name)}
+                          onClick={() => {
+                            createAgentTab(run.id?.toString() || '', run.agent_name);
+                            closeUtilityOverlay();
+                          }}
                           className="h-8 w-8"
                         >
                           <ChevronRight className="w-4 h-4" />

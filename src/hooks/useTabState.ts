@@ -1,17 +1,57 @@
 import { useCallback, useMemo } from 'react';
-import { useTabContext } from '@/contexts/TabContext';
-import { Tab } from '@/contexts/TabContext';
+import {
+  type CreateTerminalTabInput,
+  type Tab,
+  type TerminalTab,
+  useTabContext,
+} from '@/contexts/TabContext';
+
+export type LegacyTabType =
+  | 'project'
+  | 'projects'
+  | 'chat'
+  | 'agent'
+  | 'agents'
+  | 'usage'
+  | 'mcp'
+  | 'settings'
+  | 'claude-md'
+  | 'claude-file'
+  | 'agent-execution'
+  | 'create-agent'
+  | 'import-agent';
+
+interface TerminalLocation {
+  workspace: Tab;
+  terminal: TerminalTab;
+}
 
 interface UseTabStateReturn {
   // State
   tabs: Tab[];
   activeTab: Tab | undefined;
+  activeWorkspace: Tab | undefined;
   activeTabId: string | null;
+  utilityOverlay: ReturnType<typeof useTabContext>['utilityOverlay'];
+  utilityPayload: ReturnType<typeof useTabContext>['utilityPayload'];
   tabCount: number;
   chatTabCount: number;
   agentTabCount: number;
-  
-  // Operations
+
+  // New workspace operations
+  createProjectWorkspaceTab: (projectPath?: string, title?: string) => string;
+  closeProjectWorkspaceTab: (id: string) => void;
+  createTerminalTab: (workspaceId?: string, input?: CreateTerminalTabInput) => string;
+  closeTerminalTab: (workspaceId: string, terminalTabId: string) => void;
+  setActiveTerminalTab: (workspaceId: string, terminalTabId: string) => void;
+  splitPane: (workspaceId: string, terminalTabId: string, paneId: string) => string | null;
+  closePane: (workspaceId: string, terminalTabId: string, paneId: string) => void;
+  activatePane: (workspaceId: string, terminalTabId: string, paneId: string) => void;
+  runAgentInTerminalTab: (agent: any, projectPath?: string) => string;
+  openUtilityOverlay: (overlay: 'agents' | 'usage' | 'mcp' | 'settings' | 'claude-md' | 'claude-file', payload?: any) => void;
+  closeUtilityOverlay: () => void;
+
+  // Compatibility operations
   createChatTab: (projectId?: string, title?: string, projectPath?: string) => string;
   createAgentTab: (agentRunId: string, agentName: string) => string;
   createAgentExecutionTab: (agent: any, tabId: string, projectPath?: string) => string;
@@ -30,242 +70,259 @@ interface UseTabStateReturn {
   switchToNextTab: () => void;
   switchToPreviousTab: () => void;
   switchToTabByIndex: (index: number) => void;
-  updateTab: (id: string, updates: Partial<Tab>) => void;
+  updateTab: (id: string, updates: Partial<Tab> | Partial<TerminalTab>) => void;
   updateTabTitle: (id: string, title: string) => void;
-  updateTabStatus: (id: string, status: Tab['status']) => void;
+  updateTabStatus: (id: string, status: TerminalTab['status']) => void;
   markTabAsChanged: (id: string, hasChanges: boolean) => void;
-  findTabBySessionId: (sessionId: string) => Tab | undefined;
-  findTabByAgentRunId: (agentRunId: string) => Tab | undefined;
-  findTabByType: (type: Tab['type']) => Tab | undefined;
+  findTabBySessionId: (sessionId: string) => (Tab | TerminalTab | undefined);
+  findTabByAgentRunId: (agentRunId: string) => (Tab | TerminalTab | undefined);
+  findTabByType: (type: LegacyTabType) => (Tab | undefined);
   canAddTab: () => boolean;
+}
+
+function isTerminalUpdate(update: Partial<Tab> | Partial<TerminalTab>): update is Partial<TerminalTab> {
+  return (
+    'paneTree' in update ||
+    'paneStates' in update ||
+    'kind' in update ||
+    'sessionState' in update ||
+    'activePaneId' in update
+  );
 }
 
 export const useTabState = (): UseTabStateReturn => {
   const {
     tabs,
     activeTabId,
-    addTab,
-    removeTab,
-    updateTab,
+    utilityOverlay,
+    utilityPayload,
+    createProjectWorkspaceTab,
+    closeProjectWorkspaceTab,
+    updateProjectWorkspaceTab,
+    createTerminalTab: createTerminalTabInWorkspace,
+    closeTerminalTab,
+    setActiveTerminalTab,
+    updateTerminalTab,
+    splitPane,
+    closePane,
+    activatePane,
     setActiveTab,
+    openUtilityOverlay,
+    closeUtilityOverlay,
     getTabById,
-    getTabsByType
   } = useTabContext();
 
-  const activeTab = useMemo(() => 
-    activeTabId ? getTabById(activeTabId) : undefined,
-    [activeTabId, getTabById]
+  const activeTab = useMemo(() => (activeTabId ? getTabById(activeTabId) : undefined), [activeTabId, getTabById]);
+  const activeWorkspace = activeTab;
+
+  const chatTabCount = useMemo(
+    () => tabs.reduce((count, workspace) => count + workspace.terminalTabs.filter((terminal) => terminal.kind === 'chat').length, 0),
+    [tabs]
   );
 
-  const tabCount = tabs.length;
-  const chatTabCount = useMemo(() => getTabsByType('chat').length, [getTabsByType]);
-  const agentTabCount = useMemo(() => getTabsByType('agent').length, [getTabsByType]);
+  const agentTabCount = useMemo(
+    () => tabs.reduce((count, workspace) => count + workspace.terminalTabs.filter((terminal) => terminal.kind === 'agent').length, 0),
+    [tabs]
+  );
 
-  const createChatTab = useCallback((projectId?: string, title?: string, projectPath?: string): string => {
-    const tabTitle = title || `Chat ${chatTabCount + 1}`;
-    return addTab({
-      type: 'chat',
-      title: tabTitle,
-      sessionId: projectId,
-      initialProjectPath: projectPath,
-      status: 'idle',
-      hasUnsavedChanges: false,
-      icon: 'message-square'
-    });
-  }, [addTab, chatTabCount]);
+  const findTerminalLocation = useCallback(
+    (id: string): TerminalLocation | undefined => {
+      for (const workspace of tabs) {
+        const terminal = workspace.terminalTabs.find((entry) => entry.id === id);
+        if (terminal) {
+          return { workspace, terminal };
+        }
+      }
+      return undefined;
+    },
+    [tabs]
+  );
 
-  const createAgentTab = useCallback((agentRunId: string, agentName: string): string => {
-    // Check if tab already exists
-    const existingTab = tabs.find(tab => tab.agentRunId === agentRunId);
-    if (existingTab) {
-      setActiveTab(existingTab.id);
-      return existingTab.id;
+  const ensureWorkspace = useCallback((): Tab => {
+    if (activeWorkspace) {
+      return activeWorkspace;
     }
 
-    return addTab({
-      type: 'agent',
-      title: agentName,
-      agentRunId,
-      status: 'running',
-      hasUnsavedChanges: false,
-      icon: 'bot'
-    });
-  }, [addTab, tabs, setActiveTab]);
+    const workspaceId = createProjectWorkspaceTab('', 'Project');
+    const workspace = tabs.find((tab) => tab.id === workspaceId);
+    if (!workspace) {
+      // fallback for immediate usage after creation
+      return {
+        id: workspaceId,
+        type: 'project',
+        projectPath: '',
+        title: 'Project',
+        activeTerminalTabId: null,
+        terminalTabs: [],
+        status: 'idle',
+        hasUnsavedChanges: false,
+        order: tabs.length,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    }
+    return workspace;
+  }, [activeWorkspace, createProjectWorkspaceTab, tabs]);
+
+  const createTerminalTab = useCallback(
+    (workspaceId?: string, input?: CreateTerminalTabInput): string => {
+      const targetWorkspaceId = workspaceId || activeWorkspace?.id || ensureWorkspace().id;
+      return createTerminalTabInWorkspace(targetWorkspaceId, input);
+    },
+    [activeWorkspace, createTerminalTabInWorkspace, ensureWorkspace]
+  );
+
+  const runAgentInTerminalTab = useCallback(
+    (agent: any, projectPath?: string): string => {
+      const workspace = activeWorkspace || ensureWorkspace();
+
+      if (!workspace.projectPath && projectPath) {
+        updateProjectWorkspaceTab(workspace.id, {
+          projectPath,
+          title: workspace.title === 'Project' ? projectPath.split(/[\\/]/).pop() || workspace.title : workspace.title,
+        });
+      }
+
+      return createTerminalTabInWorkspace(workspace.id, {
+        kind: 'agent',
+        title: `Run: ${agent?.name || 'Agent'}`,
+        providerId: agent?.provider_id,
+        sessionState: {
+          agentData: agent,
+          providerId: agent?.provider_id,
+          projectPath: projectPath || workspace.projectPath || undefined,
+          initialProjectPath: projectPath || workspace.projectPath || undefined,
+        },
+      });
+    },
+    [activeWorkspace, createTerminalTabInWorkspace, ensureWorkspace, updateProjectWorkspaceTab]
+  );
+
+  const createChatTab = useCallback(
+    (projectId?: string, title?: string, projectPath?: string): string => {
+      const workspace = activeWorkspace || ensureWorkspace();
+      if (projectPath && workspace.projectPath !== projectPath) {
+        updateProjectWorkspaceTab(workspace.id, {
+          projectPath,
+          title: workspace.title === 'Project' ? projectPath.split(/[\\/]/).pop() || 'Project' : workspace.title,
+        });
+      }
+
+      return createTerminalTabInWorkspace(workspace.id, {
+        kind: 'chat',
+        title: title || `Terminal ${workspace.terminalTabs.length + 1}`,
+        sessionState: {
+          sessionId: projectId,
+          initialProjectPath: projectPath || workspace.projectPath || undefined,
+          projectPath: projectPath || workspace.projectPath || undefined,
+        },
+      });
+    },
+    [activeWorkspace, createTerminalTabInWorkspace, ensureWorkspace, updateProjectWorkspaceTab]
+  );
+
+  const createAgentTab = useCallback(
+    (agentRunId: string, agentName: string): string => {
+      const existing = tabs
+        .flatMap((workspace) => workspace.terminalTabs.map((terminal) => ({ workspace, terminal })))
+        .find(({ terminal }) => terminal.kind === 'agent' && terminal.sessionState?.agentRunId === agentRunId);
+
+      if (existing) {
+        setActiveTab(existing.workspace.id);
+        setActiveTerminalTab(existing.workspace.id, existing.terminal.id);
+        return existing.terminal.id;
+      }
+
+      const workspace = activeWorkspace || ensureWorkspace();
+      return createTerminalTabInWorkspace(workspace.id, {
+        kind: 'agent',
+        title: agentName,
+        sessionState: {
+          agentRunId,
+          projectPath: workspace.projectPath || undefined,
+          initialProjectPath: workspace.projectPath || undefined,
+        },
+      });
+    },
+    [activeWorkspace, createTerminalTabInWorkspace, ensureWorkspace, setActiveTab, setActiveTerminalTab, tabs]
+  );
+
+  const createAgentExecutionTab = useCallback(
+    (agent: any, _tabId: string, projectPath?: string): string => {
+      return runAgentInTerminalTab(agent, projectPath);
+    },
+    [runAgentInTerminalTab]
+  );
 
   const createProjectsTab = useCallback((): string | null => {
-    // Allow multiple projects tabs
-    return addTab({
-      type: 'projects',
-      title: 'Projects',
-      status: 'idle',
-      hasUnsavedChanges: false,
-      icon: 'folder'
-    });
-  }, [addTab]);
+    return createProjectWorkspaceTab('', 'Project');
+  }, [createProjectWorkspaceTab]);
 
   const createAgentsTab = useCallback((): string | null => {
-    // Check if agents tab already exists (singleton)
-    const existingTab = tabs.find(tab => tab.type === 'agents');
-    if (existingTab) {
-      setActiveTab(existingTab.id);
-      return existingTab.id;
-    }
-
-    return addTab({
-      type: 'agents',
-      title: 'Agents',
-      status: 'idle',
-      hasUnsavedChanges: false,
-      icon: 'bot'
-    });
-  }, [addTab, tabs, setActiveTab]);
+    openUtilityOverlay('agents');
+    return activeWorkspace?.id ?? null;
+  }, [activeWorkspace?.id, openUtilityOverlay]);
 
   const createUsageTab = useCallback((): string | null => {
-    // Check if usage tab already exists (singleton)
-    const existingTab = tabs.find(tab => tab.type === 'usage');
-    if (existingTab) {
-      setActiveTab(existingTab.id);
-      return existingTab.id;
-    }
-
-    return addTab({
-      type: 'usage',
-      title: 'Usage',
-      status: 'idle',
-      hasUnsavedChanges: false,
-      icon: 'bar-chart'
-    });
-  }, [addTab, tabs, setActiveTab]);
+    openUtilityOverlay('usage');
+    return activeWorkspace?.id ?? null;
+  }, [activeWorkspace?.id, openUtilityOverlay]);
 
   const createMCPTab = useCallback((): string | null => {
-    // Check if MCP tab already exists (singleton)
-    const existingTab = tabs.find(tab => tab.type === 'mcp');
-    if (existingTab) {
-      setActiveTab(existingTab.id);
-      return existingTab.id;
-    }
-
-    return addTab({
-      type: 'mcp',
-      title: 'MCP Servers',
-      status: 'idle',
-      hasUnsavedChanges: false,
-      icon: 'server'
-    });
-  }, [addTab, tabs, setActiveTab]);
+    openUtilityOverlay('mcp');
+    return activeWorkspace?.id ?? null;
+  }, [activeWorkspace?.id, openUtilityOverlay]);
 
   const createSettingsTab = useCallback((): string | null => {
-    // Check if settings tab already exists (singleton)
-    const existingTab = tabs.find(tab => tab.type === 'settings');
-    if (existingTab) {
-      setActiveTab(existingTab.id);
-      return existingTab.id;
-    }
-
-    return addTab({
-      type: 'settings',
-      title: 'Settings',
-      status: 'idle',
-      hasUnsavedChanges: false,
-      icon: 'settings'
-    });
-  }, [addTab, tabs, setActiveTab]);
+    openUtilityOverlay('settings');
+    return activeWorkspace?.id ?? null;
+  }, [activeWorkspace?.id, openUtilityOverlay]);
 
   const createClaudeMdTab = useCallback((): string | null => {
-    // Check if claude-md tab already exists (singleton)
-    const existingTab = tabs.find(tab => tab.type === 'claude-md');
-    if (existingTab) {
-      setActiveTab(existingTab.id);
-      return existingTab.id;
-    }
-
-    return addTab({
-      type: 'claude-md',
-      title: 'CLAUDE.md',
-      status: 'idle',
-      hasUnsavedChanges: false,
-      icon: 'file-text'
-    });
-  }, [addTab, tabs, setActiveTab]);
+    openUtilityOverlay('claude-md');
+    return activeWorkspace?.id ?? null;
+  }, [activeWorkspace?.id, openUtilityOverlay]);
 
   const createClaudeFileTab = useCallback((fileId: string, fileName: string): string => {
-    // Check if tab already exists for this file
-    const existingTab = tabs.find(tab => tab.type === 'claude-file' && tab.claudeFileId === fileId);
-    if (existingTab) {
-      setActiveTab(existingTab.id);
-      return existingTab.id;
-    }
-
-    return addTab({
-      type: 'claude-file',
-      title: fileName,
-      claudeFileId: fileId,
-      status: 'idle',
-      hasUnsavedChanges: false,
-      icon: 'file-text'
-    });
-  }, [addTab, tabs, setActiveTab]);
-
-  const createAgentExecutionTab = useCallback((agent: any, _tabId: string, projectPath?: string): string => {
-    return addTab({
-      type: 'agent-execution',
-      title: `Run: ${agent.name}`,
-      agentData: agent,
-      projectPath: projectPath,
-      status: 'idle',
-      hasUnsavedChanges: false,
-      icon: 'bot'
-    });
-  }, [addTab]);
+    openUtilityOverlay('claude-file', { fileId, fileName });
+    return activeWorkspace?.id || '';
+  }, [activeWorkspace?.id, openUtilityOverlay]);
 
   const createCreateAgentTab = useCallback((): string => {
-    // Check if create agent tab already exists (singleton)
-    const existingTab = tabs.find(tab => tab.type === 'create-agent');
-    if (existingTab) {
-      setActiveTab(existingTab.id);
-      return existingTab.id;
-    }
-
-    return addTab({
-      type: 'create-agent',
-      title: 'Create Agent',
-      status: 'idle',
-      hasUnsavedChanges: false,
-      icon: 'plus'
-    });
-  }, [addTab, tabs, setActiveTab]);
+    openUtilityOverlay('agents', { mode: 'create' });
+    return activeWorkspace?.id || '';
+  }, [activeWorkspace?.id, openUtilityOverlay]);
 
   const createImportAgentTab = useCallback((): string => {
-    // Check if import agent tab already exists (singleton)
-    const existingTab = tabs.find(tab => tab.type === 'import-agent');
-    if (existingTab) {
-      setActiveTab(existingTab.id);
-      return existingTab.id;
-    }
+    openUtilityOverlay('agents', { mode: 'import' });
+    return activeWorkspace?.id || '';
+  }, [activeWorkspace?.id, openUtilityOverlay]);
 
-    return addTab({
-      type: 'import-agent',
-      title: 'Import Agent',
-      status: 'idle',
-      hasUnsavedChanges: false,
-      icon: 'import'
-    });
-  }, [addTab, tabs, setActiveTab]);
+  const closeTab = useCallback(
+    async (id: string, force = false): Promise<boolean> => {
+      const workspace = tabs.find((tab) => tab.id === id);
+      if (workspace) {
+        if (!force && workspace.hasUnsavedChanges) {
+          const confirmed = window.confirm(`Project "${workspace.title}" has unsaved changes. Close anyway?`);
+          if (!confirmed) return false;
+        }
+        closeProjectWorkspaceTab(id);
+        return true;
+      }
 
-  const closeTab = useCallback(async (id: string, force: boolean = false): Promise<boolean> => {
-    const tab = getTabById(id);
-    if (!tab) return true;
+      const location = findTerminalLocation(id);
+      if (location) {
+        if (!force && location.terminal.hasUnsavedChanges) {
+          const confirmed = window.confirm(`Terminal "${location.terminal.title}" has unsaved changes. Close anyway?`);
+          if (!confirmed) return false;
+        }
+        closeTerminalTab(location.workspace.id, location.terminal.id);
+      }
 
-    // Check for unsaved changes
-    if (!force && tab.hasUnsavedChanges) {
-      // In a real implementation, you'd show a confirmation dialog here
-      const confirmed = window.confirm(`Tab "${tab.title}" has unsaved changes. Close anyway?`);
-      if (!confirmed) return false;
-    }
-
-    removeTab(id);
-    return true;
-  }, [getTabById, removeTab]);
+      return true;
+    },
+    [closeProjectWorkspaceTab, closeTerminalTab, findTerminalLocation, tabs]
+  );
 
   const closeCurrentTab = useCallback(async (): Promise<boolean> => {
     if (!activeTabId) return true;
@@ -274,16 +331,14 @@ export const useTabState = (): UseTabStateReturn => {
 
   const switchToNextTab = useCallback(() => {
     if (tabs.length === 0) return;
-    
-    const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTabId);
     const nextIndex = (currentIndex + 1) % tabs.length;
     setActiveTab(tabs[nextIndex].id);
   }, [tabs, activeTabId, setActiveTab]);
 
   const switchToPreviousTab = useCallback(() => {
     if (tabs.length === 0) return;
-    
-    const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTabId);
     const previousIndex = currentIndex === 0 ? tabs.length - 1 : currentIndex - 1;
     setActiveTab(tabs[previousIndex].id);
   }, [tabs, activeTabId, setActiveTab]);
@@ -294,44 +349,135 @@ export const useTabState = (): UseTabStateReturn => {
     }
   }, [tabs, setActiveTab]);
 
+  const updateTab = useCallback(
+    (id: string, updates: Partial<Tab> | Partial<TerminalTab>) => {
+      if (isTerminalUpdate(updates)) {
+        const location = findTerminalLocation(id);
+        if (location) {
+          updateTerminalTab(location.workspace.id, id, updates);
+          return;
+        }
+      }
+
+      const workspace = tabs.find((tab) => tab.id === id);
+      if (workspace) {
+        updateProjectWorkspaceTab(id, updates as Partial<Tab>);
+        return;
+      }
+
+      const location = findTerminalLocation(id);
+      if (location) {
+        updateTerminalTab(location.workspace.id, id, updates as Partial<TerminalTab>);
+      }
+    },
+    [findTerminalLocation, tabs, updateProjectWorkspaceTab, updateTerminalTab]
+  );
+
   const updateTabTitle = useCallback((id: string, title: string) => {
-    updateTab(id, { title });
-  }, [updateTab]);
+    const workspace = tabs.find((tab) => tab.id === id);
+    if (workspace) {
+      updateProjectWorkspaceTab(id, { title });
+      return;
+    }
 
-  const updateTabStatus = useCallback((id: string, status: Tab['status']) => {
-    updateTab(id, { status });
-  }, [updateTab]);
+    const location = findTerminalLocation(id);
+    if (location) {
+      updateTerminalTab(location.workspace.id, id, { title });
+    }
+  }, [findTerminalLocation, tabs, updateProjectWorkspaceTab, updateTerminalTab]);
 
-  const markTabAsChanged = useCallback((id: string, hasChanges: boolean) => {
-    updateTab(id, { hasUnsavedChanges: hasChanges });
-  }, [updateTab]);
+  const updateTabStatus = useCallback(
+    (id: string, status: TerminalTab['status']) => {
+      const workspace = tabs.find((tab) => tab.id === id);
+      if (workspace) {
+        updateProjectWorkspaceTab(id, { status });
+        return;
+      }
 
-  const findTabBySessionId = useCallback((sessionId: string): Tab | undefined => {
-    return tabs.find(tab => tab.type === 'chat' && tab.sessionId === sessionId);
-  }, [tabs]);
+      const location = findTerminalLocation(id);
+      if (location) {
+        updateTerminalTab(location.workspace.id, id, { status });
+      }
+    },
+    [findTerminalLocation, tabs, updateProjectWorkspaceTab, updateTerminalTab]
+  );
 
-  const findTabByAgentRunId = useCallback((agentRunId: string): Tab | undefined => {
-    return tabs.find(tab => tab.type === 'agent' && tab.agentRunId === agentRunId);
-  }, [tabs]);
+  const markTabAsChanged = useCallback(
+    (id: string, hasChanges: boolean) => {
+      const workspace = tabs.find((tab) => tab.id === id);
+      if (workspace) {
+        updateProjectWorkspaceTab(id, { hasUnsavedChanges: hasChanges });
+        return;
+      }
 
-  const findTabByType = useCallback((type: Tab['type']): Tab | undefined => {
-    return tabs.find(tab => tab.type === type);
-  }, [tabs]);
+      const location = findTerminalLocation(id);
+      if (location) {
+        updateTerminalTab(location.workspace.id, id, { hasUnsavedChanges: hasChanges });
+      }
+    },
+    [findTerminalLocation, tabs, updateProjectWorkspaceTab, updateTerminalTab]
+  );
 
-  const canAddTab = useCallback((): boolean => {
-    return tabs.length < 20; // MAX_TABS from context
-  }, [tabs.length]);
+  const findTabBySessionId = useCallback(
+    (sessionId: string): Tab | TerminalTab | undefined => {
+      for (const workspace of tabs) {
+        const terminal = workspace.terminalTabs.find((entry) => entry.sessionState?.sessionId === sessionId);
+        if (terminal) return terminal;
+      }
+      return undefined;
+    },
+    [tabs]
+  );
+
+  const findTabByAgentRunId = useCallback(
+    (agentRunId: string): Tab | TerminalTab | undefined => {
+      for (const workspace of tabs) {
+        const terminal = workspace.terminalTabs.find((entry) => entry.sessionState?.agentRunId === agentRunId);
+        if (terminal) return terminal;
+      }
+      return undefined;
+    },
+    [tabs]
+  );
+
+  const findTabByType = useCallback(
+    (type: LegacyTabType): Tab | undefined => {
+      if (type === 'project' || type === 'projects') {
+        return tabs[0];
+      }
+      return undefined;
+    },
+    [tabs]
+  );
+
+  const canAddTab = useCallback((): boolean => tabs.length < 20, [tabs.length]);
 
   return {
     // State
     tabs,
     activeTab,
+    activeWorkspace,
     activeTabId,
-    tabCount,
+    utilityOverlay,
+    utilityPayload,
+    tabCount: tabs.length,
     chatTabCount,
     agentTabCount,
-    
-    // Operations
+
+    // New workspace operations
+    createProjectWorkspaceTab,
+    closeProjectWorkspaceTab,
+    createTerminalTab,
+    closeTerminalTab,
+    setActiveTerminalTab,
+    splitPane,
+    closePane,
+    activatePane,
+    runAgentInTerminalTab,
+    openUtilityOverlay,
+    closeUtilityOverlay,
+
+    // Compatibility operations
     createChatTab,
     createAgentTab,
     createAgentExecutionTab,
@@ -357,6 +503,6 @@ export const useTabState = (): UseTabStateReturn => {
     findTabBySessionId,
     findTabByAgentRunId,
     findTabByType,
-    canAddTab
+    canAddTab,
   };
 };
