@@ -83,6 +83,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTrackEvent, useComponentMetrics, useWorkflowTracking } from "@/hooks";
 import { SessionPersistenceService } from "@/services/sessionPersistence";
 import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
+import { createStreamWatchdog } from "@/lib/streamWatchdog";
 import {
   getDefaultModelForProvider,
   getModelDisplayName,
@@ -221,9 +222,12 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
   const isMountedRef = useRef(true);
   const isListeningRef = useRef(false);
-  const firstStreamTimeoutRef = useRef<number | null>(null);
-  const hardTimeoutRef = useRef<number | null>(null);
-  const firstStreamSeenRef = useRef(false);
+  const streamWatchdogRef = useRef<ReturnType<typeof createStreamWatchdog> | null>(null);
+  const FIRST_STREAM_WARNING_MS = 2000;
+  const HARD_TIMEOUT_MS = 120000;
+  const FIRST_STREAM_WARNING_TEXT = 'No response yet (2s). Still waiting for provider startup.';
+  const promptAttemptStartedAtRef = useRef<number | null>(null);
+  const streamStartedAtRef = useRef<number | null>(null);
   const sessionStartTime = useRef<number>(Date.now());
   const isIMEComposingRef = useRef(false);
   
@@ -250,6 +254,41 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   useComponentMetrics('ClaudeCodeSession');
   // const aiTracking = useAIInteractionTracking('sonnet'); // Default model
   const workflowTracking = useWorkflowTracking('claude_session');
+
+  if (!streamWatchdogRef.current) {
+    streamWatchdogRef.current = createStreamWatchdog({
+      firstWarningMs: FIRST_STREAM_WARNING_MS,
+      hardTimeoutMs: HARD_TIMEOUT_MS,
+      onFirstWarning: ({ providerId, projectPath }) => {
+        if (!isMountedRef.current) return;
+        setError(FIRST_STREAM_WARNING_TEXT);
+        logWorkspaceEvent({
+          category: 'stream_watchdog',
+          action: 'first_stream_warning',
+          message: 'No stream event received in first 2s; still waiting',
+          payload: { providerId, projectPath },
+        });
+      },
+      onHardTimeout: ({ providerId, projectPath }) => {
+        if (!isMountedRef.current || !hasActiveSessionRef.current) return;
+        const now = Date.now();
+        const elapsedSinceStreamStartMs =
+          streamStartedAtRef.current !== null ? now - streamStartedAtRef.current : null;
+        const endToEndStartupMs =
+          promptAttemptStartedAtRef.current !== null ? now - promptAttemptStartedAtRef.current : null;
+        setIsLoading(false);
+        hasActiveSessionRef.current = false;
+        isListeningRef.current = false;
+        setError('Session did not complete within 120s. Try stopping and re-running.');
+        logWorkspaceEvent({
+          category: 'stream_watchdog',
+          action: 'hard_timeout',
+          message: 'No completion within 120s',
+          payload: { providerId, projectPath, elapsedSinceStreamStartMs, endToEndStartupMs },
+        });
+      },
+    });
+  }
   
   // Keep internal project path in sync when parent workspace updates it.
   useEffect(() => {
@@ -628,61 +667,31 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   };
 
   const clearStreamWatchdogs = () => {
-    if (firstStreamTimeoutRef.current !== null) {
-      window.clearTimeout(firstStreamTimeoutRef.current);
-      firstStreamTimeoutRef.current = null;
-    }
-    if (hardTimeoutRef.current !== null) {
-      window.clearTimeout(hardTimeoutRef.current);
-      hardTimeoutRef.current = null;
-    }
+    streamWatchdogRef.current?.stop();
+    streamStartedAtRef.current = null;
   };
 
   const markFirstStreamSeen = (providerId: string) => {
-    if (firstStreamSeenRef.current) return;
-    firstStreamSeenRef.current = true;
-    if (firstStreamTimeoutRef.current !== null) {
-      window.clearTimeout(firstStreamTimeoutRef.current);
-      firstStreamTimeoutRef.current = null;
-    }
+    const didMark = streamWatchdogRef.current?.markFirstStream() ?? false;
+    if (!didMark) return;
+    const now = Date.now();
+    const firstTokenLatencyMs =
+      streamStartedAtRef.current !== null ? now - streamStartedAtRef.current : null;
+    const endToEndStartupMs =
+      promptAttemptStartedAtRef.current !== null ? now - promptAttemptStartedAtRef.current : null;
+    setError((previous) =>
+      previous === FIRST_STREAM_WARNING_TEXT ? null : previous
+    );
     logWorkspaceEvent({
       category: 'stream_watchdog',
       action: 'first_stream_message',
-      payload: { providerId },
+      payload: { providerId, firstTokenLatencyMs, endToEndStartupMs },
     });
   };
 
   const startStreamWatchdogs = (providerId: string, path: string) => {
-    clearStreamWatchdogs();
-    firstStreamSeenRef.current = false;
-
-    firstStreamTimeoutRef.current = window.setTimeout(() => {
-      if (!isMountedRef.current || firstStreamSeenRef.current) return;
-      setIsLoading(false);
-      hasActiveSessionRef.current = false;
-      isListeningRef.current = false;
-      setError('No response stream started within 8s. Check provider runtime or project path.');
-      logWorkspaceEvent({
-        category: 'stream_watchdog',
-        action: 'first_stream_timeout',
-        message: 'No stream event received in first 8s',
-        payload: { providerId, projectPath: path },
-      });
-    }, 8000);
-
-    hardTimeoutRef.current = window.setTimeout(() => {
-      if (!isMountedRef.current || !hasActiveSessionRef.current) return;
-      setIsLoading(false);
-      hasActiveSessionRef.current = false;
-      isListeningRef.current = false;
-      setError('Session did not complete within 120s. Try stopping and re-running.');
-      logWorkspaceEvent({
-        category: 'stream_watchdog',
-        action: 'hard_timeout',
-        message: 'No completion within 120s',
-        payload: { providerId, projectPath: path },
-      });
-    }, 120000);
+    streamStartedAtRef.current = Date.now();
+    streamWatchdogRef.current?.start({ providerId, projectPath: path });
   };
 
   const validateProjectPath = async (path: string): Promise<boolean> => {
@@ -771,6 +780,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   };
 
   const handleSendPrompt = async (prompt: string, model: string, providerIdOverride?: string) => {
+    promptAttemptStartedAtRef.current = Date.now();
     const providerToUse = providerIdOverride || activeProviderId;
     const isClaudeProviderForRun = providerToUse === "claude";
     const modelForTracking = model || "default";
@@ -832,6 +842,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           providerId: providerToUse,
           model: modelForTracking,
           projectPath: runProjectPath,
+          firstWarningMs: FIRST_STREAM_WARNING_MS,
+          hardTimeoutMs: HARD_TIMEOUT_MS,
         },
       });
       
@@ -1686,11 +1698,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   // Provider selector bar (only shown when multiple providers detected)
   const projectPathInput = !hideProjectBar && detectedProviders.length > 0 ? (
-    <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border/50 text-xs">
+    <div className="flex items-center gap-1.5 px-0 py-1.5 border-b border-border/50 text-xs">
       <div className="relative">
         <button
           onClick={() => setShowProviderMenu(!showProviderMenu)}
-          className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-accent/50 transition-colors text-muted-foreground hover:text-foreground"
+          className="flex items-center gap-1 px-0 py-1 rounded-md hover:bg-accent/50 transition-colors text-muted-foreground hover:text-foreground"
         >
           <span className="font-medium">{providerNames[activeProviderId] || activeProviderId}</span>
           <ChevronDown className="h-3 w-3" />
@@ -1781,7 +1793,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             />
           ) : (
             // Original layout when no preview
-            <div className={cn("h-full flex flex-col", embedded ? "px-3" : "max-w-6xl mx-auto px-6")}>
+            <div className={cn("h-full flex flex-col", embedded ? "px-2" : "max-w-6xl mx-auto px-6")}>
               {projectPathInput}
               {messagesList}
               
@@ -1902,7 +1914,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                 embedded ? "absolute bottom-28 right-4 z-40" : "fixed bottom-32 right-6 z-50"
               )}
             >
-              <div className="flex items-center bg-background/95 backdrop-blur-md border rounded-full shadow-lg overflow-hidden">
+              <div className="flex items-center bg-background border border-[var(--color-chrome-border)] rounded-md shadow-sm overflow-hidden">
                 <TooltipSimple content="Scroll to top" side="top">
                   <motion.div
                     whileTap={{ scale: 0.97 }}
@@ -1934,13 +1946,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                         }, 500); // Wait for smooth scroll to complete
                       }
                     }}
-                      className="px-3 py-2 hover:bg-accent rounded-none"
+                      className="px-2.5 py-1.5 hover:bg-accent rounded-none"
                     >
-                      <ChevronUp className="h-4 w-4" />
+                      <ChevronUp className="h-3.5 w-3.5" />
                     </Button>
                   </motion.div>
                 </TooltipSimple>
-                <div className="w-px h-4 bg-border" />
+                <div className="w-px h-3.5 bg-border" />
                 <TooltipSimple content="Scroll to bottom" side="top">
                   <motion.div
                     whileTap={{ scale: 0.97 }}
@@ -1967,9 +1979,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                           }
                         }
                       }}
-                      className="px-3 py-2 hover:bg-accent rounded-none"
+                      className="px-2.5 py-1.5 hover:bg-accent rounded-none"
                     >
-                      <ChevronDown className="h-4 w-4" />
+                      <ChevronDown className="h-3.5 w-3.5" />
                     </Button>
                   </motion.div>
                 </TooltipSimple>
@@ -2005,9 +2017,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                           variant="ghost"
                           size="icon"
                           onClick={() => setShowTimeline(!showTimeline)}
-                          className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                          className="h-5 w-5 text-muted-foreground hover:text-foreground"
                         >
-                          <GitBranch className={cn("h-3.5 w-3.5", showTimeline && "text-primary")} />
+                          <GitBranch className={cn("h-2.5 w-2.5", showTimeline && "text-primary")} />
                         </Button>
                       </motion.div>
                     </TooltipSimple>
@@ -2023,9 +2035,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                              className="h-5 w-5 text-muted-foreground hover:text-foreground"
                             >
-                              <Copy className="h-3.5 w-3.5" />
+                              <Copy className="h-2.5 w-2.5" />
                             </Button>
                           </motion.div>
                         </TooltipSimple>
@@ -2065,9 +2077,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                         variant="ghost"
                         size="icon"
                         onClick={() => setShowSettings(!showSettings)}
-                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                        className="h-5 w-5 text-muted-foreground hover:text-foreground"
                       >
-                        <Wrench className={cn("h-3.5 w-3.5", showSettings && "text-primary")} />
+                        <Wrench className={cn("h-2.5 w-2.5", showSettings && "text-primary")} />
                       </Button>
                     </motion.div>
                   </TooltipSimple>
@@ -2087,10 +2099,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.8 }}
-                    className="bg-background/95 backdrop-blur-md border rounded-full px-3 py-1 shadow-lg pointer-events-auto"
+                    className="bg-background border border-[var(--color-chrome-border)] rounded-md px-2 py-0.5 shadow-sm pointer-events-auto"
                   >
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <Hash className="h-3 w-3 text-muted-foreground" />
+                    <div className="flex items-center gap-1 text-[11px]">
+                      <Hash className="h-2.5 w-2.5 text-muted-foreground" />
                       <span className="font-mono">{totalTokens.toLocaleString()}</span>
                       <span className="text-muted-foreground">tokens</span>
                     </div>

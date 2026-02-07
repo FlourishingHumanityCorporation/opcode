@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Copy, Download, RefreshCw, Trash2 } from 'lucide-react';
+import { Activity, Copy, Download, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useTabContext } from '@/contexts/TabContext';
+import { api, type SessionStartupProbeResult } from '@/lib/api';
 import { TabPersistenceService } from '@/services/tabPersistence';
 import {
   clearWorkspaceDiagnostics,
   exportWorkspaceDiagnostics,
+  getStartupLatencyStats,
   getWorkspaceDiagnosticsSnapshot,
+  logWorkspaceEvent,
   subscribeWorkspaceDiagnostics,
   type WorkspaceDiagnosticEvent,
 } from '@/services/workspaceDiagnostics';
@@ -13,8 +17,12 @@ import {
 type DiagnosticEntry = WorkspaceDiagnosticEvent & { id: number; timestamp: string };
 
 export const DiagnosticsPanel: React.FC = () => {
+  const { tabs, activeTabId } = useTabContext();
   const [entries, setEntries] = useState<DiagnosticEntry[]>([]);
   const [copied, setCopied] = useState(false);
+  const [isProbing, setIsProbing] = useState(false);
+  const [probeResult, setProbeResult] = useState<SessionStartupProbeResult | null>(null);
+  const [probeError, setProbeError] = useState<string | null>(null);
 
   const refresh = () => {
     const snapshot = getWorkspaceDiagnosticsSnapshot();
@@ -28,6 +36,25 @@ export const DiagnosticsPanel: React.FC = () => {
   }, []);
 
   const storageInspection = useMemo(() => TabPersistenceService.inspectStoredWorkspace(), [entries]);
+  const startupLatency = useMemo(() => getStartupLatencyStats(), [entries]);
+  const activeWorkspace = useMemo(
+    () => tabs.find((tab) => tab.id === activeTabId) ?? tabs[0],
+    [tabs, activeTabId]
+  );
+  const probeProjectPath = useMemo(() => {
+    if (!activeWorkspace) return '';
+    const activeTerminal =
+      activeWorkspace.terminalTabs.find((terminal) => terminal.id === activeWorkspace.activeTerminalTabId) ??
+      activeWorkspace.terminalTabs[0];
+    const activePaneState = activeTerminal ? activeTerminal.paneStates[activeTerminal.activePaneId] : undefined;
+    return (
+      activeWorkspace.projectPath ||
+      activeTerminal?.sessionState?.projectPath ||
+      activeTerminal?.sessionState?.initialProjectPath ||
+      activePaneState?.projectPath ||
+      ''
+    );
+  }, [activeWorkspace]);
 
   const handleCopy = async () => {
     const output = exportWorkspaceDiagnostics();
@@ -47,6 +74,46 @@ export const DiagnosticsPanel: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const handleRunStartupProbe = async () => {
+    if (!probeProjectPath) {
+      setProbeError('No project path available in the active workspace.');
+      return;
+    }
+
+    setIsProbing(true);
+    setProbeError(null);
+    setProbeResult(null);
+    logWorkspaceEvent({
+      category: 'stream_watchdog',
+      action: 'startup_probe_started',
+      payload: { projectPath: probeProjectPath },
+    });
+
+    try {
+      const result = await api.runSessionStartupProbe(probeProjectPath, {
+        model: 'sonnet',
+        timeoutMs: 45_000,
+      });
+      setProbeResult(result);
+      logWorkspaceEvent({
+        category: 'stream_watchdog',
+        action: 'startup_probe_completed',
+        payload: result,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Probe failed';
+      setProbeError(message);
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'startup_probe_failed',
+        message,
+        payload: { projectPath: probeProjectPath },
+      });
+    } finally {
+      setIsProbing(false);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
@@ -57,6 +124,16 @@ export const DiagnosticsPanel: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRunStartupProbe}
+            disabled={isProbing || !probeProjectPath}
+            title={probeProjectPath || 'No project path available'}
+          >
+            <Activity className={`mr-1.5 h-4 w-4 ${isProbing ? 'animate-spin' : ''}`} />
+            {isProbing ? 'Probing...' : 'Run Startup Probe'}
+          </Button>
           <Button size="icon" variant="ghost" onClick={refresh} title="Refresh diagnostics">
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -86,11 +163,39 @@ export const DiagnosticsPanel: React.FC = () => {
         </div>
       )}
 
+      {(probeResult || probeError) && (
+        <div className="border-b border-border/60 px-4 py-3 text-xs">
+          <div className="mb-1 font-medium">Latest Probe</div>
+          {probeError ? (
+            <div className="text-destructive">{probeError}</div>
+          ) : probeResult ? (
+            <div className="text-muted-foreground">
+              firstByte={probeResult.first_byte_ms ?? '-'}ms | total={probeResult.total_ms}ms | exit=
+              {probeResult.exit_code ?? 'null'} | timeout={probeResult.timed_out ? 'yes' : 'no'} | bytes(out/err)=
+              {probeResult.stdout_bytes}/{probeResult.stderr_bytes}
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      <div className="border-b border-border/60 px-4 py-3 text-xs">
+        <div className="mb-1 font-medium">Session Startup Latency</div>
+        <div className="text-muted-foreground">
+          samples={startupLatency.samples} | last={startupLatency.lastMs ?? '-'}ms | p50={startupLatency.p50Ms ?? '-'}ms | p95={startupLatency.p95Ms ?? '-'}ms
+        </div>
+        <div className="text-muted-foreground">
+          {Object.entries(startupLatency.byProvider)
+            .map(([providerId, stats]) => `${providerId}: n=${stats.samples}, p50=${stats.p50Ms ?? '-'}ms, p95=${stats.p95Ms ?? '-'}ms`)
+            .join(' | ') || 'by-provider=none'}
+        </div>
+      </div>
+
       <div className="border-b border-border/60 px-4 py-3 text-xs">
         <div className="mb-1 font-medium">Workspace Snapshot</div>
         <div className="text-muted-foreground">
           stored={storageInspection.found ? 'yes' : 'no'} | tabs={storageInspection.tabCount} | terminals={storageInspection.terminalCount} | active={storageInspection.activeTabId || 'none'}
         </div>
+        <div className="text-muted-foreground">probeProject={probeProjectPath || 'none'}</div>
         <div className={storageInspection.validation.valid ? 'text-emerald-500' : 'text-destructive'}>
           invariants={storageInspection.validation.valid ? 'ok' : storageInspection.validation.errors.join(' | ')}
         </div>

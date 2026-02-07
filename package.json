@@ -19,6 +19,9 @@
     "check": "tsc --noEmit && cd src-tauri && cargo check",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
+    "debug:session-start": "node scripts/measure-session-startup.mjs",
+    "debug:session-start:json": "node scripts/measure-session-startup.mjs --json",
+    "debug:session-start:gate": "node scripts/measure-session-startup.mjs --runs 3 --fail-on-slow-ms 5000",
     "smoke:ui": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts",
     "smoke:ui:headed": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts --headed"
   },

@@ -195,12 +195,16 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'load_agent_session_history': '/api/agents/sessions/{sessionId}/history',
     'list_detected_agents': '/api/agents/detected',
     'check_provider_runtime': '/api/providers/{providerId}/runtime',
+    'run_session_startup_probe': '/api/diagnostics/session-startup-probe',
     
     // Usage commands
     'get_usage_stats': '/api/usage',
     'get_usage_by_date_range': '/api/usage/range',
     'get_session_stats': '/api/usage/sessions',
     'get_usage_details': '/api/usage/details',
+    'get_usage_index_status': '/api/usage/index/status',
+    'start_usage_index_sync': '/api/usage/index/sync',
+    'cancel_usage_index_sync': '/api/usage/index/cancel',
     
     // Settings and configuration
     'get_claude_settings': '/api/settings/claude',

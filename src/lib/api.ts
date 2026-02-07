@@ -204,16 +204,33 @@ export interface ProviderRuntimeStatus {
   setup_hints: string[];
 }
 
+export interface SessionStartupProbeResult {
+  provider_id: string;
+  project_path: string;
+  model: string;
+  timeout_ms: number;
+  timed_out: boolean;
+  total_ms: number;
+  first_stdout_ms?: number | null;
+  first_stderr_ms?: number | null;
+  first_byte_ms?: number | null;
+  stdout_bytes: number;
+  stderr_bytes: number;
+  exit_code?: number | null;
+  signal?: number | null;
+}
+
 // Usage Dashboard types
 export interface UsageEntry {
-  project: string;
   timestamp: string;
   model: string;
   input_tokens: number;
   output_tokens: number;
-  cache_write_tokens: number;
+  cache_creation_tokens: number;
   cache_read_tokens: number;
   cost: number;
+  session_id: string;
+  project_path: string;
 }
 
 export interface ModelUsage {
@@ -254,6 +271,19 @@ export interface UsageStats {
   by_model: ModelUsage[];
   by_date: DailyUsage[];
   by_project: ProjectUsage[];
+}
+
+export interface UsageIndexStatus {
+  state: 'idle' | 'indexing' | 'error';
+  started_at?: string;
+  last_completed_at?: string;
+  last_error?: string;
+  files_total: number;
+  files_processed: number;
+  lines_processed: number;
+  entries_indexed: number;
+  current_file?: string;
+  cancelled: boolean;
 }
 
 /**
@@ -1108,6 +1138,27 @@ export const api = {
   },
 
   /**
+   * Runs a real Claude startup probe and returns timing metrics.
+   */
+  async runSessionStartupProbe(
+    projectPath: string,
+    options?: {
+      model?: string;
+      prompt?: string;
+      timeoutMs?: number;
+      includePartialMessages?: boolean;
+    }
+  ): Promise<SessionStartupProbeResult> {
+    return apiCall("run_session_startup_probe", {
+      projectPath,
+      model: options?.model,
+      prompt: options?.prompt,
+      timeoutMs: options?.timeoutMs,
+      includePartialMessages: options?.includePartialMessages,
+    });
+  },
+
+  /**
    * Executes a new session with any detected CLI agent
    */
   async executeAgentSession(
@@ -1196,13 +1247,17 @@ export const api = {
   async getSessionStats(
     since?: string,
     until?: string,
-    order?: "asc" | "desc"
+    order?: "asc" | "desc",
+    limit?: number,
+    offset?: number,
   ): Promise<ProjectUsage[]> {
     try {
       return await apiCall<ProjectUsage[]>("get_session_stats", {
         since,
         until,
         order,
+        limit,
+        offset,
       });
     } catch (error) {
       console.error("Failed to get session stats:", error);
@@ -1212,14 +1267,47 @@ export const api = {
 
   /**
    * Gets detailed usage entries with optional filtering
-   * @param limit - Optional limit for number of entries
+   * @param projectPath - Optional project path filter
+   * @param date - Optional date filter prefix (YYYY-MM-DD)
    * @returns Promise resolving to array of usage entries
    */
-  async getUsageDetails(limit?: number): Promise<UsageEntry[]> {
+  async getUsageDetails(
+    projectPath?: string,
+    date?: string,
+    limit?: number,
+    offset?: number,
+  ): Promise<UsageEntry[]> {
     try {
-      return await apiCall<UsageEntry[]>("get_usage_details", { limit });
+      return await apiCall<UsageEntry[]>("get_usage_details", { projectPath, date, limit, offset });
     } catch (error) {
       console.error("Failed to get usage details:", error);
+      throw error;
+    }
+  },
+
+  async getUsageIndexStatus(): Promise<UsageIndexStatus> {
+    try {
+      return await apiCall<UsageIndexStatus>("get_usage_index_status");
+    } catch (error) {
+      console.error("Failed to get usage index status:", error);
+      throw error;
+    }
+  },
+
+  async startUsageIndexSync(): Promise<UsageIndexStatus> {
+    try {
+      return await apiCall<UsageIndexStatus>("start_usage_index_sync");
+    } catch (error) {
+      console.error("Failed to start usage index sync:", error);
+      throw error;
+    }
+  },
+
+  async cancelUsageIndexSync(): Promise<UsageIndexStatus> {
+    try {
+      return await apiCall<UsageIndexStatus>("cancel_usage_index_sync");
+    } catch (error) {
+      console.error("Failed to cancel usage index sync:", error);
       throw error;
     }
   },

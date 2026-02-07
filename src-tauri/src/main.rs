@@ -6,6 +6,7 @@ mod checkpoint;
 mod claude_binary;
 mod commands;
 mod process;
+mod usage_index;
 
 use checkpoint::state::CheckpointState;
 use commands::agents::{
@@ -32,6 +33,7 @@ use commands::claude::{
     search_files, track_checkpoint_message, track_session_messages, update_checkpoint_settings,
     update_hooks_config, validate_hook_command, ClaudeProcessState,
 };
+use commands::diagnostics::run_session_startup_probe;
 use commands::mcp::{
     mcp_add, mcp_add_from_claude_desktop, mcp_add_json, mcp_get, mcp_get_server_status, mcp_list,
     mcp_read_project_config, mcp_remove, mcp_reset_project_choices, mcp_save_project_config,
@@ -44,11 +46,13 @@ use commands::storage::{
     storage_read_table, storage_reset_database, storage_update_row,
 };
 use commands::usage::{
-    get_session_stats, get_usage_by_date_range, get_usage_details, get_usage_stats,
+    cancel_usage_index_sync, get_session_stats, get_usage_by_date_range, get_usage_details,
+    get_usage_index_status, get_usage_stats, start_usage_index_sync,
 };
 use process::ProcessRegistryState;
 use std::sync::Mutex;
 use tauri::Manager;
+use usage_index::UsageIndexState;
 
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
@@ -148,6 +152,7 @@ fn main() {
 
             // Initialize Claude process state
             app.manage(ClaudeProcessState::default());
+            app.manage(UsageIndexState::default());
 
             // Apply window vibrancy with rounded corners on macOS
             #[cfg(target_os = "macos")]
@@ -263,6 +268,9 @@ fn main() {
             get_usage_by_date_range,
             get_usage_details,
             get_session_stats,
+            get_usage_index_status,
+            start_usage_index_sync,
+            cancel_usage_index_sync,
             // MCP (Model Context Protocol)
             mcp_add,
             mcp_list,
@@ -297,6 +305,7 @@ fn main() {
             execute_agent_session,
             continue_agent_session,
             resume_agent_session,
+            run_session_startup_probe,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

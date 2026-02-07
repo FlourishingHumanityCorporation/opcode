@@ -104,6 +104,77 @@ async function reorderFirstWorkspaceToLast(page: Page): Promise<string[]> {
   return workspaceTabIds(page);
 }
 
+async function installStreamingWebSocketMock(
+  page: Page,
+  options: { firstOutputDelayMs: number; completionDelayMs: number }
+) {
+  await page.evaluate(({ firstOutputDelayMs, completionDelayMs }) => {
+    class MockWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSING = 2;
+      static readonly CLOSED = 3;
+
+      readyState = MockWebSocket.CONNECTING;
+      onopen: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+
+      constructor(_url: string) {
+        setTimeout(() => {
+          this.readyState = MockWebSocket.OPEN;
+          this.onopen?.(new Event('open'));
+        }, 0);
+      }
+
+      send(_data: string) {
+        setTimeout(() => {
+          this.onmessage?.(
+            new MessageEvent('message', {
+              data: JSON.stringify({ type: 'start', message: 'started' }),
+            })
+          );
+        }, 10);
+
+        setTimeout(() => {
+          this.onmessage?.(
+            new MessageEvent('message', {
+              data: JSON.stringify({
+                type: 'output',
+                content: JSON.stringify({
+                  type: 'system',
+                  subtype: 'init',
+                  session_id: 'smoke-session-1',
+                }),
+              }),
+            })
+          );
+        }, firstOutputDelayMs);
+
+        setTimeout(() => {
+          this.onmessage?.(
+            new MessageEvent('message', {
+              data: JSON.stringify({ type: 'completion', status: 'success' }),
+            })
+          );
+        }, completionDelayMs);
+      }
+
+      close() {
+        this.readyState = MockWebSocket.CLOSED;
+        this.onclose?.(new CloseEvent('close', { code: 1000, reason: 'closed' }));
+      }
+
+      addEventListener() {}
+
+      removeEventListener() {}
+    }
+
+    (window as unknown as { WebSocket: typeof WebSocket }).WebSocket = MockWebSocket as unknown as typeof WebSocket;
+  }, options);
+}
+
 test.describe('Workspace persistence smoke', () => {
   test('reorders workspace tabs and restores exact order after restart', async ({ page }) => {
     await setupWorkspaceApiMock(page);
@@ -204,11 +275,36 @@ test.describe('Workspace persistence smoke', () => {
 
     const input = page.getByPlaceholder(/Message .* \(.*\)\.\.\./i).first();
     await input.fill('timeout test');
+    const startedAt = Date.now();
     await input.press('Enter');
 
-    await expect(page.getByText(/No response stream started within 8s|Failed to send prompt/i)).toBeVisible({
-      timeout: 15_000,
+    await expect(page.getByText(/No response yet \(2s\)|Failed to send prompt/i)).toBeVisible({
+      timeout: 5_000,
     });
+    expect(Date.now() - startedAt).toBeLessThan(3_500);
     await expect(page.locator('.rotating-symbol')).toHaveCount(0);
+  });
+
+  test('does not show slow-start warning when first stream arrives quickly', async ({ page }) => {
+    await setupWorkspaceApiMock(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('opcode.smoke.projectPath', '/tmp/opcode-smoke-project');
+    });
+    await page.goto('/');
+    await ensureWorkspaceCount(page, 1);
+
+    await installStreamingWebSocketMock(page, {
+      firstOutputDelayMs: 400,
+      completionDelayMs: 900,
+    });
+
+    const input = page.getByPlaceholder(/Message .* \(.*\)\.\.\./i).first();
+    await input.fill('fast stream test');
+    await input.press('Enter');
+
+    await expect(page.locator('.rotating-symbol')).toHaveCount(0, { timeout: 5000 });
+    await expect(
+      page.getByText(/No response yet \(2s\)\. Still waiting for provider startup\./i)
+    ).toHaveCount(0);
   });
 });
