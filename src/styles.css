@@ -173,6 +173,14 @@ html {
 
   /* Shared chrome layout */
   --workspace-inline-gutter: 0.625rem;
+  --workspace-chip-horizontal-padding: 0.625rem;
+  --workspace-chip-icon-size: 0.875rem;
+  --workspace-chip-gap: 0.375rem;
+  --workspace-chip-text-offset: calc(
+    var(--workspace-chip-horizontal-padding) +
+    var(--workspace-chip-icon-size) +
+    var(--workspace-chip-gap)
+  );
 }
 
 /* Theme Variations */
@@ -305,6 +313,16 @@ html {
 .workspace-chrome-row {
   padding-left: var(--workspace-inline-gutter);
   padding-right: var(--workspace-inline-gutter);
+}
+
+/* Align non-chip rows to the same text column as chip labels */
+.workspace-chip-text-align {
+  padding-left: var(--workspace-chip-text-offset);
+}
+
+/* Align icon+text rows to chip icon column */
+.workspace-chip-icon-align {
+  padding-left: var(--workspace-chip-horizontal-padding);
 }
 
 /* Banded chrome section with an inner boxed row */

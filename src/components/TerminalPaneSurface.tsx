@@ -94,7 +94,7 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
       data-testid={`workspace-pane-${paneId}`}
     >
       <div className="workspace-chrome-row flex h-8 items-center justify-between border-b border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-surface)]">
-        <div className="flex items-center gap-1.5 text-[12px] leading-none font-medium tracking-[0.01em] text-[var(--color-chrome-text)]">
+        <div className="workspace-chip-icon-align flex items-center gap-1.5 text-[12px] leading-none font-medium tracking-[0.01em] text-[var(--color-chrome-text)]">
           {terminal.kind === 'agent' ? (
             <Bot className="h-3.5 w-3.5" />
           ) : (

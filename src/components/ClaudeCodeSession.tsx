@@ -7,7 +7,12 @@ import {
   ChevronUp,
   X,
   Hash,
-  Wrench
+  Wrench,
+  Sparkles,
+  Command,
+  Cpu,
+  Send,
+  Code
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,7 +74,11 @@ const listen = async (eventName: string, callback: (event: any) => void): Promis
   return domListen(eventName, callback);
 };
 import { StreamMessage } from "./StreamMessage";
-import { FloatingPromptInput, type FloatingPromptInputRef } from "./FloatingPromptInput";
+import {
+  FloatingPromptInput,
+  type FloatingPromptInputRef,
+  type PromptSendOptions,
+} from "./FloatingPromptInput";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { TimelineNavigator } from "./TimelineNavigator";
 import { CheckpointSettings } from "./CheckpointSettings";
@@ -177,6 +186,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     prompt: string;
     model: string;
     providerId: string;
+    reasoningEffort?: string;
   };
 
   const [projectPath, setProjectPath] = useState(initialProjectPath || session?.project_path || "");
@@ -779,9 +789,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     return null;
   };
 
-  const handleSendPrompt = async (prompt: string, model: string, providerIdOverride?: string) => {
+  const handleSendPrompt = async (
+    prompt: string,
+    model: string,
+    options?: PromptSendOptions
+  ) => {
     promptAttemptStartedAtRef.current = Date.now();
-    const providerToUse = providerIdOverride || activeProviderId;
+    const providerToUse = options?.providerIdOverride || activeProviderId;
+    const reasoningEffort = options?.reasoningEffort;
     const isClaudeProviderForRun = providerToUse === "claude";
     const modelForTracking = model || "default";
     let runProjectPath = projectPath;
@@ -825,6 +840,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         prompt,
         model,
         providerId: providerToUse,
+        reasoningEffort,
       };
       setQueuedPrompts(prev => [...prev, newPrompt]);
       return;
@@ -1151,7 +1167,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             
             // Small delay to ensure UI updates
             setTimeout(() => {
-              handleSendPrompt(nextPrompt.prompt, nextPrompt.model, nextPrompt.providerId);
+              handleSendPrompt(nextPrompt.prompt, nextPrompt.model, {
+                providerIdOverride: nextPrompt.providerId,
+                reasoningEffort: nextPrompt.reasoningEffort,
+              });
             }, 100);
           }
         };
@@ -1248,7 +1267,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           if (isClaudeProviderForRun) {
             await api.resumeClaudeCode(runProjectPath, effectiveSession.id, prompt, model);
           } else {
-            await api.resumeAgentSession(providerToUse, runProjectPath, effectiveSession.id, prompt, model);
+            await api.resumeAgentSession(
+              providerToUse,
+              runProjectPath,
+              effectiveSession.id,
+              prompt,
+              model,
+              reasoningEffort
+            );
           }
         } else {
           console.log('[ClaudeCodeSession] Starting new session, provider:', providerToUse);
@@ -1258,7 +1284,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           if (isClaudeProviderForRun) {
             await api.executeClaudeCode(runProjectPath, prompt, model);
           } else {
-            await api.executeAgentSession(providerToUse, runProjectPath, prompt, model);
+            await api.executeAgentSession(
+              providerToUse,
+              runProjectPath,
+              prompt,
+              model,
+              reasoningEffort
+            );
           }
         }
       }
@@ -1690,6 +1722,15 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     opencode: "OpenCode",
   };
 
+  const providerIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+    claude: Sparkles,
+    codex: Command,
+    gemini: Cpu,
+    aider: Wrench,
+    goose: Send,
+    opencode: Code,
+  };
+
   const handleProviderChange = (newProviderId: string) => {
     setActiveProviderId(newProviderId);
     setShowProviderMenu(false);
@@ -1698,12 +1739,21 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   // Provider selector bar (only shown when multiple providers detected)
   const projectPathInput = !hideProjectBar && detectedProviders.length > 0 ? (
-    <div className="flex items-center gap-1.5 px-0 py-1.5 border-b border-border/50 text-xs">
+    <div
+      className={cn(
+        "flex items-center gap-1.5 px-0 py-1.5 border-b border-border/50 text-xs",
+        embedded && "workspace-chip-icon-align"
+      )}
+    >
       <div className="relative">
         <button
           onClick={() => setShowProviderMenu(!showProviderMenu)}
-          className="flex items-center gap-1 px-0 py-1 rounded-md hover:bg-accent/50 transition-colors text-muted-foreground hover:text-foreground"
+          className="flex items-center gap-1.5 px-0 py-1 rounded-md hover:bg-accent/50 transition-colors text-muted-foreground hover:text-foreground"
         >
+          {(() => {
+            const ActiveProviderIcon = providerIcons[activeProviderId] || Command;
+            return <ActiveProviderIcon className="h-3.5 w-3.5 shrink-0" />;
+          })()}
           <span className="font-medium">{providerNames[activeProviderId] || activeProviderId}</span>
           <ChevronDown className="h-3 w-3" />
         </button>
@@ -1718,7 +1768,15 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                   agent.providerId === activeProviderId && "bg-accent/30 text-foreground font-medium"
                 )}
               >
-                <span>{providerNames[agent.providerId] || agent.providerId}</span>
+                {(() => {
+                  const ProviderIcon = providerIcons[agent.providerId] || Command;
+                  return (
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <ProviderIcon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{providerNames[agent.providerId] || agent.providerId}</span>
+                </span>
+                  );
+                })()}
                 {agent.version && (
                   <span className="text-muted-foreground ml-2">v{agent.version}</span>
                 )}

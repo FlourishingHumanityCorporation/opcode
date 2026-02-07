@@ -305,6 +305,17 @@ fn create_system_command(claude_path: &str, args: Vec<String>, project_path: &st
     cmd
 }
 
+/// Appends a Claude --model argument only when an explicit model is requested.
+/// `default` (or empty) means use Claude Code's configured/recommended default.
+fn append_claude_model_arg(args: &mut Vec<String>, model: &str) {
+    let trimmed = model.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
+        return;
+    }
+
+    args.extend_from_slice(&["--model".to_string(), trimmed.to_string()]);
+}
+
 /// Gets the user's home directory path
 #[tauri::command]
 pub async fn get_home_directory() -> Result<String, String> {
@@ -932,16 +943,17 @@ pub async fn execute_claude_code(
 
     let claude_path = find_claude_binary(&app)?;
 
-    let args = vec![
+    let mut args = vec![
         "-p".to_string(),
         prompt.clone(),
-        "--model".to_string(),
-        model.clone(),
+    ];
+    append_claude_model_arg(&mut args, &model);
+    args.extend_from_slice(&[
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
         "--dangerously-skip-permissions".to_string(),
-    ];
+    ]);
 
     let cmd = create_system_command(&claude_path, args, &project_path);
     spawn_claude_process(app, cmd, prompt, model, project_path).await
@@ -963,17 +975,18 @@ pub async fn continue_claude_code(
 
     let claude_path = find_claude_binary(&app)?;
 
-    let args = vec![
+    let mut args = vec![
         "-c".to_string(), // Continue flag
         "-p".to_string(),
         prompt.clone(),
-        "--model".to_string(),
-        model.clone(),
+    ];
+    append_claude_model_arg(&mut args, &model);
+    args.extend_from_slice(&[
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
         "--dangerously-skip-permissions".to_string(),
-    ];
+    ]);
 
     let cmd = create_system_command(&claude_path, args, &project_path);
     spawn_claude_process(app, cmd, prompt, model, project_path).await
@@ -997,18 +1010,19 @@ pub async fn resume_claude_code(
 
     let claude_path = find_claude_binary(&app)?;
 
-    let args = vec![
+    let mut args = vec![
         "--resume".to_string(),
         session_id.clone(),
         "-p".to_string(),
         prompt.clone(),
-        "--model".to_string(),
-        model.clone(),
+    ];
+    append_claude_model_arg(&mut args, &model);
+    args.extend_from_slice(&[
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
         "--dangerously-skip-permissions".to_string(),
-    ];
+    ]);
 
     let cmd = create_system_command(&claude_path, args, &project_path);
     spawn_claude_process(app, cmd, prompt, model, project_path).await
@@ -2287,7 +2301,7 @@ fn build_provider_args(provider_id: &str, prompt: &str, model: &str) -> Vec<Stri
             // Use `exec --json` for structured JSONL output (transformed in codex_transform.rs)
             let mut args = vec!["exec".to_string(), "--json".to_string(), prompt.to_string()];
             // Only pass --model if it's not a Claude model name (codex uses OpenAI models)
-            let claude_models = ["sonnet", "opus", "haiku", "claude"];
+            let claude_models = ["default", "sonnet", "opus", "haiku", "claude"];
             if !model.is_empty()
                 && !claude_models.iter().any(|m| model.to_lowercase().contains(m))
             {

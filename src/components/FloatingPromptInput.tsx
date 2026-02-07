@@ -48,7 +48,7 @@ interface FloatingPromptInputProps {
   /**
    * Callback when prompt is sent
    */
-  onSend: (prompt: string, model: string) => void;
+  onSend: (prompt: string, model: string, options?: PromptSendOptions) => void;
   /**
    * Whether the input is loading
    */
@@ -86,6 +86,13 @@ interface FloatingPromptInputProps {
 export interface FloatingPromptInputRef {
   addImage: (imagePath: string) => void;
 }
+
+export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
+export type PromptSendOptions = {
+  reasoningEffort?: CodexReasoningEffort;
+  providerIdOverride?: string;
+};
 
 /**
  * Thinking mode type definition
@@ -158,6 +165,55 @@ const THINKING_MODES: ThinkingModeConfig[] = [
   }
 ];
 
+type CodexReasoningModeConfig = {
+  id: CodexReasoningEffort;
+  name: string;
+  description: string;
+  level: number;
+  icon: React.ReactNode;
+  color: string;
+  shortName: string;
+};
+
+const CODEX_REASONING_MODES: CodexReasoningModeConfig[] = [
+  {
+    id: "low",
+    name: "Low",
+    description: "Lower reasoning effort",
+    level: 1,
+    icon: <Lightbulb className="h-3.5 w-3.5" />,
+    color: "text-primary",
+    shortName: "Low",
+  },
+  {
+    id: "medium",
+    name: "Medium",
+    description: "Balanced reasoning effort",
+    level: 2,
+    icon: <Brain className="h-3.5 w-3.5" />,
+    color: "text-primary",
+    shortName: "Med",
+  },
+  {
+    id: "high",
+    name: "High",
+    description: "Higher reasoning effort",
+    level: 3,
+    icon: <Cpu className="h-3.5 w-3.5" />,
+    color: "text-primary",
+    shortName: "High",
+  },
+  {
+    id: "xhigh",
+    name: "Extra High",
+    description: "Maximum reasoning effort",
+    level: 4,
+    icon: <Rocket className="h-3.5 w-3.5" />,
+    color: "text-primary",
+    shortName: "XHigh",
+  },
+];
+
 const THINKING_PROMPT_HINTS_ENABLED_KEY = "thinking_prompt_hints_enabled";
 const MIN_COMPOSER_HEIGHT = 29;
 const MAX_COMPOSER_HEIGHT = 144;
@@ -217,6 +273,8 @@ const FloatingPromptInputInner = (
     defaultModel ?? getDefaultModelForProvider(providerId)
   );
   const [selectedThinkingMode, setSelectedThinkingMode] = useState<ThinkingMode>("auto");
+  const [selectedCodexReasoningEffort, setSelectedCodexReasoningEffort] =
+    useState<CodexReasoningEffort>("high");
   const [thinkingPromptHintsEnabled, setThinkingPromptHintsEnabled] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -239,6 +297,11 @@ const FloatingPromptInputInner = (
     [providerId]
   );
   const providerDisplayName = getProviderDisplayName(providerId);
+  const isCodexProvider = providerId === "codex";
+  const reasoningLabel = isCodexProvider ? "Reasoning" : "Thinking";
+  const selectedReasoningMode = isCodexProvider
+    ? CODEX_REASONING_MODES.find((mode) => mode.id === selectedCodexReasoningEffort)
+    : THINKING_MODES.find((mode) => mode.id === selectedThinkingMode);
 
   useEffect(() => {
     setSelectedModel((current) => {
@@ -289,7 +352,10 @@ const FloatingPromptInputInner = (
   };
 
   const getModelIcon = (option: ProviderModelOption) => {
-    if (providerId === "claude" && option.id === "opus") {
+    if (
+      providerId === "claude"
+      && (option.id === "default" || option.id === "opus")
+    ) {
       return <Sparkles className="h-3.5 w-3.5" />;
     }
 
@@ -779,13 +845,16 @@ const FloatingPromptInputInner = (
     if (prompt.trim() && !disabled) {
       let finalPrompt = prompt.trim();
 
-      // Append thinking phrase only when prompt hints are enabled
+      // Append thinking phrase only when prompt hints are enabled for non-Codex providers.
       const thinkingMode = THINKING_MODES.find(m => m.id === selectedThinkingMode);
-      if (thinkingPromptHintsEnabled && thinkingMode && thinkingMode.phrase) {
+      if (!isCodexProvider && thinkingPromptHintsEnabled && thinkingMode && thinkingMode.phrase) {
         finalPrompt = `${finalPrompt}.\n\n${thinkingMode.phrase}.`;
       }
 
-      onSend(finalPrompt, selectedModel);
+      const sendOptions: PromptSendOptions | undefined = isCodexProvider
+        ? { reasoningEffort: selectedCodexReasoningEffort }
+        : undefined;
+      onSend(finalPrompt, selectedModel, sendOptions);
       setPrompt("");
       setEmbeddedImages([]);
       setTextareaHeight(MIN_COMPOSER_HEIGHT); // Reset height after sending
@@ -1046,7 +1115,7 @@ const FloatingPromptInputInner = (
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Thinking:</span>
+                    <span className="text-xs text-muted-foreground">{reasoningLabel}:</span>
                     <Popover
                       trigger={
                         <Tooltip>
@@ -1057,33 +1126,39 @@ const FloatingPromptInputInner = (
                                 onClick={() => setThinkingModePickerOpen(!thinkingModePickerOpen)}
                                 className="gap-2"
                               >
-                                <span className={THINKING_MODES.find(m => m.id === selectedThinkingMode)?.color}>
-                                  {THINKING_MODES.find(m => m.id === selectedThinkingMode)?.icon}
+                                <span className={selectedReasoningMode?.color}>
+                                  {selectedReasoningMode?.icon}
                                 </span>
                                 <ThinkingModeIndicator 
-                                  level={THINKING_MODES.find(m => m.id === selectedThinkingMode)?.level || 0} 
+                                  level={selectedReasoningMode?.level || 0} 
                                 />
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
-                              <p className="font-medium">{THINKING_MODES.find(m => m.id === selectedThinkingMode)?.name || "Auto"}</p>
-                              <p className="text-xs text-muted-foreground">{THINKING_MODES.find(m => m.id === selectedThinkingMode)?.description}</p>
+                              <p className="font-medium">{selectedReasoningMode?.name || "Auto"}</p>
+                              <p className="text-xs text-muted-foreground">{selectedReasoningMode?.description}</p>
                             </TooltipContent>
                           </Tooltip>
                       }
                       content={
                         <div className="w-[280px] p-1">
-                          {THINKING_MODES.map((mode) => (
+                          {(isCodexProvider ? CODEX_REASONING_MODES : THINKING_MODES).map((mode) => (
                             <button
                               key={mode.id}
                               onClick={() => {
-                                setSelectedThinkingMode(mode.id);
+                                if (isCodexProvider) {
+                                  setSelectedCodexReasoningEffort(mode.id as CodexReasoningEffort);
+                                } else {
+                                  setSelectedThinkingMode(mode.id as ThinkingMode);
+                                }
                                 setThinkingModePickerOpen(false);
                               }}
                               className={cn(
                                 "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
                                 "hover:bg-accent",
-                                selectedThinkingMode === mode.id && "bg-accent"
+                                (isCodexProvider
+                                  ? selectedCodexReasoningEffort === mode.id
+                                  : selectedThinkingMode === mode.id) && "bg-accent"
                               )}
                             >
                               <span className={cn("mt-0.5", mode.color)}>
@@ -1100,6 +1175,7 @@ const FloatingPromptInputInner = (
                               <ThinkingModeIndicator level={mode.level} />
                             </button>
                           ))}
+                          {!isCodexProvider && (
                           <div className="mt-1 border-t border-border/60 px-2 py-2">
                             <div className="flex items-start justify-between gap-3">
                               <div className="space-y-0.5">
@@ -1114,6 +1190,7 @@ const FloatingPromptInputInner = (
                               />
                             </div>
                           </div>
+                          )}
                         </div>
                       }
                       open={thinkingModePickerOpen}
@@ -1171,10 +1248,10 @@ const FloatingPromptInputInner = (
             />
           )}
 
-          <div className="px-2 py-0">
+          <div className="workspace-chrome-row py-0">
             <div className="flex items-center gap-0.5 min-h-8">
               {/* Model & Thinking Mode Selectors - Left side, fixed at bottom */}
-              <div className="flex items-center gap-0 shrink-0">
+              <div className="workspace-chip-icon-align flex items-center gap-0 shrink-0">
                 <Popover
                   trigger={
                     <Tooltip>
@@ -1259,35 +1336,41 @@ const FloatingPromptInputInner = (
                               disabled={disabled}
                               className="h-5 px-1 hover:bg-accent/50 gap-0.5"
                             >
-                              <span className={THINKING_MODES.find(m => m.id === selectedThinkingMode)?.color}>
-                                {THINKING_MODES.find(m => m.id === selectedThinkingMode)?.icon}
+                              <span className={selectedReasoningMode?.color}>
+                                {selectedReasoningMode?.icon}
                               </span>
                               <span className="text-[9px] font-semibold opacity-70">
-                                {THINKING_MODES.find(m => m.id === selectedThinkingMode)?.shortName}
+                                {selectedReasoningMode?.shortName}
                               </span>
                               <ChevronUp className="h-2 w-2 opacity-50" />
                             </Button>
                           </motion.div>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          <p className="text-xs font-medium">Thinking: {THINKING_MODES.find(m => m.id === selectedThinkingMode)?.name || "Auto"}</p>
-                          <p className="text-xs text-muted-foreground">{THINKING_MODES.find(m => m.id === selectedThinkingMode)?.description}</p>
+                          <p className="text-xs font-medium">{reasoningLabel}: {selectedReasoningMode?.name || "Auto"}</p>
+                          <p className="text-xs text-muted-foreground">{selectedReasoningMode?.description}</p>
                         </TooltipContent>
                       </Tooltip>
                   }
                 content={
                   <div className="w-[280px] p-1">
-                    {THINKING_MODES.map((mode) => (
+                    {(isCodexProvider ? CODEX_REASONING_MODES : THINKING_MODES).map((mode) => (
                       <button
                         key={mode.id}
                         onClick={() => {
-                          setSelectedThinkingMode(mode.id);
+                          if (isCodexProvider) {
+                            setSelectedCodexReasoningEffort(mode.id as CodexReasoningEffort);
+                          } else {
+                            setSelectedThinkingMode(mode.id as ThinkingMode);
+                          }
                           setThinkingModePickerOpen(false);
                         }}
                         className={cn(
                           "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
                           "hover:bg-accent",
-                          selectedThinkingMode === mode.id && "bg-accent"
+                          (isCodexProvider
+                            ? selectedCodexReasoningEffort === mode.id
+                            : selectedThinkingMode === mode.id) && "bg-accent"
                         )}
                       >
                         <span className={cn("mt-0.5", mode.color)}>
@@ -1304,6 +1387,7 @@ const FloatingPromptInputInner = (
                         <ThinkingModeIndicator level={mode.level} />
                       </button>
                     ))}
+                    {!isCodexProvider && (
                     <div className="mt-1 border-t border-border/60 px-2 py-2">
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-0.5">
@@ -1318,6 +1402,7 @@ const FloatingPromptInputInner = (
                         />
                       </div>
                     </div>
+                    )}
                   </div>
                 }
                 open={thinkingModePickerOpen}

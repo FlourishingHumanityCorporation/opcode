@@ -250,30 +250,51 @@ fn parse_which_output(raw: &str) -> Option<String> {
     Some(first_line.to_string())
 }
 
-fn resolve_iterm_probe_binary(app: &AppHandle) -> Result<String, String> {
-    if let Ok(output) = std::process::Command::new("which").arg("claude").output() {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Some(candidate) = parse_which_output(&stdout) {
-                if !crate::claude_binary::is_disallowed_claude_path(&candidate) {
-                    if candidate == "claude"
-                        || (PathBuf::from(&candidate).exists() && PathBuf::from(&candidate).is_file())
-                    {
-                        return Ok(candidate);
-                    }
-                }
+fn select_iterm_probe_binary(
+    which_candidate: Option<String>,
+    discovered_fallback: Option<String>,
+) -> Result<String, String> {
+    if let Some(candidate_raw) = which_candidate {
+        let candidate = candidate_raw.trim().to_string();
+        if !candidate.is_empty() && !crate::claude_binary::is_disallowed_claude_path(&candidate) {
+            if candidate == "claude" || (PathBuf::from(&candidate).exists() && PathBuf::from(&candidate).is_file())
+            {
+                return Ok(candidate);
             }
         }
     }
 
-    let discovered = find_claude_binary(app)?;
-    if crate::claude_binary::is_disallowed_claude_path(&discovered) {
-        return Err(
-            "Resolved Claude path points to a GUI app bundle. Please configure a CLI binary."
-                .to_string(),
-        );
+    if let Some(discovered) = discovered_fallback {
+        if crate::claude_binary::is_disallowed_claude_path(&discovered) {
+            return Err(
+                "Resolved Claude path points to a GUI app bundle. Please configure a CLI binary."
+                    .to_string(),
+            );
+        }
+        return Ok(discovered);
     }
-    Ok(discovered)
+
+    Err("Failed to resolve Claude CLI binary for iTerm benchmark.".to_string())
+}
+
+fn resolve_iterm_probe_binary(app: &AppHandle) -> Result<String, String> {
+    let which_candidate = if let Ok(output) = std::process::Command::new("which").arg("claude").output() {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            parse_which_output(&stdout)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    if let Ok(selected) = select_iterm_probe_binary(which_candidate.clone(), None) {
+        return Ok(selected);
+    }
+
+    let discovered = find_claude_binary(app)?;
+    select_iterm_probe_binary(which_candidate, Some(discovered))
 }
 
 async fn run_direct_probe(
@@ -653,5 +674,43 @@ pub async fn run_session_startup_probe(
             run_iterm_probe(project_path, model, timeout_ms, claude_path, args).await
         }
         _ => run_direct_probe(benchmark_kind, project_path, model, timeout_ms, claude_path, args).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_which_output, select_iterm_probe_binary};
+
+    #[test]
+    fn parse_which_output_handles_alias_format() {
+        let parsed = parse_which_output("claude: aliased to /opt/homebrew/bin/claude\n");
+        assert_eq!(parsed.as_deref(), Some("/opt/homebrew/bin/claude"));
+    }
+
+    #[test]
+    fn select_iterm_probe_binary_accepts_cli_command_name() {
+        let selected =
+            select_iterm_probe_binary(Some("claude".to_string()), Some("/tmp/unused".to_string())).unwrap();
+        assert_eq!(selected, "claude");
+    }
+
+    #[test]
+    fn select_iterm_probe_binary_falls_back_when_which_is_app_bundle() {
+        let selected = select_iterm_probe_binary(
+            Some("/Applications/Claude.app/Contents/MacOS/Claude".to_string()),
+            Some("/opt/homebrew/bin/claude".to_string()),
+        )
+        .unwrap();
+        assert_eq!(selected, "/opt/homebrew/bin/claude");
+    }
+
+    #[test]
+    fn select_iterm_probe_binary_rejects_disallowed_fallback() {
+        let error = select_iterm_probe_binary(
+            Some("/Applications/Claude.app/Contents/MacOS/Claude".to_string()),
+            Some("/Applications/Claude.app/Contents/MacOS/Claude".to_string()),
+        )
+        .unwrap_err();
+        assert!(error.contains("GUI app bundle"));
     }
 }

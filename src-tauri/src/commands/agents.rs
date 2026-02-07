@@ -1044,22 +1044,31 @@ fn build_provider_args(
     model: &str,
     system_prompt: Option<&str>,
 ) -> Vec<String> {
+    let model = model.trim();
+    let has_explicit_model = !model.is_empty() && !model.eq_ignore_ascii_case("default");
+
     match provider_id {
-        "claude" => vec![
-            "-p".to_string(),
-            task.to_string(),
-            "--system-prompt".to_string(),
-            system_prompt.unwrap_or("").to_string(),
-            "--model".to_string(),
-            model.to_string(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-            "--verbose".to_string(),
-            "--dangerously-skip-permissions".to_string(),
-        ],
+        "claude" => {
+            let mut args = vec![
+                "-p".to_string(),
+                task.to_string(),
+                "--system-prompt".to_string(),
+                system_prompt.unwrap_or("").to_string(),
+            ];
+            if has_explicit_model {
+                args.extend(["--model".to_string(), model.to_string()]);
+            }
+            args.extend([
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+                "--verbose".to_string(),
+                "--dangerously-skip-permissions".to_string(),
+            ]);
+            args
+        }
         "codex" => {
             let mut args = vec!["exec".to_string(), "--json".to_string(), task.to_string()];
-            if !model.is_empty() {
+            if has_explicit_model {
                 args.extend(["--model".to_string(), model.to_string()]);
             }
             args
@@ -1070,7 +1079,7 @@ fn build_provider_args(
                 task.to_string(),
                 "--yes".to_string(),
             ];
-            if !model.is_empty() {
+            if has_explicit_model {
                 args.extend(["--model".to_string(), model.to_string()]);
             }
             args
@@ -1084,7 +1093,7 @@ fn build_provider_args(
                 "--output-format".to_string(),
                 "stream-json".to_string(),
             ];
-            if !model.is_empty() {
+            if has_explicit_model {
                 args.extend(["--model".to_string(), model.to_string()]);
             }
             args
@@ -1098,14 +1107,14 @@ fn build_provider_args(
                 "--output-format".to_string(),
                 "stream-json".to_string(),
             ];
-            if !model.is_empty() {
+            if has_explicit_model {
                 args.extend(["--model".to_string(), model.to_string()]);
             }
             args
         }
         "opencode" => {
             let mut args = vec!["run".to_string(), task.to_string()];
-            if !model.is_empty() {
+            if has_explicit_model {
                 args.extend(["--model".to_string(), model.to_string()]);
             }
             args

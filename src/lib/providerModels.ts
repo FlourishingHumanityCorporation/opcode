@@ -8,36 +8,66 @@ export interface ProviderModelOption {
 const PROVIDER_MODEL_OPTIONS: Record<string, ProviderModelOption[]> = {
   claude: [
     {
+      id: "default",
+      name: "Default (recommended)",
+      shortName: "D",
+      description: "Opus 4.6 · Most capable for complex work",
+    },
+    {
       id: "sonnet",
-      name: "Claude 4 Sonnet",
+      name: "Sonnet",
       shortName: "S",
-      description: "Faster, efficient for most tasks",
+      description: "Sonnet 4.5 · Best for everyday tasks",
+    },
+    {
+      id: "haiku",
+      name: "Haiku",
+      shortName: "H",
+      description: "Haiku 4.5 · Fastest for quick answers",
     },
     {
       id: "opus",
-      name: "Claude 4 Opus",
+      name: "Opus",
       shortName: "O",
-      description: "More capable, better for complex tasks",
+      description: "Legacy Opus alias",
     },
   ],
   codex: [
+    {
+      id: "gpt-5.2-codex",
+      name: "GPT-5.2-Codex",
+      shortName: "5.2C",
+      description: "Codex specialized model",
+    },
+    {
+      id: "gpt-5.3-codex",
+      name: "GPT-5.3-Codex",
+      shortName: "5.3C",
+      description: "Latest Codex specialized model",
+    },
+    {
+      id: "gpt-5.1-codex-max",
+      name: "GPT-5.1-Codex-Max",
+      shortName: "5.1M",
+      description: "Higher-capacity Codex model",
+    },
+    {
+      id: "gpt-5.2",
+      name: "GPT-5.2",
+      shortName: "5.2",
+      description: "General-purpose GPT-5 model",
+    },
+    {
+      id: "gpt-5.1-codex-mini",
+      name: "GPT-5.1-Codex-Mini",
+      shortName: "5.1m",
+      description: "Lower-latency Codex model",
+    },
     {
       id: "",
       name: "Provider Default",
       shortName: "D",
       description: "Use the CLI's configured default model",
-    },
-    {
-      id: "gpt-5-codex",
-      name: "GPT-5 Codex",
-      shortName: "C5",
-      description: "Code-specialized model",
-    },
-    {
-      id: "gpt-5",
-      name: "GPT-5",
-      shortName: "G5",
-      description: "General-purpose GPT-5 model",
     },
   ],
   gemini: [
@@ -96,8 +126,12 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 const LEGACY_MODEL_LABELS: Record<string, string> = {
-  sonnet: "Claude 4 Sonnet",
-  opus: "Claude 4 Opus",
+  default: "Default (recommended)",
+  sonnet: "Sonnet",
+  haiku: "Haiku",
+  opus: "Opus",
+  "gpt-5-codex": "GPT-5-Codex (Legacy)",
+  "gpt-5": "GPT-5 (Legacy)",
 };
 
 export function getProviderModelOptions(providerId: string): ProviderModelOption[] {
@@ -114,17 +148,20 @@ export function getProviderModelOptions(providerId: string): ProviderModelOption
 }
 
 export function getDefaultModelForProvider(providerId: string): string {
+  if (providerId === "codex") {
+    return "gpt-5.3-codex";
+  }
   return getProviderModelOptions(providerId)[0]?.id ?? "";
 }
 
 export function getModelDisplayName(providerId: string, model: string): string {
-  if (!model) {
-    return "Provider Default";
-  }
-
   const known = getProviderModelOptions(providerId).find((option) => option.id === model);
   if (known) {
     return known.name;
+  }
+
+  if (!model) {
+    return "Provider Default";
   }
 
   return LEGACY_MODEL_LABELS[model] || model;

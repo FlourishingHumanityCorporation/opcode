@@ -54,7 +54,8 @@ export const PromptQueue: React.FC<PromptQueueProps> = React.memo(({
                 className="flex items-start gap-2 p-2 rounded-md bg-background/50"
               >
                 <div className="flex-shrink-0 mt-0.5">
-                  {queuedPrompt.model === "opus" ? (
+                  {(queuedPrompt.providerId || "claude") === "claude"
+                  && (queuedPrompt.model === "default" || queuedPrompt.model === "opus") ? (
                     <Sparkles className="h-3.5 w-3.5 text-purple-500" />
                   ) : (
                     <Zap className="h-3.5 w-3.5 text-amber-500" />
