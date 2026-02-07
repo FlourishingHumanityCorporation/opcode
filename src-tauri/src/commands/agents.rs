@@ -2532,6 +2532,7 @@ mod tests {
             "test task",
             "sonnet",
             Some("system prompt here"),
+            None,
         );
         assert_eq!(args[0], "-p");
         assert_eq!(args[1], "test task");
@@ -2543,7 +2544,7 @@ mod tests {
 
     #[test]
     fn build_provider_args_codex_contains_exec_json() {
-        let args = build_provider_args("codex", "refactor code", "gpt-5-codex", None);
+        let args = build_provider_args("codex", "refactor code", "gpt-5.3-codex", None, None);
         assert_eq!(
             args,
             vec![
@@ -2551,14 +2552,42 @@ mod tests {
                 "--json".to_string(),
                 "refactor code".to_string(),
                 "--model".to_string(),
-                "gpt-5-codex".to_string()
+                "gpt-5.3-codex".to_string()
             ]
         );
     }
 
     #[test]
+    fn build_provider_args_codex_includes_reasoning_effort() {
+        let args = build_provider_args(
+            "codex",
+            "refactor code",
+            "gpt-5.3-codex",
+            None,
+            Some("xhigh"),
+        );
+        assert!(args.contains(&"-c".to_string()));
+        assert!(args.contains(&"model_reasoning_effort=\"xhigh\"".to_string()));
+    }
+
+    #[test]
+    fn build_provider_args_codex_ignores_invalid_reasoning_effort() {
+        let args = build_provider_args(
+            "codex",
+            "refactor code",
+            "gpt-5.3-codex",
+            None,
+            Some("extra_high"),
+        );
+        assert!(!args.contains(&"-c".to_string()));
+        assert!(!args
+            .iter()
+            .any(|arg| arg.contains("model_reasoning_effort")));
+    }
+
+    #[test]
     fn build_provider_args_goose_uses_non_interactive_stream_mode() {
-        let args = build_provider_args("goose", "summarize repo", "gpt-5", None);
+        let args = build_provider_args("goose", "summarize repo", "gpt-5", None, None);
         assert_eq!(args[0], "run");
         assert_eq!(args[1], "--text");
         assert!(args.contains(&"--no-session".to_string()));
@@ -2569,7 +2598,7 @@ mod tests {
 
     #[test]
     fn build_provider_args_opencode_uses_run_command() {
-        let args = build_provider_args("opencode", "fix failing tests", "gpt-5", None);
+        let args = build_provider_args("opencode", "fix failing tests", "gpt-5", None, None);
         assert_eq!(args[0], "run");
         assert_eq!(args[1], "fix failing tests");
         assert!(args.contains(&"--model".to_string()));
