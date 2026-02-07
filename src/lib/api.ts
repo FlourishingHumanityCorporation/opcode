@@ -205,6 +205,7 @@ export interface ProviderRuntimeStatus {
 }
 
 export interface SessionStartupProbeResult {
+  benchmark_kind: "startup" | "assistant";
   provider_id: string;
   project_path: string;
   model: string;
@@ -214,6 +215,11 @@ export interface SessionStartupProbeResult {
   first_stdout_ms?: number | null;
   first_stderr_ms?: number | null;
   first_byte_ms?: number | null;
+  first_json_event_ms?: number | null;
+  first_assistant_message_ms?: number | null;
+  first_result_message_ms?: number | null;
+  stdout_json_lines: number;
+  stdout_parse_errors: number;
   stdout_bytes: number;
   stderr_bytes: number;
   exit_code?: number | null;
@@ -1147,6 +1153,7 @@ export const api = {
       prompt?: string;
       timeoutMs?: number;
       includePartialMessages?: boolean;
+      benchmarkKind?: "startup" | "assistant";
     }
   ): Promise<SessionStartupProbeResult> {
     return apiCall("run_session_startup_probe", {
@@ -1155,6 +1162,7 @@ export const api = {
       prompt: options?.prompt,
       timeoutMs: options?.timeoutMs,
       includePartialMessages: options?.includePartialMessages,
+      benchmarkKind: options?.benchmarkKind,
     });
   },
 

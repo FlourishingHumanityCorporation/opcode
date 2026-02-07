@@ -1,0 +1,139 @@
+name: Session Latency Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Number of benchmark runs per mode"
+        required: false
+        default: "3"
+      timeout_ms:
+        description: "Per-run timeout in milliseconds"
+        required: false
+        default: "90000"
+      model:
+        description: "Model alias/id to benchmark"
+        required: false
+        default: "sonnet"
+      startup_p95_ms:
+        description: "Fail threshold for first-byte startup p95"
+        required: false
+        default: "40000"
+      assistant_p95_ms:
+        description: "Fail threshold for first-assistant-message p95"
+        required: false
+        default: "50000"
+  schedule:
+    - cron: "0 9 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: session-latency-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: macos-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify required secret
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::error::Missing ANTHROPIC_API_KEY secret. Configure it in repository secrets."
+            exit 1
+          fi
+
+      - name: Install Claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Print benchmark configuration
+        run: |
+          RUNS="${{ github.event.inputs.runs }}"
+          TIMEOUT_MS="${{ github.event.inputs.timeout_ms }}"
+          MODEL="${{ github.event.inputs.model }}"
+          STARTUP_P95_MS="${{ github.event.inputs.startup_p95_ms }}"
+          ASSISTANT_P95_MS="${{ github.event.inputs.assistant_p95_ms }}"
+
+          RUNS="${RUNS:-3}"
+          TIMEOUT_MS="${TIMEOUT_MS:-90000}"
+          MODEL="${MODEL:-sonnet}"
+          STARTUP_P95_MS="${STARTUP_P95_MS:-40000}"
+          ASSISTANT_P95_MS="${ASSISTANT_P95_MS:-50000}"
+
+          echo "RUNS=${RUNS}" >> "$GITHUB_ENV"
+          echo "TIMEOUT_MS=${TIMEOUT_MS}" >> "$GITHUB_ENV"
+          echo "MODEL=${MODEL}" >> "$GITHUB_ENV"
+          echo "STARTUP_P95_MS=${STARTUP_P95_MS}" >> "$GITHUB_ENV"
+          echo "ASSISTANT_P95_MS=${ASSISTANT_P95_MS}" >> "$GITHUB_ENV"
+
+          echo "Benchmark config:"
+          echo "  runs=${RUNS}"
+          echo "  timeout_ms=${TIMEOUT_MS}"
+          echo "  model=${MODEL}"
+          echo "  startup_p95_ms=${STARTUP_P95_MS}"
+          echo "  assistant_p95_ms=${ASSISTANT_P95_MS}"
+
+      - name: Run startup benchmark gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/measure-session-startup.mjs \
+            --project "$GITHUB_WORKSPACE" \
+            --runs "$RUNS" \
+            --timeout-ms "$TIMEOUT_MS" \
+            --model "$MODEL" \
+            --benchmark-kind startup \
+            --fail-on-slow-ms "$STARTUP_P95_MS" \
+            --json | tee startup-probe.json
+
+      - name: Run assistant benchmark gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/measure-session-startup.mjs \
+            --project "$GITHUB_WORKSPACE" \
+            --runs "$RUNS" \
+            --timeout-ms "$TIMEOUT_MS" \
+            --model "$MODEL" \
+            --benchmark-kind assistant \
+            --fail-on-assistant-slow-ms "$ASSISTANT_P95_MS" \
+            --json | tee assistant-probe.json
+
+      - name: Summarize benchmark results
+        run: |
+          node -e '
+          const fs = require("node:fs");
+          const startup = JSON.parse(fs.readFileSync("startup-probe.json", "utf8"));
+          const assistant = JSON.parse(fs.readFileSync("assistant-probe.json", "utf8"));
+          const lines = [
+            "## Session Latency Benchmark",
+            "",
+            `- Startup first-byte p95: ${startup.aggregates.firstByte.p95Ms ?? "n/a"} ms`,
+            `- Startup first-byte p50: ${startup.aggregates.firstByte.p50Ms ?? "n/a"} ms`,
+            `- Assistant first-message p95: ${assistant.aggregates.firstAssistantMessage.p95Ms ?? "n/a"} ms`,
+            `- Assistant first-message p50: ${assistant.aggregates.firstAssistantMessage.p50Ms ?? "n/a"} ms`,
+            `- Startup timeout count: ${startup.aggregates.timeoutCount}`,
+            `- Assistant timeout count: ${assistant.aggregates.timeoutCount}`,
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+          '
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-latency-benchmark-${{ github.run_id }}
+          path: |
+            startup-probe.json
+            assistant-probe.json
+          retention-days: 14

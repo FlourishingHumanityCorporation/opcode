@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Columns2, MessageSquare, X } from 'lucide-react';
+import { Bot, Columns2, Terminal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { Tab, TerminalTab } from '@/contexts/TabContext';
@@ -93,12 +93,12 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
       onMouseDown={() => activatePane(workspace.id, terminal.id, paneId)}
       data-testid={`workspace-pane-${paneId}`}
     >
-      <div className="flex h-7 items-center justify-between border-b border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-surface)] px-2">
-        <div className="flex items-center gap-1 text-[11px] font-medium tracking-[0.01em] text-[var(--color-chrome-text)]">
+      <div className="workspace-chrome-row flex h-8 items-center justify-between border-b border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-surface)]">
+        <div className="flex items-center gap-1.5 text-[12px] leading-none font-medium tracking-[0.01em] text-[var(--color-chrome-text)]">
           {terminal.kind === 'agent' ? (
-            <Bot className="h-2.5 w-2.5" />
+            <Bot className="h-3.5 w-3.5" />
           ) : (
-            <MessageSquare className="h-2.5 w-2.5" />
+            <Terminal className="h-3.5 w-3.5" />
           )}
           <span className="truncate">{terminal.title}</span>
         </div>

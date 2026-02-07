@@ -74,7 +74,7 @@ export const DiagnosticsPanel: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleRunStartupProbe = async () => {
+  const runProbe = async (kind: 'startup' | 'assistant') => {
     if (!probeProjectPath) {
       setProbeError('No project path available in the active workspace.');
       return;
@@ -86,13 +86,14 @@ export const DiagnosticsPanel: React.FC = () => {
     logWorkspaceEvent({
       category: 'stream_watchdog',
       action: 'startup_probe_started',
-      payload: { projectPath: probeProjectPath },
+      payload: { projectPath: probeProjectPath, benchmarkKind: kind },
     });
 
     try {
       const result = await api.runSessionStartupProbe(probeProjectPath, {
         model: 'sonnet',
         timeoutMs: 45_000,
+        benchmarkKind: kind,
       });
       setProbeResult(result);
       logWorkspaceEvent({
@@ -107,12 +108,15 @@ export const DiagnosticsPanel: React.FC = () => {
         category: 'error',
         action: 'startup_probe_failed',
         message,
-        payload: { projectPath: probeProjectPath },
+        payload: { projectPath: probeProjectPath, benchmarkKind: kind },
       });
     } finally {
       setIsProbing(false);
     }
   };
+
+  const handleRunStartupProbe = () => runProbe('startup');
+  const handleRunAssistantBenchmark = () => runProbe('assistant');
 
   return (
     <div className="flex h-full flex-col">
@@ -133,6 +137,16 @@ export const DiagnosticsPanel: React.FC = () => {
           >
             <Activity className={`mr-1.5 h-4 w-4 ${isProbing ? 'animate-spin' : ''}`} />
             {isProbing ? 'Probing...' : 'Run Startup Probe'}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRunAssistantBenchmark}
+            disabled={isProbing || !probeProjectPath}
+            title={probeProjectPath || 'No project path available'}
+          >
+            <Activity className={`mr-1.5 h-4 w-4 ${isProbing ? 'animate-spin' : ''}`} />
+            {isProbing ? 'Probing...' : 'Run Assistant Benchmark'}
           </Button>
           <Button size="icon" variant="ghost" onClick={refresh} title="Refresh diagnostics">
             <RefreshCw className="h-4 w-4" />
@@ -170,6 +184,7 @@ export const DiagnosticsPanel: React.FC = () => {
             <div className="text-destructive">{probeError}</div>
           ) : probeResult ? (
             <div className="text-muted-foreground">
+              mode={probeResult.benchmark_kind} | firstAssistant={probeResult.first_assistant_message_ms ?? '-'}ms |
               firstByte={probeResult.first_byte_ms ?? '-'}ms | total={probeResult.total_ms}ms | exit=
               {probeResult.exit_code ?? 'null'} | timeout={probeResult.timed_out ? 'yes' : 'no'} | bytes(out/err)=
               {probeResult.stdout_bytes}/{probeResult.stderr_bytes}

@@ -128,52 +128,54 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ work
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background">
-      <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-[var(--color-chrome-border)]/90 bg-[var(--color-chrome-bg)] px-2">
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-hide">
-          {workspace.terminalTabs.map((terminal, index) => {
-            const isActive = terminal.id === activeTerminal.id;
-            return (
-              <motion.button
-                key={terminal.id}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => setActiveTerminalTab(workspace.id, terminal.id)}
-                onDoubleClick={() => handleRenameTerminal(terminal)}
-                className={cn(
-                  'group flex h-6 min-w-[132px] max-w-[280px] items-center gap-1 rounded-md border px-1.5 text-[11px] tracking-[0.01em]',
-                  isActive
-                    ? 'border-[var(--color-chrome-border)] bg-[var(--color-chrome-active)] text-[var(--color-chrome-text-active)] font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_1px_1px_rgba(0,0,0,0.05)]'
-                    : 'border-transparent bg-[var(--color-chrome-surface)] text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)] font-medium'
-                )}
-                data-testid={`terminal-tab-${terminal.id}`}
-              >
-                <Terminal className="h-2.5 w-2.5 shrink-0" />
-                <span className="truncate text-left">{getTerminalTitle(terminal, index)}</span>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className={cn('h-3.5 w-3.5 shrink-0 p-0', isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    closeTerminalTab(workspace.id, terminal.id);
-                  }}
+      <div className="workspace-chrome-band shrink-0">
+        <div className="workspace-chrome-row workspace-chrome-box flex h-9 items-center gap-0.5">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto scrollbar-hide">
+            {workspace.terminalTabs.map((terminal, index) => {
+              const isActive = terminal.id === activeTerminal.id;
+              return (
+                <motion.button
+                  key={terminal.id}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setActiveTerminalTab(workspace.id, terminal.id)}
+                  onDoubleClick={() => handleRenameTerminal(terminal)}
+                  className={cn(
+                    'group flex h-7 min-w-[132px] max-w-[280px] items-center gap-1.5 rounded-md border px-2.5 text-[12px] leading-none tracking-[0.01em]',
+                    isActive
+                      ? 'border-[var(--color-chrome-border)] bg-[var(--color-chrome-active)] text-[var(--color-chrome-text-active)] font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_1px_1px_rgba(0,0,0,0.05)]'
+                      : 'border-transparent bg-[var(--color-chrome-surface)] text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)] font-medium'
+                  )}
+                  data-testid={`terminal-tab-${terminal.id}`}
                 >
-                  <X className="h-2 w-2" />
-                </Button>
-              </motion.button>
-            );
-          })}
-        </div>
+                  <Terminal className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate text-left">{getTerminalTitle(terminal, index)}</span>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className={cn('h-4 w-4 shrink-0 p-0', isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closeTerminalTab(workspace.id, terminal.id);
+                    }}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </motion.button>
+              );
+            })}
+          </div>
 
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-6 w-6 shrink-0 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
-          onClick={handleCreateTerminal}
-          title="New terminal tab"
-          data-testid="workspace-new-terminal"
-        >
-          <Plus className="h-3 w-3" />
-        </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 shrink-0 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
+            onClick={handleCreateTerminal}
+            title="New terminal tab"
+            data-testid="workspace-new-terminal"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1">

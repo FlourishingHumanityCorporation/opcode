@@ -8,11 +8,13 @@ function parseArgs(argv) {
     projectPath: processCwd(),
     prompt: "Reply with exactly OK and nothing else.",
     model: "sonnet",
+    benchmarkKind: "startup",
     runs: 1,
     timeoutMs: 120_000,
     providerBinary: env.OPCODE_PROVIDER_BIN || "claude",
     includePartialMessages: false,
     failOnSlowMs: null,
+    failOnAssistantSlowMs: null,
     json: false,
   };
 
@@ -32,6 +34,11 @@ function parseArgs(argv) {
     }
     if (arg === "--model" && next) {
       config.model = next;
+      i += 1;
+      continue;
+    }
+    if (arg === "--benchmark-kind" && next) {
+      config.benchmarkKind = next === "assistant" ? "assistant" : "startup";
       i += 1;
       continue;
     }
@@ -59,6 +66,11 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (arg === "--fail-on-assistant-slow-ms" && next) {
+      config.failOnAssistantSlowMs = Math.max(1, Number.parseInt(next, 10) || 1);
+      i += 1;
+      continue;
+    }
     if (arg === "--json") {
       config.json = true;
       continue;
@@ -82,11 +94,13 @@ function printHelp() {
   console.log("  --project <path>                 Working directory for provider process");
   console.log("  --prompt <text>                  Prompt to run");
   console.log("  --model <id>                     Model id (default: sonnet)");
+  console.log("  --benchmark-kind <mode>          startup|assistant (default: startup)");
   console.log("  --runs <n>                       Number of runs (default: 1)");
   console.log("  --timeout-ms <ms>                Per-run timeout (default: 120000)");
   console.log("  --provider-bin <path|command>    Provider CLI binary (default: claude)");
   console.log("  --include-partial-messages       Add --include-partial-messages flag");
   console.log("  --fail-on-slow-ms <ms>           Exit non-zero if p95 first-byte exceeds ms");
+  console.log("  --fail-on-assistant-slow-ms <ms> Exit non-zero if p95 assistant-message exceeds ms");
   console.log("  --json                           Emit JSON summary");
   console.log("  --help                           Show this help");
 }
@@ -135,6 +149,31 @@ function resolveBinary(binary) {
   return binary;
 }
 
+function parseJsonLineMetrics(
+  line,
+  nowMs,
+  metrics
+) {
+  const trimmed = line.trim();
+  if (!trimmed) return;
+
+  try {
+    const event = JSON.parse(trimmed);
+    metrics.stdoutJsonLines += 1;
+    if (metrics.firstJsonEventMs === null) {
+      metrics.firstJsonEventMs = nowMs;
+    }
+    if (event?.type === "assistant" && metrics.firstAssistantMessageMs === null) {
+      metrics.firstAssistantMessageMs = nowMs;
+    }
+    if (event?.type === "result" && metrics.firstResultMessageMs === null) {
+      metrics.firstResultMessageMs = nowMs;
+    }
+  } catch {
+    metrics.stdoutParseErrors += 1;
+  }
+}
+
 function runOnce(config, runNumber) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
@@ -163,16 +202,35 @@ function runOnce(config, runNumber) {
     let firstStderrMs = null;
     let stdoutBytes = 0;
     let stderrBytes = 0;
+    let stdoutCarry = "";
     let timedOut = false;
+    const stdoutMetrics = {
+      firstJsonEventMs: null,
+      firstAssistantMessageMs: null,
+      firstResultMessageMs: null,
+      stdoutJsonLines: 0,
+      stdoutParseErrors: 0,
+    };
 
     const mark = (which, buffer) => {
+      const nowMs = Date.now() - startedAt;
       if (which === "stdout" && firstStdoutMs === null && buffer.length > 0) {
-        firstStdoutMs = Date.now() - startedAt;
+        firstStdoutMs = nowMs;
       }
       if (which === "stderr" && firstStderrMs === null && buffer.length > 0) {
-        firstStderrMs = Date.now() - startedAt;
+        firstStderrMs = nowMs;
       }
-      if (which === "stdout") stdoutBytes += buffer.length;
+      if (which === "stdout") {
+        stdoutBytes += buffer.length;
+        stdoutCarry += buffer.toString("utf8");
+        let newlineIndex = stdoutCarry.indexOf("\n");
+        while (newlineIndex >= 0) {
+          const line = stdoutCarry.slice(0, newlineIndex);
+          stdoutCarry = stdoutCarry.slice(newlineIndex + 1);
+          parseJsonLineMetrics(line, nowMs, stdoutMetrics);
+          newlineIndex = stdoutCarry.indexOf("\n");
+        }
+      }
       if (which === "stderr") stderrBytes += buffer.length;
     };
 
@@ -188,6 +246,9 @@ function runOnce(config, runNumber) {
       clearTimeout(timeoutHandle);
       const totalMs = Date.now() - startedAt;
       const firstByteMs = [firstStdoutMs, firstStderrMs].filter((value) => value !== null);
+      if (stdoutCarry.trim().length > 0) {
+        parseJsonLineMetrics(stdoutCarry, totalMs, stdoutMetrics);
+      }
       resolve({
         run: runNumber,
         exitCode: code,
@@ -197,6 +258,11 @@ function runOnce(config, runNumber) {
         firstStdoutMs,
         firstStderrMs,
         firstByteMs: firstByteMs.length > 0 ? Math.min(...firstByteMs) : null,
+        firstJsonEventMs: stdoutMetrics.firstJsonEventMs,
+        firstAssistantMessageMs: stdoutMetrics.firstAssistantMessageMs,
+        firstResultMessageMs: stdoutMetrics.firstResultMessageMs,
+        stdoutJsonLines: stdoutMetrics.stdoutJsonLines,
+        stdoutParseErrors: stdoutMetrics.stdoutParseErrors,
         stdoutBytes,
         stderrBytes,
       });
@@ -213,6 +279,11 @@ function runOnce(config, runNumber) {
         firstStdoutMs: null,
         firstStderrMs: null,
         firstByteMs: null,
+        firstJsonEventMs: null,
+        firstAssistantMessageMs: null,
+        firstResultMessageMs: null,
+        stdoutJsonLines: 0,
+        stdoutParseErrors: 0,
         stdoutBytes,
         stderrBytes,
         error: error.message,
@@ -235,6 +306,12 @@ async function main() {
   const firstByteValues = runs
     .map((run) => run.firstByteMs)
     .filter((value) => typeof value === "number");
+  const firstAssistantValues = runs
+    .map((run) => run.firstAssistantMessageMs)
+    .filter((value) => typeof value === "number");
+  const firstJsonValues = runs
+    .map((run) => run.firstJsonEventMs)
+    .filter((value) => typeof value === "number");
   const totalValues = runs.map((run) => run.totalMs).filter((value) => typeof value === "number");
   const timeoutCount = runs.filter((run) => run.timedOut).length;
   const successCount = runs.filter((run) => run.exitCode === 0 && !run.timedOut).length;
@@ -243,6 +320,7 @@ async function main() {
     config: {
       projectPath: config.projectPath,
       model: config.model,
+      benchmarkKind: config.benchmarkKind,
       runs: config.runs,
       timeoutMs: config.timeoutMs,
       providerBinary: config.providerBinary,
@@ -253,6 +331,8 @@ async function main() {
       successCount,
       timeoutCount,
       firstByte: stats(firstByteValues),
+      firstJsonEvent: stats(firstJsonValues),
+      firstAssistantMessage: stats(firstAssistantValues),
       totalDuration: stats(totalValues),
     },
   };
@@ -262,16 +342,16 @@ async function main() {
   } else {
     console.log("Session Startup Probe");
     console.log(
-      `binary=${config.providerBinary} model=${config.model} runs=${config.runs} timeoutMs=${config.timeoutMs}`
+      `binary=${config.providerBinary} model=${config.model} mode=${config.benchmarkKind} runs=${config.runs} timeoutMs=${config.timeoutMs}`
     );
     console.log(`project=${config.projectPath}`);
     runs.forEach((run) => {
       console.log(
-        `run=${run.run} firstByteMs=${run.firstByteMs ?? "n/a"} totalMs=${run.totalMs} exit=${run.exitCode ?? "null"} signal=${run.signal ?? "none"} timeout=${run.timedOut}`
+        `run=${run.run} firstByteMs=${run.firstByteMs ?? "n/a"} firstAssistantMs=${run.firstAssistantMessageMs ?? "n/a"} totalMs=${run.totalMs} exit=${run.exitCode ?? "null"} signal=${run.signal ?? "none"} timeout=${run.timedOut}`
       );
     });
     console.log(
-      `summary: success=${successCount}/${config.runs} timeouts=${timeoutCount} firstByteP50=${summary.aggregates.firstByte.p50Ms ?? "n/a"}ms firstByteP95=${summary.aggregates.firstByte.p95Ms ?? "n/a"}ms`
+      `summary: success=${successCount}/${config.runs} timeouts=${timeoutCount} firstByteP95=${summary.aggregates.firstByte.p95Ms ?? "n/a"}ms firstAssistantP95=${summary.aggregates.firstAssistantMessage.p95Ms ?? "n/a"}ms`
     );
   }
 
@@ -282,6 +362,16 @@ async function main() {
         `FAIL: first-byte latency gate failed (p95=${p95 ?? "n/a"}ms, timeoutCount=${timeoutCount}, max=${config.failOnSlowMs}ms)`
       );
       exit(2);
+    }
+  }
+
+  if (config.failOnAssistantSlowMs !== null) {
+    const p95 = summary.aggregates.firstAssistantMessage.p95Ms;
+    if (timeoutCount > 0 || p95 === null || p95 > config.failOnAssistantSlowMs) {
+      console.error(
+        `FAIL: assistant-message latency gate failed (p95=${p95 ?? "n/a"}ms, timeoutCount=${timeoutCount}, max=${config.failOnAssistantSlowMs}ms)`
+      );
+      exit(3);
     }
   }
 }

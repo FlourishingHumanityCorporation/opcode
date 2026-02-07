@@ -22,6 +22,8 @@
     "debug:session-start": "node scripts/measure-session-startup.mjs",
     "debug:session-start:json": "node scripts/measure-session-startup.mjs --json",
     "debug:session-start:gate": "node scripts/measure-session-startup.mjs --runs 3 --fail-on-slow-ms 5000",
+    "debug:assistant-benchmark:json": "node scripts/measure-session-startup.mjs --benchmark-kind assistant --json",
+    "debug:assistant-benchmark:gate": "node scripts/measure-session-startup.mjs --runs 3 --benchmark-kind assistant --fail-on-assistant-slow-ms 50000",
     "smoke:ui": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts",
     "smoke:ui:headed": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts --headed"
   },

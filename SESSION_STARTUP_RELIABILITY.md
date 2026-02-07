@@ -54,8 +54,9 @@ Observed:
 Use this every time latency is reported:
 
 1. In app:
-   - Open utility rail -> Diagnostics -> `Run Startup Probe`.
-   - This executes a real startup probe against the active workspace project path.
+   - Open utility rail -> Diagnostics.
+   - Use `Run Startup Probe` for first-output timing.
+   - Use `Run Assistant Benchmark` for first assistant-message timing.
    - Results are shown in `Latest Probe` and logged into diagnostics timeline.
 
 2. CLI baseline probe:
@@ -80,8 +81,12 @@ npm run debug:session-start:gate
 ## CI/Automation Recommendation
 
 1. Keep mocked Playwright smoke tests for deterministic UI behavior.
-2. Add a non-blocking nightly job that runs `debug:session-start` on a provisioned machine with valid provider auth.
-3. Alert on first-byte `p95` drift over a configured threshold.
+2. Use `.github/workflows/session-latency-benchmark.yml` for scheduled + manual probe runs.
+3. Configure repository secret: `ANTHROPIC_API_KEY`.
+4. The workflow runs both:
+   - startup first-byte gate,
+   - assistant first-message gate.
+5. JSON outputs are uploaded as workflow artifacts (`startup-probe.json`, `assistant-probe.json`).
 
 ## Notes
 

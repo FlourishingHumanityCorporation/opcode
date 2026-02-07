@@ -22,7 +22,7 @@ const ProjectTabItem: React.FC<ProjectTabItemProps> = ({ tab, isActive, onClick,
       value={tab}
       id={tab.id}
       className={cn(
-        'group flex h-7 min-w-[164px] max-w-[280px] items-center gap-1.5 rounded-md border px-2 text-[12px] tracking-[0.01em]',
+        'group flex h-7 min-w-[164px] max-w-[280px] items-center gap-1.5 rounded-md border px-2.5 text-[12px] leading-none tracking-[0.01em]',
         'cursor-pointer select-none transition-colors',
         isActive
           ? 'border-[var(--color-chrome-border)] bg-[var(--color-chrome-active)] text-[var(--color-chrome-text-active)] font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_1px_1px_rgba(0,0,0,0.05)]'
@@ -31,7 +31,7 @@ const ProjectTabItem: React.FC<ProjectTabItemProps> = ({ tab, isActive, onClick,
       onClick={() => onClick(tab.id)}
       data-testid={`workspace-tab-${tab.id}`}
     >
-      <Folder className="h-3 w-3 shrink-0" />
+      <Folder className="h-3.5 w-3.5 shrink-0" />
       <span className="min-w-0 flex-1 truncate text-left">{tab.title || 'Project'}</span>
       <button
         className={cn(
@@ -44,7 +44,7 @@ const ProjectTabItem: React.FC<ProjectTabItemProps> = ({ tab, isActive, onClick,
         }}
         aria-label={`Close ${tab.title}`}
       >
-        <X className="h-2.5 w-2.5" />
+        <X className="h-3 w-3" />
       </button>
     </Reorder.Item>
   );
@@ -145,7 +145,7 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
   };
 
   return (
-    <div className={cn('relative flex h-10 items-center border-b border-[var(--color-chrome-border)]/90 bg-[var(--color-chrome-bg)] px-2', className)}>
+    <div className={cn('workspace-chrome-row relative flex h-10 items-center border-b border-[var(--color-chrome-border)]/90 bg-[var(--color-chrome-bg)]', className)}>
       <AnimatePresence>
         {showLeftScroll && (
           <motion.button

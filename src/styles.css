@@ -170,6 +170,9 @@ html {
   /* Transitions */
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* Shared chrome layout */
+  --workspace-inline-gutter: 0.625rem;
 }
 
 /* Theme Variations */
@@ -296,6 +299,26 @@ html {
   /* Additional colors for status messages */
   --color-green-500: oklch(0.55 0.25 142);
   --color-green-600: oklch(0.47 0.27 142);
+}
+
+/* Shared inset for workspace chrome rows (tab strips / pane headers) */
+.workspace-chrome-row {
+  padding-left: var(--workspace-inline-gutter);
+  padding-right: var(--workspace-inline-gutter);
+}
+
+/* Banded chrome section with an inner boxed row */
+.workspace-chrome-band {
+  border-bottom: 1px solid var(--color-chrome-border);
+  background: var(--color-chrome-bg);
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.workspace-chrome-box {
+  border: 1px solid var(--color-chrome-border);
+  border-radius: var(--radius-md);
+  background: var(--color-chrome-surface);
 }
 
 /* Custom Theme - CSS variables will be set dynamically by ThemeContext */

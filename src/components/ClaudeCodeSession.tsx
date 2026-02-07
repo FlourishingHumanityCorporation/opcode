@@ -1793,7 +1793,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             />
           ) : (
             // Original layout when no preview
-            <div className={cn("h-full flex flex-col", embedded ? "px-2" : "max-w-6xl mx-auto px-6")}>
+            <div className={cn("h-full flex flex-col", embedded ? "workspace-chrome-row" : "max-w-6xl mx-auto px-6")}>
               {projectPathInput}
               {messagesList}
               
