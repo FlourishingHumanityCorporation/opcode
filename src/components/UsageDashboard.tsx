@@ -489,86 +489,86 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
       : 0;
     
     return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-        <Card className="min-w-0 p-4 shimmer-hover">
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <Card className="min-w-0 rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-3.5 shadow-none shimmer-hover">
           <div>
-            <p className="text-caption text-muted-foreground">Total Cost</p>
-            <p className="text-display-2 mt-1 truncate">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.045em] text-muted-foreground">Total Cost</p>
+            <p className="mt-1 truncate text-[1.75rem] font-semibold leading-none tracking-tight text-foreground">
               {formatCurrency(stats.total_cost)}
             </p>
-            <p className="mt-1 text-caption text-muted-foreground">
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
               Includes cache-adjusted pricing
             </p>
           </div>
         </Card>
 
-        <Card className="min-w-0 p-4 shimmer-hover">
+        <Card className="min-w-0 rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-3.5 shadow-none shimmer-hover">
           <div>
-            <p className="text-caption text-muted-foreground">Total Sessions</p>
-            <p className="text-display-2 mt-1 truncate">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.045em] text-muted-foreground">Total Sessions</p>
+            <p className="mt-1 truncate text-[1.75rem] font-semibold leading-none tracking-tight text-foreground">
               {formatNumber(stats.total_sessions)}
             </p>
-            <p className="mt-1 text-caption text-muted-foreground">
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
               Unique session IDs
             </p>
           </div>
         </Card>
 
-        <Card className="min-w-0 p-4 shimmer-hover">
+        <Card className="min-w-0 rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-3.5 shadow-none shimmer-hover">
           <div>
-            <p className="text-caption text-muted-foreground">Non-Cache Tokens</p>
-            <p className="text-display-2 mt-1 truncate">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.045em] text-muted-foreground">Non-Cache Tokens</p>
+            <p className="mt-1 truncate text-[1.75rem] font-semibold leading-none tracking-tight text-foreground">
               {formatTokens(nonCacheTokens)}
             </p>
-            <p className="mt-1 text-caption text-muted-foreground">
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
               Input + output ({100 - cacheShare}% of total)
             </p>
           </div>
         </Card>
 
-        <Card className="min-w-0 p-4 shimmer-hover">
+        <Card className="min-w-0 rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-3.5 shadow-none shimmer-hover">
           <div>
-            <p className="text-caption text-muted-foreground">Cache Tokens</p>
-            <p className="text-display-2 mt-1 truncate">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.045em] text-muted-foreground">Cache Tokens</p>
+            <p className="mt-1 truncate text-[1.75rem] font-semibold leading-none tracking-tight text-foreground">
               {formatTokens(cacheTokens)}
             </p>
-            <p className="mt-1 text-caption text-muted-foreground">
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
               Cache write + read ({cacheShare}% of total)
             </p>
           </div>
         </Card>
 
-        <Card className="min-w-0 p-4 shimmer-hover">
+        <Card className="min-w-0 rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-3.5 shadow-none shimmer-hover">
           <div>
-            <p className="text-caption text-muted-foreground">Total Tokens (incl cache)</p>
-            <p className="text-display-2 mt-1 truncate">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.045em] text-muted-foreground">Total Tokens (Incl Cache)</p>
+            <p className="mt-1 truncate text-[1.75rem] font-semibold leading-none tracking-tight text-foreground">
               {formatTokens(stats.total_tokens)}
             </p>
-            <p className="mt-1 text-caption text-muted-foreground">
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
               Non-cache + cache combined
             </p>
           </div>
         </Card>
 
-        <Card className="min-w-0 p-4 shimmer-hover">
+        <Card className="min-w-0 rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-3.5 shadow-none shimmer-hover">
           <div>
-            <p className="text-caption text-muted-foreground">Avg Cost/Session</p>
-            <p className="text-display-2 mt-1 truncate">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.045em] text-muted-foreground">Avg Cost / Session</p>
+            <p className="mt-1 truncate text-[1.75rem] font-semibold leading-none tracking-tight text-foreground">
               {formatCurrency(
                 stats.total_sessions > 0 
                   ? stats.total_cost / stats.total_sessions 
                   : 0
               )}
             </p>
-            <p className="mt-1 text-caption text-muted-foreground">
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
               Cost / unique session
             </p>
           </div>
         </Card>
       </div>
 
-        <Card className="border-border/80 bg-muted/20 p-4">
+        <Card className="rounded-md border-[var(--color-chrome-border)]/80 bg-muted/20 p-3.5 shadow-none">
           <div className="flex items-start gap-2">
             <Info className="mt-0.5 h-4 w-4 text-muted-foreground" />
             <div className="space-y-1">
@@ -614,8 +614,8 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
     return stats.by_project.slice(0, 3).map((project) => (
       <div key={project.project_path} className="flex items-center justify-between">
         <div className="flex flex-col">
-          <span className="text-body-small font-medium truncate max-w-[200px]" title={project.project_path}>
-            {project.project_path}
+          <span className="text-body-small font-medium truncate max-w-[220px]" title={project.project_path}>
+            {project.project_path.split('/').slice(-2).join('/') || project.project_name || 'Unknown project'}
           </span>
           <span className="text-caption text-muted-foreground">
             {project.session_count} sessions
@@ -652,27 +652,29 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
     <div className="h-full overflow-y-auto overflow-x-hidden">
       <div className="mx-auto flex h-full w-full max-w-6xl flex-col">
         {/* Header */}
-        <div className="p-6 pb-4">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <div className="px-5 pb-3 pt-5">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
             <div className="min-w-0">
-              <h1 className="text-heading-1">Usage Dashboard</h1>
-              <p className="mt-1 text-body-small text-muted-foreground">
+              <h1 className="text-3xl font-semibold tracking-tight text-foreground">Usage Dashboard</h1>
+              <p className="mt-1 text-[1.1rem] text-muted-foreground">
                 Track your Claude Code usage and costs
               </p>
             </div>
             {/* Date Range Filter */}
-            <div className="flex flex-col gap-2 xl:items-end">
+            <div className="flex flex-col gap-1.5 xl:items-end">
               <div className="flex items-center gap-2 text-muted-foreground">
-                <Filter className="h-4 w-4" />
-                <span className="text-caption">Date Range</span>
+                <Filter className="h-3.5 w-3.5" />
+                <span className="text-xs font-medium">Date Range</span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-[var(--color-chrome-border)] bg-[var(--color-chrome-surface)] p-1">
                 {(["7d", "30d", "all"] as const).map((range) => (
                   <Button
                     key={range}
-                    variant={selectedDateRange === range ? "default" : "outline"}
+                    variant="ghost"
                     size="sm"
-                    className="min-w-[7.5rem] justify-center"
+                    className={selectedDateRange === range
+                      ? "h-8 min-w-[6.5rem] justify-center rounded-md border border-[var(--color-chrome-border)] bg-background px-3 text-xs font-medium text-foreground shadow-xs"
+                      : "h-8 min-w-[6.5rem] justify-center rounded-md px-3 text-xs font-medium text-muted-foreground hover:bg-background/70 hover:text-foreground"}
                     onClick={() => setSelectedDateRange(range)}
                     disabled={loading}
                   >
@@ -685,19 +687,19 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto px-5 pb-5">
           {(usageIndexStatus || usageIndexError) && (
-            <div className="mb-4 rounded-lg border border-border bg-card p-3">
-              <div className="flex items-start justify-between gap-4">
+            <div className="mb-3 rounded-md border border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-2.5 shadow-none">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium">
+                  <p className="text-xs font-semibold tracking-[0.01em]">
                     {usageIndexStatus?.state === "indexing"
                       ? "Indexing usage history..."
                       : usageIndexStatus?.state === "error"
                         ? "Usage index error"
                         : "Usage index ready"}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
                     {usageIndexStatus?.state === "error" && usageIndexStatus.last_error
                       ? usageIndexStatus.last_error
                       : usageIndexError
@@ -709,23 +711,23 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                           : "No completed sync yet"}
                   </p>
                   {(usageIndexStatus?.state === "error" || usageIndexError) && (
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
                       Log: ~/.opcode-usage-debug.log
                     </p>
                   )}
                   {usageIndexStatus?.current_file && usageIndexStatus.state === "indexing" && (
-                    <p className="mt-1 max-w-full truncate text-xs text-muted-foreground" title={usageIndexStatus.current_file}>
+                    <p className="mt-0.5 max-w-full truncate text-[11px] text-muted-foreground" title={usageIndexStatus.current_file}>
                       {usageIndexStatus.current_file}
                     </p>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   {usageIndexStatus?.state === "indexing" ? (
-                    <Button size="sm" variant="outline" onClick={() => void cancelUsageIndexSync()}>
+                    <Button size="sm" variant="outline" className="h-7 px-2.5 text-[11px]" onClick={() => void cancelUsageIndexSync()}>
                       Cancel
                     </Button>
                   ) : (
-                    <Button size="sm" variant="outline" onClick={() => void startUsageIndexSync()}>
+                    <Button size="sm" variant="outline" className="h-7 px-2.5 text-[11px]" onClick={() => void startUsageIndexSync()}>
                       Refresh
                     </Button>
                   )}
@@ -746,7 +748,7 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
               </Button>
             </div>
           ) : stats ? (
-            <div className="space-y-6">
+            <div className="space-y-4">
               {stats.total_sessions === 0 && usageIndexStatus?.state === "indexing" && (
                 <Card className="p-4">
                   <p className="text-sm text-muted-foreground">Indexing usage history...</p>
@@ -764,44 +766,44 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                   void loadSessionStats();
                 }
               }} className="w-full">
-                <TabsList className="mb-6 grid h-auto w-full grid-cols-2 gap-1 p-1 sm:grid-cols-3 lg:grid-cols-5">
-                  <TabsTrigger value="overview" className="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">Overview</TabsTrigger>
-                  <TabsTrigger value="models" className="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">By Model</TabsTrigger>
-                  <TabsTrigger value="projects" className="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">By Project</TabsTrigger>
-                  <TabsTrigger value="sessions" className="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">By Session</TabsTrigger>
-                  <TabsTrigger value="timeline" className="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">Timeline</TabsTrigger>
+                <TabsList className="mb-3 grid h-auto w-full grid-cols-2 gap-1 rounded-md border border-[var(--color-chrome-border)]/80 p-0.5 shadow-none sm:grid-cols-3 lg:grid-cols-5">
+                  <TabsTrigger value="overview" className="px-2 py-1.5 text-xs sm:px-3 sm:text-sm">Overview</TabsTrigger>
+                  <TabsTrigger value="models" className="px-2 py-1.5 text-xs sm:px-3 sm:text-sm">By Model</TabsTrigger>
+                  <TabsTrigger value="projects" className="px-2 py-1.5 text-xs sm:px-3 sm:text-sm">By Project</TabsTrigger>
+                  <TabsTrigger value="sessions" className="px-2 py-1.5 text-xs sm:px-3 sm:text-sm">By Session</TabsTrigger>
+                  <TabsTrigger value="timeline" className="px-2 py-1.5 text-xs sm:px-3 sm:text-sm">Timeline</TabsTrigger>
                 </TabsList>
 
                 {/* Overview Tab */}
-                <TabsContent value="overview" className="space-y-6 mt-6">
-                  <Card className="p-6">
+                <TabsContent value="overview" className="mt-3 space-y-3">
+                  <Card className="rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-4 shadow-none">
                     <h3 className="text-label mb-2">Token Breakdown</h3>
                     <p className="mb-4 text-xs text-muted-foreground">
                       Input/output are fresh model work. Cache write/read are reused prompt-context paths.
                     </p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                       <div>
                         <p className="text-caption text-muted-foreground">Input Tokens</p>
-                        <p className="text-heading-4">{formatTokens(stats.total_input_tokens)}</p>
+                        <p className="text-xl font-semibold leading-none tracking-tight">{formatTokens(stats.total_input_tokens)}</p>
                       </div>
                       <div>
                         <p className="text-caption text-muted-foreground">Output Tokens</p>
-                        <p className="text-heading-4">{formatTokens(stats.total_output_tokens)}</p>
+                        <p className="text-xl font-semibold leading-none tracking-tight">{formatTokens(stats.total_output_tokens)}</p>
                       </div>
                       <div>
                         <p className="text-caption text-muted-foreground">Cache Write</p>
-                        <p className="text-heading-4">{formatTokens(stats.total_cache_creation_tokens)}</p>
+                        <p className="text-xl font-semibold leading-none tracking-tight">{formatTokens(stats.total_cache_creation_tokens)}</p>
                       </div>
                       <div>
                         <p className="text-caption text-muted-foreground">Cache Read</p>
-                        <p className="text-heading-4">{formatTokens(stats.total_cache_read_tokens)}</p>
+                        <p className="text-xl font-semibold leading-none tracking-tight">{formatTokens(stats.total_cache_read_tokens)}</p>
                       </div>
                     </div>
                   </Card>
 
                   {/* Quick Stats */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Card className="p-6">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <Card className="rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-4 shadow-none">
                       <h3 className="text-label mb-2">Most Used Models</h3>
                       <p className="mb-4 text-xs text-muted-foreground">
                         Session counts are unique per model and are not additive across models.
@@ -811,7 +813,7 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                       </div>
                     </Card>
 
-                    <Card className="p-6">
+                    <Card className="rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-4 shadow-none">
                       <h3 className="text-label mb-4">Top Projects</h3>
                       <div className="space-y-3">
                         {topProjects}
@@ -821,10 +823,10 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                 </TabsContent>
 
                 {/* Models Tab - Lazy render and cache */}
-                <TabsContent value="models" className="space-y-6 mt-6">
+                <TabsContent value="models" className="mt-3 space-y-3">
                   {hasLoadedTabs.has("models") && stats && (
                     <div style={{ display: activeTab === "models" ? "block" : "none" }}>
-                      <Card className="p-6">
+                      <Card className="rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-4 shadow-none">
                         <h3 className="text-sm font-semibold mb-1">Usage by Model</h3>
                         <p className="mb-4 text-xs text-muted-foreground">
                           A single session can appear under multiple models if it switched models.
@@ -875,10 +877,10 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                 </TabsContent>
 
                 {/* Projects Tab - Lazy render and cache */}
-                <TabsContent value="projects" className="space-y-6 mt-6">
+                <TabsContent value="projects" className="mt-3 space-y-3">
                   {hasLoadedTabs.has("projects") && stats && (
                     <div style={{ display: activeTab === "projects" ? "block" : "none" }}>
-                      <Card className="p-6">
+                      <Card className="rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-4 shadow-none">
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-sm font-semibold">Usage by Project</h3>
                         <span className="text-xs text-muted-foreground">
@@ -963,10 +965,10 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                 </TabsContent>
 
                 {/* Sessions Tab - Lazy render and cache */}
-                <TabsContent value="sessions" className="space-y-6 mt-6">
+                <TabsContent value="sessions" className="mt-3 space-y-3">
                   {hasLoadedTabs.has("sessions") && (
                     <div style={{ display: activeTab === "sessions" ? "block" : "none" }}>
-                      <Card className="p-6">
+                      <Card className="rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-4 shadow-none">
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-sm font-semibold">Usage by Session</h3>
                         {sessionStats && sessionStats.length > 0 && (
@@ -1068,10 +1070,10 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                 </TabsContent>
 
                 {/* Timeline Tab - Lazy render and cache */}
-                <TabsContent value="timeline" className="space-y-6 mt-6">
+                <TabsContent value="timeline" className="mt-3 space-y-3">
                   {hasLoadedTabs.has("timeline") && stats && (
                     <div style={{ display: activeTab === "timeline" ? "block" : "none" }}>
-                      <Card className="p-6">
+                      <Card className="rounded-md border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-active)] p-4 shadow-none">
                       <h3 className="text-sm font-semibold mb-6 flex items-center space-x-2">
                         <Calendar className="h-4 w-4" />
                         <span>Daily Usage</span>
