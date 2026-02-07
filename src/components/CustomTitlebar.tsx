@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Minus, Square, X, Bot, BarChart3, FileText, Network, Info, MoreVertical } from 'lucide-react';
+import { Settings, Minus, Square, X, Bot, BarChart3, FileText, Network, Info, MoreVertical, Bug } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { TooltipProvider, TooltipSimple } from '@/components/ui/tooltip-modern';
+import { logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 
 interface CustomTitlebarProps {
   onSettingsClick?: () => void;
@@ -10,6 +11,7 @@ interface CustomTitlebarProps {
   onUsageClick?: () => void;
   onClaudeClick?: () => void;
   onMCPClick?: () => void;
+  onDiagnosticsClick?: () => void;
   onInfoClick?: () => void;
 }
 
@@ -19,11 +21,14 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
   onUsageClick,
   onClaudeClick,
   onMCPClick,
+  onDiagnosticsClick,
   onInfoClick
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const actionButtonClass = "p-1 rounded-md text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)] transition-colors tauri-no-drag";
+  const menuItemClass = "w-full px-3 py-1 text-left text-[12px] font-medium tracking-[0.01em] text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)] transition-colors flex items-center gap-2";
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -75,14 +80,14 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
   return (
     <TooltipProvider>
     <div 
-      className="relative z-[200] h-11 bg-background/95 backdrop-blur-sm flex items-center justify-between select-none border-b border-border/50 tauri-drag"
+      className="relative z-[200] h-10 bg-[var(--color-chrome-bg)] backdrop-blur-sm flex items-center justify-between select-none border-b border-[var(--color-chrome-border)] tauri-drag"
       data-tauri-drag-region
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       {/* Left side - macOS Traffic Light buttons */}
-      <div className="flex items-center space-x-2 pl-5">
-        <div className="flex items-center space-x-2">
+      <div className="flex items-center space-x-1.5 pl-3">
+        <div className="flex items-center space-x-1.5">
           {/* Close button */}
           <button
             onClick={(e) => {
@@ -136,20 +141,20 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
       </div> */}
 
       {/* Right side - Navigation icons with improved spacing */}
-      <div className="flex items-center pr-5 gap-3 tauri-no-drag">
+      <div className="flex items-center pr-3 gap-1.5 tauri-no-drag">
         {/* Primary actions group */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           {onAgentsClick && (
             <TooltipSimple content="Agents" side="bottom">
               <motion.button
                 onClick={onAgentsClick}
                 whileTap={{ scale: 0.97 }}
                 transition={{ duration: 0.15 }}
-                className="p-2 rounded-md hover:bg-accent hover:text-accent-foreground transition-colors tauri-no-drag"
+                className={actionButtonClass}
                 aria-label="Agents"
                 data-testid="titlebar-agents-button"
               >
-                <Bot size={16} />
+                <Bot size={13} />
               </motion.button>
             </TooltipSimple>
           )}
@@ -157,33 +162,48 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
           {onUsageClick && (
             <TooltipSimple content="Usage Dashboard" side="bottom">
               <motion.button
-                onClick={onUsageClick}
+                onClick={() => {
+                  logWorkspaceEvent({
+                    category: 'state_action',
+                    action: 'titlebar_usage_click',
+                  });
+                  try {
+                    onUsageClick();
+                  } catch (error) {
+                    logWorkspaceEvent({
+                      category: 'error',
+                      action: 'titlebar_usage_click_failed',
+                      message: error instanceof Error ? error.message : String(error),
+                    });
+                    throw error;
+                  }
+                }}
                 whileTap={{ scale: 0.97 }}
                 transition={{ duration: 0.15 }}
-                className="p-2 rounded-md hover:bg-accent hover:text-accent-foreground transition-colors tauri-no-drag"
+                className={actionButtonClass}
                 aria-label="Usage Dashboard"
               >
-                <BarChart3 size={16} />
+                <BarChart3 size={13} />
               </motion.button>
             </TooltipSimple>
           )}
         </div>
 
         {/* Visual separator */}
-        <div className="w-px h-5 bg-border/50" />
+        <div className="w-px h-3.5 bg-[var(--color-chrome-border)]" />
 
         {/* Secondary actions group */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           {onSettingsClick && (
             <TooltipSimple content="Settings" side="bottom">
               <motion.button
                 onClick={onSettingsClick}
                 whileTap={{ scale: 0.97 }}
                 transition={{ duration: 0.15 }}
-                className="p-2 rounded-md hover:bg-accent hover:text-accent-foreground transition-colors tauri-no-drag"
+                className={actionButtonClass}
                 aria-label="Settings"
               >
-                <Settings size={16} />
+                <Settings size={13} />
               </motion.button>
             </TooltipSimple>
           )}
@@ -195,15 +215,15 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                 whileTap={{ scale: 0.97 }}
                 transition={{ duration: 0.15 }}
-                className="p-2 rounded-md hover:bg-accent hover:text-accent-foreground transition-colors flex items-center gap-1"
+                className={actionButtonClass}
                 aria-label="More options"
               >
-                <MoreVertical size={16} />
+                <MoreVertical size={13} />
               </motion.button>
             </TooltipSimple>
 
             {isDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-48 bg-popover border border-border rounded-lg shadow-lg z-[250]">
+              <div className="absolute right-0 mt-2 w-48 bg-[var(--color-chrome-surface)] border border-[var(--color-chrome-border)] rounded-lg shadow-lg z-[250]">
                 <div className="py-1">
                   {onClaudeClick && (
                     <button
@@ -211,9 +231,9 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
                         onClaudeClick();
                         setIsDropdownOpen(false);
                       }}
-                      className="w-full px-4 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground transition-colors flex items-center gap-3"
+                      className={menuItemClass}
                     >
-                      <FileText size={14} />
+                      <FileText size={12} />
                       <span>CLAUDE.md</span>
                     </button>
                   )}
@@ -224,9 +244,9 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
                         onMCPClick();
                         setIsDropdownOpen(false);
                       }}
-                      className="w-full px-4 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground transition-colors flex items-center gap-3"
+                      className={menuItemClass}
                     >
-                      <Network size={14} />
+                      <Network size={12} />
                       <span>MCP Servers</span>
                     </button>
                   )}
@@ -237,10 +257,23 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
                         onInfoClick();
                         setIsDropdownOpen(false);
                       }}
-                      className="w-full px-4 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground transition-colors flex items-center gap-3"
+                      className={menuItemClass}
                     >
-                      <Info size={14} />
+                      <Info size={12} />
                       <span>About</span>
+                    </button>
+                  )}
+
+                  {onDiagnosticsClick && (
+                    <button
+                      onClick={() => {
+                        onDiagnosticsClick();
+                        setIsDropdownOpen(false);
+                      }}
+                      className={menuItemClass}
+                    >
+                      <Bug size={12} />
+                      <span>Diagnostics</span>
                     </button>
                   )}
                 </div>

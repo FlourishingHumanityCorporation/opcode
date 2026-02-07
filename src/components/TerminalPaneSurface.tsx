@@ -87,46 +87,46 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
   return (
     <div
       className={cn(
-        'flex h-full flex-col border border-border/50 bg-card/40',
-        isActive ? 'ring-1 ring-primary/50' : 'ring-0'
+        'flex h-full flex-col border bg-background',
+        isActive ? 'border-[var(--color-chrome-border)]' : 'border-[var(--color-chrome-border)]/70'
       )}
       onMouseDown={() => activatePane(workspace.id, terminal.id, paneId)}
       data-testid={`workspace-pane-${paneId}`}
     >
-      <div className="flex h-9 items-center justify-between border-b border-border/50 bg-background/80 px-2">
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div className="flex h-7 items-center justify-between border-b border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-surface)] px-2">
+        <div className="flex items-center gap-1 text-[11px] font-medium tracking-[0.01em] text-[var(--color-chrome-text)]">
           {terminal.kind === 'agent' ? (
-            <Bot className="h-3.5 w-3.5" />
+            <Bot className="h-2.5 w-2.5" />
           ) : (
-            <MessageSquare className="h-3.5 w-3.5" />
+            <MessageSquare className="h-2.5 w-2.5" />
           )}
           <span className="truncate">{terminal.title}</span>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           <Button
             size="icon"
             variant="ghost"
-            className="h-7 w-7"
+            className="h-5 w-5 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
             onClick={(event) => {
               event.stopPropagation();
               splitPane(workspace.id, terminal.id, paneId);
             }}
             title="Split Right"
           >
-            <Columns2 className="h-3.5 w-3.5" />
+            <Columns2 className="h-2.5 w-2.5" />
           </Button>
           <Button
             size="icon"
             variant="ghost"
-            className="h-7 w-7"
+            className="h-5 w-5 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
             onClick={(event) => {
               event.stopPropagation();
               closePane(workspace.id, terminal.id, paneId);
             }}
             title="Close Pane"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-2.5 w-2.5" />
           </Button>
         </div>
       </div>

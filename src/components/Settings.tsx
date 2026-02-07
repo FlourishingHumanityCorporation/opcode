@@ -82,7 +82,7 @@ export const Settings: React.FC<SettingsProps> = ({
   const getUserHooks = React.useRef<(() => any) | null>(null);
   
   // Theme hook
-  const { theme, setTheme, customColors, setCustomColors } = useTheme();
+  const { theme, themePreference, setTheme, customColors, setCustomColors } = useTheme();
   
   // Proxy state
   const [proxySettingsChanged, setProxySettingsChanged] = useState(false);
@@ -94,8 +94,6 @@ export const Settings: React.FC<SettingsProps> = ({
   
   // Tab persistence state
   const [tabPersistenceEnabled, setTabPersistenceEnabled] = useState(true);
-  // Startup intro preference
-  const [startupIntroEnabled, setStartupIntroEnabled] = useState(true);
 
   // Provider detection state
   const [detectedAgents, setDetectedAgents] = useState<Array<{ provider_id: string; binary_path: string; version: string | null; source: string }>>([]);
@@ -109,11 +107,6 @@ export const Settings: React.FC<SettingsProps> = ({
     loadDetectedAgents();
     // Load tab persistence setting
     setTabPersistenceEnabled(TabPersistenceService.isEnabled());
-    // Load startup intro setting (default to true if not set)
-    (async () => {
-      const pref = await api.getSetting('startup_intro_enabled');
-      setStartupIntroEnabled(pref === null ? true : pref === 'true');
-    })();
   }, []);
 
   /**
@@ -413,7 +406,7 @@ export const Settings: React.FC<SettingsProps> = ({
       ) : (
         <div className="flex-1 overflow-y-auto p-6">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid grid-cols-9 w-full mb-6 h-auto p-1">
+            <TabsList className="mb-6 h-auto w-full flex-wrap justify-start gap-1 p-1">
               <TabsTrigger value="general" className="py-2.5 px-3">General</TabsTrigger>
               <TabsTrigger value="providers" className="py-2.5 px-3">Providers</TabsTrigger>
               <TabsTrigger value="permissions" className="py-2.5 px-3">Permissions</TabsTrigger>
@@ -433,67 +426,84 @@ export const Settings: React.FC<SettingsProps> = ({
                   
                   <div className="space-y-4">
                     {/* Theme Selector */}
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                       <div>
                         <Label>Theme</Label>
                         <p className="text-caption text-muted-foreground mt-1">
                           Choose your preferred color theme
                         </p>
+                        {themePreference === 'system' && (
+                          <p className="text-caption text-muted-foreground mt-1">
+                            Following system: {theme === 'dark' ? 'Dark' : 'Light'}
+                          </p>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1 p-1 bg-muted/30 rounded-lg">
+                      <div className="flex w-full flex-wrap items-center gap-1 rounded-lg bg-muted/30 p-1 lg:w-auto">
+                        <button
+                          onClick={() => setTheme('system')}
+                          className={cn(
+                            "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+                            themePreference === 'system'
+                              ? "bg-background shadow-sm"
+                              : "hover:bg-background/50"
+                          )}
+                        >
+                          {themePreference === 'system' && <Check className="h-3 w-3" />}
+                          System
+                        </button>
                         <button
                           onClick={() => setTheme('dark')}
                           className={cn(
                             "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-                            theme === 'dark' 
+                            themePreference === 'dark' 
                               ? "bg-background shadow-sm" 
                               : "hover:bg-background/50"
                           )}
                         >
-                          {theme === 'dark' && <Check className="h-3 w-3" />}
+                          {themePreference === 'dark' && <Check className="h-3 w-3" />}
                           Dark
                         </button>
                         <button
                           onClick={() => setTheme('gray')}
                           className={cn(
                             "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-                            theme === 'gray' 
+                            themePreference === 'gray' 
                               ? "bg-background shadow-sm" 
                               : "hover:bg-background/50"
                           )}
                         >
-                          {theme === 'gray' && <Check className="h-3 w-3" />}
+                          {themePreference === 'gray' && <Check className="h-3 w-3" />}
                           Gray
                         </button>
                         <button
                           onClick={() => setTheme('light')}
                           className={cn(
                             "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-                            theme === 'light' 
+                            themePreference === 'light' 
                               ? "bg-background shadow-sm" 
                               : "hover:bg-background/50"
                           )}
                         >
-                          {theme === 'light' && <Check className="h-3 w-3" />}
+                          {themePreference === 'light' && <Check className="h-3 w-3" />}
                           Light
                         </button>
                         <button
                           onClick={() => setTheme('custom')}
                           className={cn(
                             "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-                            theme === 'custom' 
+                            themePreference === 'custom' 
                               ? "bg-background shadow-sm" 
                               : "hover:bg-background/50"
                           )}
                         >
-                          {theme === 'custom' && <Check className="h-3 w-3" />}
+                          {themePreference === 'custom' && <Check className="h-3 w-3" />}
                           Custom
                         </button>
                       </div>
                     </div>
                     
                     {/* Custom Color Editor */}
-                    {theme === 'custom' && (
+                    {themePreference === 'custom' && (
                       <div className="space-y-4 p-4 border rounded-lg bg-muted/20">
                         <h4 className="text-label">Custom Theme Colors</h4>
                         
@@ -760,34 +770,6 @@ export const Settings: React.FC<SettingsProps> = ({
                       />
                     </div>
 
-                    {/* Startup Intro Toggle */}
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-1">
-                        <Label htmlFor="startup-intro">Show Welcome Intro on Startup</Label>
-                        <p className="text-caption text-muted-foreground">
-                          Display a brief welcome animation when the app launches
-                        </p>
-                      </div>
-                      <Switch
-                        id="startup-intro"
-                        checked={startupIntroEnabled}
-                        onCheckedChange={async (checked) => {
-                          setStartupIntroEnabled(checked);
-                          try {
-                            await api.saveSetting('startup_intro_enabled', checked ? 'true' : 'false');
-                            trackEvent.settingsChanged('startup_intro_enabled', checked);
-                            setToast({ 
-                              message: checked 
-                                ? 'Welcome intro enabled' 
-                                : 'Welcome intro disabled', 
-                              type: 'success' 
-                            });
-                          } catch (e) {
-                            setToast({ message: 'Failed to update preference', type: 'error' });
-                          }
-                        }}
-                      />
-                    </div>
                   </div>
                 </div>
               </Card>

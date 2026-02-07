@@ -28,7 +28,7 @@ export const WorkspacePaneTree: React.FC<WorkspacePaneTreeProps> = ({ workspace,
       <div className="min-w-0 min-h-0" style={{ width: `${ratio}%` }}>
         <WorkspacePaneTree workspace={workspace} terminal={terminal} node={node.left} />
       </div>
-      <div className={cn('w-px bg-border/70')} />
+      <div className={cn('w-px bg-[var(--color-chrome-border)]/80')} />
       <div className="min-w-0 min-h-0 flex-1" style={{ width: `${100 - ratio}%` }}>
         <WorkspacePaneTree workspace={workspace} terminal={terminal} node={node.right} />
       </div>

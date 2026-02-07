@@ -5,6 +5,7 @@ mod checkpoint;
 mod claude_binary;
 mod commands;
 mod process;
+mod usage_index;
 mod web_server;
 
 #[derive(Parser)]

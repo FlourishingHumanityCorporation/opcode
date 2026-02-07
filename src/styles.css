@@ -107,6 +107,12 @@ html {
   --color-border: oklch(0.20 0.01 240);
   --color-input: oklch(0.20 0.01 240);
   --color-ring: oklch(0.50 0.015 240);
+  --color-chrome-bg: oklch(0.14 0.01 240);
+  --color-chrome-surface: oklch(0.18 0.01 240);
+  --color-chrome-active: oklch(0.22 0.01 240);
+  --color-chrome-text: oklch(0.72 0.01 240);
+  --color-chrome-text-active: oklch(0.94 0.01 240);
+  --color-chrome-border: oklch(0.28 0.01 240);
   
   /* Additional colors for status messages */
   --color-green-500: oklch(0.72 0.20 142);
@@ -120,7 +126,7 @@ html {
   --radius-xl: 1rem;
 
   /* Fonts */
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+  --font-sans: "SF Pro Text", "SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
   
   /* Font Weights */
@@ -188,6 +194,12 @@ html {
   --color-border: oklch(0.25 0.015 250);
   --color-input: oklch(0.22 0.012 250);
   --color-ring: oklch(0.68 0.035 220);
+  --color-chrome-bg: oklch(0.13 0.01 250);
+  --color-chrome-surface: oklch(0.16 0.01 250);
+  --color-chrome-active: oklch(0.21 0.01 250);
+  --color-chrome-text: oklch(0.7 0.01 250);
+  --color-chrome-text-active: oklch(0.95 0.008 250);
+  --color-chrome-border: oklch(0.27 0.012 250);
   --radius-base: 0.33rem;
   --radius-md: 0.42rem;
   --radius-lg: 0.68rem;
@@ -195,25 +207,31 @@ html {
 
 /* Light Theme */
 .theme-light {
-  --color-background: oklch(0.98 0.01 240);
-  --color-foreground: oklch(0.12 0.01 240);
-  --color-card: oklch(0.96 0.01 240);
-  --color-card-foreground: oklch(0.12 0.01 240);
-  --color-popover: oklch(0.98 0.01 240);
-  --color-popover-foreground: oklch(0.12 0.01 240);
-  --color-primary: oklch(0.12 0.01 240);
-  --color-primary-foreground: oklch(0.98 0.01 240);
-  --color-secondary: oklch(0.94 0.01 240);
-  --color-secondary-foreground: oklch(0.12 0.01 240);
-  --color-muted: oklch(0.94 0.01 240);
-  --color-muted-foreground: oklch(0.45 0.01 240);
-  --color-accent: oklch(0.94 0.01 240);
-  --color-accent-foreground: oklch(0.12 0.01 240);
-  --color-destructive: oklch(0.6 0.2 25);
-  --color-destructive-foreground: oklch(0.98 0.01 240);
-  --color-border: oklch(0.90 0.01 240);
-  --color-input: oklch(0.90 0.01 240);
-  --color-ring: oklch(0.52 0.015 240);
+  --color-background: #ffffff;
+  --color-foreground: #3d3d3d;
+  --color-card: #ffffff;
+  --color-card-foreground: #3d3d3d;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #3d3d3d;
+  --color-primary: #3d3d3d;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #fafafa;
+  --color-secondary-foreground: #3d3d3d;
+  --color-muted: #fafafa;
+  --color-muted-foreground: #707070;
+  --color-accent: #f3f3f3;
+  --color-accent-foreground: #3d3d3d;
+  --color-destructive: #dc3f3f;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e8e8e8;
+  --color-input: #e8e8e8;
+  --color-ring: #cecece;
+  --color-chrome-bg: #fafafa;
+  --color-chrome-surface: #f7f7f7;
+  --color-chrome-active: #ffffff;
+  --color-chrome-text: #6f6f6f;
+  --color-chrome-text-active: #3d3d3d;
+  --color-chrome-border: #e9e9e9;
   
   /* Additional colors for status messages */
   --color-green-500: oklch(0.62 0.20 142);
@@ -241,6 +259,12 @@ html {
   --color-border: oklch(0.32 0.01 240);
   --color-input: oklch(0.32 0.01 240);
   --color-ring: oklch(0.55 0.015 240);
+  --color-chrome-bg: oklch(0.23 0.01 240);
+  --color-chrome-surface: oklch(0.28 0.01 240);
+  --color-chrome-active: oklch(0.34 0.01 240);
+  --color-chrome-text: oklch(0.73 0.01 240);
+  --color-chrome-text-active: oklch(0.95 0.01 240);
+  --color-chrome-border: oklch(0.36 0.01 240);
   
   /* Additional colors for status messages */
   --color-green-500: oklch(0.72 0.20 142);
@@ -285,13 +309,15 @@ html {
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light dark;
 }
 
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 /* Placeholder text styling */

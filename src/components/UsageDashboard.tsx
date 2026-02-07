@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { api, type UsageStats, type ProjectUsage } from "@/lib/api";
+import { api, type UsageStats, type ProjectUsage, type UsageIndexStatus } from "@/lib/api";
+import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
 import { 
   Calendar, 
   Filter,
+  Info,
   Loader2,
   Briefcase,
   ChevronLeft,
@@ -24,6 +26,93 @@ interface UsageDashboardProps {
 const dataCache = new Map<string, { data: any; timestamp: number }>();
 const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes cache - increased for better performance
 
+const EMPTY_USAGE_STATS: UsageStats = {
+  total_cost: 0,
+  total_tokens: 0,
+  total_input_tokens: 0,
+  total_output_tokens: 0,
+  total_cache_creation_tokens: 0,
+  total_cache_read_tokens: 0,
+  total_sessions: 0,
+  by_model: [],
+  by_date: [],
+  by_project: [],
+};
+
+function toFiniteNumber(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toNonNegativeInteger(value: unknown): number {
+  const parsed = Math.floor(toFiniteNumber(value));
+  return parsed >= 0 ? parsed : 0;
+}
+
+function sanitizeUsageStats(raw: unknown): UsageStats {
+  if (!raw || typeof raw !== "object") {
+    return EMPTY_USAGE_STATS;
+  }
+
+  const input = raw as any;
+  return {
+    total_cost: toFiniteNumber(input.total_cost),
+    total_tokens: toNonNegativeInteger(input.total_tokens),
+    total_input_tokens: toNonNegativeInteger(input.total_input_tokens),
+    total_output_tokens: toNonNegativeInteger(input.total_output_tokens),
+    total_cache_creation_tokens: toNonNegativeInteger(input.total_cache_creation_tokens),
+    total_cache_read_tokens: toNonNegativeInteger(input.total_cache_read_tokens),
+    total_sessions: toNonNegativeInteger(input.total_sessions),
+    by_model: Array.isArray(input.by_model)
+      ? input.by_model.map((model: any) => ({
+          model: typeof model?.model === "string" ? model.model : "unknown",
+          total_cost: toFiniteNumber(model?.total_cost),
+          total_tokens: toNonNegativeInteger(model?.total_tokens),
+          input_tokens: toNonNegativeInteger(model?.input_tokens),
+          output_tokens: toNonNegativeInteger(model?.output_tokens),
+          cache_creation_tokens: toNonNegativeInteger(model?.cache_creation_tokens),
+          cache_read_tokens: toNonNegativeInteger(model?.cache_read_tokens),
+          session_count: toNonNegativeInteger(model?.session_count),
+        }))
+      : [],
+    by_date: Array.isArray(input.by_date)
+      ? input.by_date.map((day: any) => ({
+          date: typeof day?.date === "string" ? day.date : "",
+          total_cost: toFiniteNumber(day?.total_cost),
+          total_tokens: toNonNegativeInteger(day?.total_tokens),
+          models_used: Array.isArray(day?.models_used)
+            ? day.models_used.filter((entry: unknown): entry is string => typeof entry === "string")
+            : [],
+        }))
+      : [],
+    by_project: Array.isArray(input.by_project)
+      ? input.by_project.map((project: any) => ({
+          project_path: typeof project?.project_path === "string" ? project.project_path : "",
+          project_name: typeof project?.project_name === "string" ? project.project_name : "",
+          total_cost: toFiniteNumber(project?.total_cost),
+          total_tokens: toNonNegativeInteger(project?.total_tokens),
+          session_count: toNonNegativeInteger(project?.session_count),
+          last_used: typeof project?.last_used === "string" ? project.last_used : "",
+        }))
+      : [],
+  };
+}
+
+function sanitizeSessionStats(raw: unknown): ProjectUsage[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.map((session: any) => ({
+    project_path: typeof session?.project_path === "string" ? session.project_path : "",
+    project_name: typeof session?.project_name === "string" ? session.project_name : "",
+    total_cost: toFiniteNumber(session?.total_cost),
+    total_tokens: toNonNegativeInteger(session?.total_tokens),
+    session_count: toNonNegativeInteger(session?.session_count),
+    last_used: typeof session?.last_used === "string" ? session.last_used : "",
+  }));
+}
+
 /**
  * Optimized UsageDashboard component with caching and progressive loading
  */
@@ -32,9 +121,14 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [sessionStats, setSessionStats] = useState<ProjectUsage[] | null>(null);
+  const [sessionStatsLoading, setSessionStatsLoading] = useState(false);
+  const [sessionStatsError, setSessionStatsError] = useState<string | null>(null);
+  const [usageIndexStatus, setUsageIndexStatus] = useState<UsageIndexStatus | null>(null);
+  const [usageIndexError, setUsageIndexError] = useState<string | null>(null);
   const [selectedDateRange, setSelectedDateRange] = useState<"all" | "7d" | "30d">("7d");
   const [activeTab, setActiveTab] = useState("overview");
   const [hasLoadedTabs, setHasLoadedTabs] = useState<Set<string>>(new Set(["overview"]));
+  const previousIndexState = useRef<string | null>(null);
   
   // Pagination states
   const [projectsPage, setProjectsPage] = useState(1);
@@ -74,6 +168,11 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
     return modelMap[model] || model;
   }, []);
 
+  const parseSafeDate = useCallback((value: string): Date | null => {
+    const parsed = new Date(value.includes('T') ? value : value.replace(/-/g, '/'));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }, []);
+
   // Function to get cached data or null
   const getCachedData = useCallback((key: string) => {
     const cached = dataCache.get(key);
@@ -90,14 +189,21 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
 
   const loadUsageStats = useCallback(async () => {
     const cacheKey = `usage-${selectedDateRange}`;
+    logWorkspaceEvent({
+      category: 'state_action',
+      action: 'usage_dashboard_load_start',
+      payload: { selectedDateRange },
+    });
     
     // Check cache first
     const cachedStats = getCachedData(`${cacheKey}-stats`);
-    const cachedSessions = getCachedData(`${cacheKey}-sessions`);
-    
-    if (cachedStats && cachedSessions) {
+    if (cachedStats) {
+      logWorkspaceEvent({
+        category: 'state_action',
+        action: 'usage_dashboard_load_cache_hit',
+        payload: { selectedDateRange },
+      });
       setStats(cachedStats);
-      setSessionStats(cachedSessions);
       setLoading(false);
       return;
     }
@@ -110,68 +216,240 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
       setError(null);
 
       let statsData: UsageStats;
-      let sessionData: ProjectUsage[] = [];
       
       if (selectedDateRange === "all") {
-        // Fetch both in parallel for all time
-        const [statsResult, sessionResult] = await Promise.all([
-          api.getUsageStats(),
-          api.getSessionStats()
-        ]);
-        statsData = statsResult;
-        sessionData = sessionResult;
+        const statsResult = await api.getUsageStats();
+        statsData = sanitizeUsageStats(statsResult);
       } else {
         const endDate = new Date();
         const startDate = new Date();
         const days = selectedDateRange === "7d" ? 7 : 30;
         startDate.setDate(startDate.getDate() - days);
-        
-        const formatDateForApi = (date: Date) => {
-          const year = date.getFullYear();
-          const month = String(date.getMonth() + 1).padStart(2, '0');
-          const day = String(date.getDate()).padStart(2, '0');
-          return `${year}${month}${day}`;
-        }
 
-        // Fetch both in parallel for better performance
-        const [statsResult, sessionResult] = await Promise.all([
-          api.getUsageByDateRange(
-            startDate.toISOString(),
-            endDate.toISOString()
-          ),
-          api.getSessionStats(
-            formatDateForApi(startDate),
-            formatDateForApi(endDate),
-            'desc'
-          )
-        ]);
+        const statsResult = await api.getUsageByDateRange(
+          startDate.toISOString(),
+          endDate.toISOString()
+        );
         
-        statsData = statsResult;
-        sessionData = sessionResult;
+        statsData = sanitizeUsageStats(statsResult);
       }
       
       // Update state
       setStats(statsData);
-      setSessionStats(sessionData);
+      logWorkspaceEvent({
+        category: 'state_action',
+        action: 'usage_dashboard_load_success',
+        payload: {
+          selectedDateRange,
+          models: statsData.by_model.length,
+          projects: statsData.by_project.length,
+          sessions: sessionStats?.length || 0,
+          dates: statsData.by_date.length,
+        },
+      });
       
       // Cache the data
       setCachedData(`${cacheKey}-stats`, statsData);
-      setCachedData(`${cacheKey}-sessions`, sessionData);
     } catch (err: any) {
       console.error("Failed to load usage stats:", err);
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'usage_dashboard_load_failed',
+        message: err instanceof Error ? err.message : String(err),
+        payload: { selectedDateRange },
+      });
       setError("Failed to load usage statistics. Please try again.");
     } finally {
       setLoading(false);
     }
   }, [selectedDateRange, getCachedData, setCachedData, stats, sessionStats]);
 
+  const loadSessionStats = useCallback(async () => {
+    if (sessionStatsLoading) return;
+
+    const cacheKey = `usage-${selectedDateRange}-sessions`;
+    const cachedSessions = getCachedData(cacheKey);
+    if (cachedSessions) {
+      setSessionStats(cachedSessions);
+      setSessionStatsError(null);
+      return;
+    }
+
+    setSessionStatsLoading(true);
+    setSessionStatsError(null);
+    logWorkspaceEvent({
+      category: 'state_action',
+      action: 'usage_sessions_load_start',
+      payload: { selectedDateRange },
+    });
+
+    try {
+      let result: ProjectUsage[];
+
+      if (selectedDateRange === "all") {
+        result = sanitizeSessionStats(await api.getSessionStats(undefined, undefined, undefined, 500, 0));
+      } else {
+        const endDate = new Date();
+        const startDate = new Date();
+        const days = selectedDateRange === "7d" ? 7 : 30;
+        startDate.setDate(startDate.getDate() - days);
+
+        const formatDateForApi = (date: Date) => {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          return `${year}${month}${day}`;
+        };
+
+        result = sanitizeSessionStats(
+          await api.getSessionStats(
+            formatDateForApi(startDate),
+            formatDateForApi(endDate),
+            'desc',
+            500,
+            0,
+          )
+        );
+      }
+
+      setSessionStats(result);
+      setCachedData(cacheKey, result);
+      logWorkspaceEvent({
+        category: 'state_action',
+        action: 'usage_sessions_load_success',
+        payload: { selectedDateRange, sessions: result.length },
+      });
+    } catch (err: any) {
+      console.error("Failed to load session stats:", err);
+      const message = err instanceof Error ? err.message : String(err);
+      setSessionStatsError("Failed to load session statistics. Please try again.");
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'usage_sessions_load_failed',
+        message,
+        payload: { selectedDateRange },
+      });
+    } finally {
+      setSessionStatsLoading(false);
+    }
+  }, [getCachedData, selectedDateRange, sessionStatsLoading, setCachedData]);
+
+  useEffect(() => {
+    logWorkspaceEvent({
+      category: 'state_action',
+      action: 'usage_dashboard_mounted',
+    });
+    return () => {
+      logWorkspaceEvent({
+        category: 'state_action',
+        action: 'usage_dashboard_unmounted',
+      });
+    };
+  }, []);
+
+  const refreshUsageIndexStatus = useCallback(async () => {
+    try {
+      const status = await api.getUsageIndexStatus();
+      setUsageIndexStatus(status);
+      setUsageIndexError(null);
+      return status;
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : String(err);
+      setUsageIndexError(message);
+      return null;
+    }
+  }, []);
+
+  const startUsageIndexSync = useCallback(async () => {
+    try {
+      const status = await api.startUsageIndexSync();
+      setUsageIndexStatus(status);
+      setUsageIndexError(null);
+      return status;
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : String(err);
+      setUsageIndexError(message);
+      return null;
+    }
+  }, []);
+
+  const cancelUsageIndexSync = useCallback(async () => {
+    try {
+      const status = await api.cancelUsageIndexSync();
+      setUsageIndexStatus(status);
+      setUsageIndexError(null);
+      return status;
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : String(err);
+      setUsageIndexError(message);
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const bootstrap = async () => {
+      await refreshUsageIndexStatus();
+      if (!cancelled) {
+        await startUsageIndexSync();
+      }
+    };
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshUsageIndexStatus, startUsageIndexSync]);
+
+  useEffect(() => {
+    if (usageIndexStatus?.state !== "indexing") {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshUsageIndexStatus();
+    }, 1500);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [refreshUsageIndexStatus, usageIndexStatus?.state]);
+
+  useEffect(() => {
+    const currentState = usageIndexStatus?.state ?? null;
+    if (previousIndexState.current === "indexing" && currentState === "idle") {
+      void loadUsageStats();
+      if (activeTab === "sessions") {
+        void loadSessionStats();
+      }
+    }
+    previousIndexState.current = currentState;
+  }, [activeTab, loadSessionStats, loadUsageStats, usageIndexStatus?.state]);
+
   // Load data on mount and when date range changes
   useEffect(() => {
     // Reset pagination when date range changes
     setProjectsPage(1);
     setSessionsPage(1);
+    setSessionStats(null);
+    setSessionStatsError(null);
     loadUsageStats();
   }, [loadUsageStats])
+
+  const usageIndexProgress = useMemo(() => {
+    if (!usageIndexStatus || usageIndexStatus.files_total === 0) {
+      return 0;
+    }
+    return Math.min(
+      100,
+      Math.round((usageIndexStatus.files_processed / usageIndexStatus.files_total) * 100)
+    );
+  }, [usageIndexStatus]);
+
+  useEffect(() => {
+    if (activeTab === "sessions" && sessionStats === null && !sessionStatsLoading) {
+      loadSessionStats();
+    }
+  }, [activeTab, loadSessionStats, sessionStats, sessionStatsLoading]);
 
   // Preload adjacent tabs when idle
   useEffect(() => {
@@ -203,46 +481,105 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
   // Memoize expensive computations
   const summaryCards = useMemo(() => {
     if (!stats) return null;
+
+    const nonCacheTokens = stats.total_input_tokens + stats.total_output_tokens;
+    const cacheTokens = stats.total_cache_creation_tokens + stats.total_cache_read_tokens;
+    const cacheShare = stats.total_tokens > 0
+      ? Math.round((cacheTokens / stats.total_tokens) * 100)
+      : 0;
     
     return (
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="p-4 shimmer-hover">
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        <Card className="min-w-0 p-4 shimmer-hover">
           <div>
             <p className="text-caption text-muted-foreground">Total Cost</p>
-            <p className="text-display-2 mt-1">
+            <p className="text-display-2 mt-1 truncate">
               {formatCurrency(stats.total_cost)}
             </p>
+            <p className="mt-1 text-caption text-muted-foreground">
+              Includes cache-adjusted pricing
+            </p>
           </div>
         </Card>
 
-        <Card className="p-4 shimmer-hover">
+        <Card className="min-w-0 p-4 shimmer-hover">
           <div>
             <p className="text-caption text-muted-foreground">Total Sessions</p>
-            <p className="text-display-2 mt-1">
+            <p className="text-display-2 mt-1 truncate">
               {formatNumber(stats.total_sessions)}
             </p>
-          </div>
-        </Card>
-
-        <Card className="p-4 shimmer-hover">
-          <div>
-            <p className="text-caption text-muted-foreground">Total Tokens</p>
-            <p className="text-display-2 mt-1">
-              {formatTokens(stats.total_tokens)}
+            <p className="mt-1 text-caption text-muted-foreground">
+              Unique session IDs
             </p>
           </div>
         </Card>
 
-        <Card className="p-4 shimmer-hover">
+        <Card className="min-w-0 p-4 shimmer-hover">
+          <div>
+            <p className="text-caption text-muted-foreground">Non-Cache Tokens</p>
+            <p className="text-display-2 mt-1 truncate">
+              {formatTokens(nonCacheTokens)}
+            </p>
+            <p className="mt-1 text-caption text-muted-foreground">
+              Input + output ({100 - cacheShare}% of total)
+            </p>
+          </div>
+        </Card>
+
+        <Card className="min-w-0 p-4 shimmer-hover">
+          <div>
+            <p className="text-caption text-muted-foreground">Cache Tokens</p>
+            <p className="text-display-2 mt-1 truncate">
+              {formatTokens(cacheTokens)}
+            </p>
+            <p className="mt-1 text-caption text-muted-foreground">
+              Cache write + read ({cacheShare}% of total)
+            </p>
+          </div>
+        </Card>
+
+        <Card className="min-w-0 p-4 shimmer-hover">
+          <div>
+            <p className="text-caption text-muted-foreground">Total Tokens (incl cache)</p>
+            <p className="text-display-2 mt-1 truncate">
+              {formatTokens(stats.total_tokens)}
+            </p>
+            <p className="mt-1 text-caption text-muted-foreground">
+              Non-cache + cache combined
+            </p>
+          </div>
+        </Card>
+
+        <Card className="min-w-0 p-4 shimmer-hover">
           <div>
             <p className="text-caption text-muted-foreground">Avg Cost/Session</p>
-            <p className="text-display-2 mt-1">
+            <p className="text-display-2 mt-1 truncate">
               {formatCurrency(
                 stats.total_sessions > 0 
                   ? stats.total_cost / stats.total_sessions 
                   : 0
               )}
             </p>
+            <p className="mt-1 text-caption text-muted-foreground">
+              Cost / unique session
+            </p>
+          </div>
+        </Card>
+      </div>
+
+        <Card className="border-border/80 bg-muted/20 p-4">
+          <div className="flex items-start gap-2">
+            <Info className="mt-0.5 h-4 w-4 text-muted-foreground" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium">How cache tokens work</p>
+              <p className="text-xs text-muted-foreground">
+                Cache write/read tokens are reused prompt context. They are counted in total tokens, but billed differently from normal input/output tokens.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Current range: {cacheShare}% cache tokens, {100 - cacheShare}% non-cache tokens.
+              </p>
+            </div>
           </div>
         </Card>
       </div>
@@ -306,32 +643,36 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
       bars: reversedData.map(day => ({
         ...day,
         heightPercent: maxCost > 0 ? (day.total_cost / maxCost) * 100 : 0,
-        date: new Date(day.date.replace(/-/g, '/')),
+        parsedDate: parseSafeDate(day.date),
       }))
     };
-  }, [stats?.by_date]);
+  }, [stats?.by_date, parseSafeDate]);
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-6xl mx-auto flex flex-col h-full">
+    <div className="h-full overflow-y-auto overflow-x-hidden">
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col">
         {/* Header */}
-        <div className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
+        <div className="p-6 pb-4">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="min-w-0">
               <h1 className="text-heading-1">Usage Dashboard</h1>
               <p className="mt-1 text-body-small text-muted-foreground">
                 Track your Claude Code usage and costs
               </p>
             </div>
             {/* Date Range Filter */}
-            <div className="flex items-center space-x-2">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              <div className="flex space-x-1">
+            <div className="flex flex-col gap-2 xl:items-end">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Filter className="h-4 w-4" />
+                <span className="text-caption">Date Range</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
                 {(["7d", "30d", "all"] as const).map((range) => (
                   <Button
                     key={range}
                     variant={selectedDateRange === range ? "default" : "outline"}
                     size="sm"
+                    className="min-w-[7.5rem] justify-center"
                     onClick={() => setSelectedDateRange(range)}
                     disabled={loading}
                   >
@@ -345,6 +686,54 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
+          {(usageIndexStatus || usageIndexError) && (
+            <div className="mb-4 rounded-lg border border-border bg-card p-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    {usageIndexStatus?.state === "indexing"
+                      ? "Indexing usage history..."
+                      : usageIndexStatus?.state === "error"
+                        ? "Usage index error"
+                        : "Usage index ready"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {usageIndexStatus?.state === "error" && usageIndexStatus.last_error
+                      ? usageIndexStatus.last_error
+                      : usageIndexError
+                      ? usageIndexError
+                      : usageIndexStatus?.state === "indexing"
+                        ? `Processed ${usageIndexStatus.files_processed} of ${usageIndexStatus.files_total} files (${usageIndexProgress}%)`
+                        : usageIndexStatus?.last_completed_at
+                          ? `Last synced ${new Date(usageIndexStatus.last_completed_at).toLocaleString()}`
+                          : "No completed sync yet"}
+                  </p>
+                  {(usageIndexStatus?.state === "error" || usageIndexError) && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Log: ~/.opcode-usage-debug.log
+                    </p>
+                  )}
+                  {usageIndexStatus?.current_file && usageIndexStatus.state === "indexing" && (
+                    <p className="mt-1 max-w-full truncate text-xs text-muted-foreground" title={usageIndexStatus.current_file}>
+                      {usageIndexStatus.current_file}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {usageIndexStatus?.state === "indexing" ? (
+                    <Button size="sm" variant="outline" onClick={() => void cancelUsageIndexSync()}>
+                      Cancel
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => void startUsageIndexSync()}>
+                      Refresh
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {loading ? (
             <div className="flex items-center justify-center h-64">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -358,6 +747,12 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
             </div>
           ) : stats ? (
             <div className="space-y-6">
+              {stats.total_sessions === 0 && usageIndexStatus?.state === "indexing" && (
+                <Card className="p-4">
+                  <p className="text-sm text-muted-foreground">Indexing usage history...</p>
+                </Card>
+              )}
+
               {/* Summary Cards */}
               {summaryCards}
 
@@ -365,19 +760,25 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
               <Tabs value={activeTab} onValueChange={(value) => {
                 setActiveTab(value);
                 setHasLoadedTabs(prev => new Set([...prev, value]));
+                if (value === "sessions" && sessionStats === null && !sessionStatsLoading) {
+                  void loadSessionStats();
+                }
               }} className="w-full">
-                <TabsList className="grid grid-cols-5 w-full mb-6 h-auto p-1">
-                  <TabsTrigger value="overview" className="py-2.5 px-3">Overview</TabsTrigger>
-                  <TabsTrigger value="models" className="py-2.5 px-3">By Model</TabsTrigger>
-                  <TabsTrigger value="projects" className="py-2.5 px-3">By Project</TabsTrigger>
-                  <TabsTrigger value="sessions" className="py-2.5 px-3">By Session</TabsTrigger>
-                  <TabsTrigger value="timeline" className="py-2.5 px-3">Timeline</TabsTrigger>
+                <TabsList className="mb-6 grid h-auto w-full grid-cols-2 gap-1 p-1 sm:grid-cols-3 lg:grid-cols-5">
+                  <TabsTrigger value="overview" className="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">Overview</TabsTrigger>
+                  <TabsTrigger value="models" className="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">By Model</TabsTrigger>
+                  <TabsTrigger value="projects" className="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">By Project</TabsTrigger>
+                  <TabsTrigger value="sessions" className="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">By Session</TabsTrigger>
+                  <TabsTrigger value="timeline" className="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">Timeline</TabsTrigger>
                 </TabsList>
 
                 {/* Overview Tab */}
                 <TabsContent value="overview" className="space-y-6 mt-6">
                   <Card className="p-6">
-                    <h3 className="text-label mb-4">Token Breakdown</h3>
+                    <h3 className="text-label mb-2">Token Breakdown</h3>
+                    <p className="mb-4 text-xs text-muted-foreground">
+                      Input/output are fresh model work. Cache write/read are reused prompt-context paths.
+                    </p>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <div>
                         <p className="text-caption text-muted-foreground">Input Tokens</p>
@@ -401,7 +802,10 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                   {/* Quick Stats */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Card className="p-6">
-                      <h3 className="text-label mb-4">Most Used Models</h3>
+                      <h3 className="text-label mb-2">Most Used Models</h3>
+                      <p className="mb-4 text-xs text-muted-foreground">
+                        Session counts are unique per model and are not additive across models.
+                      </p>
                       <div className="space-y-3">
                         {mostUsedModels}
                       </div>
@@ -421,7 +825,10 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                   {hasLoadedTabs.has("models") && stats && (
                     <div style={{ display: activeTab === "models" ? "block" : "none" }}>
                       <Card className="p-6">
-                        <h3 className="text-sm font-semibold mb-4">Usage by Model</h3>
+                        <h3 className="text-sm font-semibold mb-1">Usage by Model</h3>
+                        <p className="mb-4 text-xs text-muted-foreground">
+                          A single session can appear under multiple models if it switched models.
+                        </p>
                         <div className="space-y-4">
                           {stats.by_model.map((model) => (
                           <div key={model.model} className="space-y-2">
@@ -487,8 +894,13 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                           
                           return (
                             <>
-                              {paginatedProjects.map((project) => (
-                                <div key={project.project_path} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                              {paginatedProjects.map((project) => {
+                                const avgCostPerSession = project.session_count > 0
+                                  ? project.total_cost / project.session_count
+                                  : 0;
+
+                                return (
+                                  <div key={project.project_path} className="flex items-center justify-between py-2 border-b border-border last:border-0">
                                   <div className="flex flex-col truncate">
                                     <span className="text-sm font-medium truncate" title={project.project_path}>
                                       {project.project_path}
@@ -505,11 +917,12 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                                   <div className="text-right">
                                     <p className="text-sm font-semibold">{formatCurrency(project.total_cost)}</p>
                                     <p className="text-xs text-muted-foreground">
-                                      {formatCurrency(project.total_cost / project.session_count)}/session
+                                      {formatCurrency(avgCostPerSession)}/session
                                     </p>
                                   </div>
                                 </div>
-                              ))}
+                                );
+                              })}
                               
                               {/* Pagination Controls */}
                               {totalPages > 1 && (
@@ -563,7 +976,18 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                         )}
                       </div>
                       <div className="space-y-3">
-                        {sessionStats && sessionStats.length > 0 ? (() => {
+                        {sessionStatsLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : sessionStatsError ? (
+                          <div className="text-center py-8 text-sm text-destructive">
+                            {sessionStatsError}
+                            <Button onClick={() => void loadSessionStats()} size="sm" className="ml-3">
+                              Retry
+                            </Button>
+                          </div>
+                        ) : sessionStats && sessionStats.length > 0 ? (() => {
                           const startIndex = (sessionsPage - 1) * ITEMS_PER_PAGE;
                           const endIndex = startIndex + ITEMS_PER_PAGE;
                           const paginatedSessions = sessionStats.slice(startIndex, endIndex);
@@ -571,13 +995,20 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                           
                           return (
                             <>
-                              {paginatedSessions.map((session, index) => (
-                                <div key={`${session.project_path}-${session.project_name}-${startIndex + index}`} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                              {paginatedSessions.map((session, index) => {
+                                const sessionPath = session.project_path || '';
+                                const displayPath = sessionPath
+                                  ? sessionPath.split('/').slice(-2).join('/')
+                                  : 'Unknown project';
+                                const parsedLastUsed = session.last_used ? parseSafeDate(session.last_used) : null;
+
+                                return (
+                                  <div key={`${session.project_path}-${session.project_name}-${startIndex + index}`} className="flex items-center justify-between py-2 border-b border-border last:border-0">
                                   <div className="flex flex-col">
                                     <div className="flex items-center space-x-2">
                                       <Briefcase className="h-4 w-4 text-muted-foreground" />
-                                      <span className="text-xs font-mono text-muted-foreground truncate max-w-[200px]" title={session.project_path}>
-                                        {session.project_path.split('/').slice(-2).join('/')}
+                                      <span className="text-xs font-mono text-muted-foreground truncate max-w-[200px]" title={sessionPath || undefined}>
+                                        {displayPath}
                                       </span>
                                     </div>
                                     <span className="text-sm font-medium mt-1">
@@ -587,11 +1018,12 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                                   <div className="text-right">
                                     <p className="text-sm font-semibold">{formatCurrency(session.total_cost)}</p>
                                     <p className="text-xs text-muted-foreground">
-                                      {session.last_used ? new Date(session.last_used).toLocaleDateString() : 'N/A'}
+                                      {parsedLastUsed ? parsedLastUsed.toLocaleDateString() : 'N/A'}
                                     </p>
                                   </div>
                                 </div>
-                              ))}
+                                );
+                              })}
                               
                               {/* Pagination Controls */}
                               {totalPages > 1 && (
@@ -655,15 +1087,21 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                           
                           {/* Chart container */}
                           <div className="flex items-end space-x-2 h-64 border-l border-b border-border pl-4">
-                            {timelineChartData.bars.map((day) => {
-                              const formattedDate = day.date.toLocaleDateString('en-US', {
-                                weekday: 'short',
-                                month: 'short',
-                                day: 'numeric'
-                              });
-                              
+                            {timelineChartData.bars.map((day, index) => {
+                              const formattedDate = day.parsedDate
+                                ? day.parsedDate.toLocaleDateString('en-US', {
+                                  weekday: 'short',
+                                  month: 'short',
+                                  day: 'numeric'
+                                })
+                                : day.date;
+
+                              const xLabel = day.parsedDate
+                                ? day.parsedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                : day.date;
+
                               return (
-                                <div key={day.date.toISOString()} className="flex-1 h-full flex flex-col items-center justify-end group relative">
+                                <div key={`${day.date}-${index}`} className="flex-1 h-full flex flex-col items-center justify-end group relative">
                                   {/* Tooltip */}
                                   <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
                                     <div className="bg-background border border-border rounded-lg shadow-lg p-3 whitespace-nowrap">
@@ -693,7 +1131,7 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                                   <div
                                     className="absolute left-1/2 top-full mt-2 -translate-x-1/2 text-xs text-muted-foreground whitespace-nowrap pointer-events-none"
                                   >
-                                    {day.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                    {xLabel}
                                   </div>
                                 </div>
                               );

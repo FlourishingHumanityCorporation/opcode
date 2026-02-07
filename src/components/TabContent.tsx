@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useTabState } from '@/hooks/useTabState';
 import { ProjectWorkspaceView } from '@/components/ProjectWorkspaceView';
 import { UtilityOverlayHost } from '@/components/UtilityOverlayHost';
+import { logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 
 export const TabContent: React.FC = () => {
   const {
@@ -93,6 +94,11 @@ export const TabContent: React.FC = () => {
     const handleOpenUtilityOverlay = (event: Event) => {
       const detail = (event as CustomEvent<{ overlay: 'agents' | 'usage' | 'mcp' | 'settings' | 'claude-md' | 'diagnostics'; payload?: any }>).detail;
       if (!detail?.overlay) return;
+      logWorkspaceEvent({
+        category: 'state_action',
+        action: 'tabcontent_open_utility_overlay',
+        payload: { overlay: detail.overlay },
+      });
       openUtilityOverlay(detail.overlay, detail.payload);
     };
 

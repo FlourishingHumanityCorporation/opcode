@@ -1,10 +1,11 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import type { UtilityOverlayType } from '@/contexts/TabContext';
 import { Button } from '@/components/ui/button';
 import { ClaudeFileEditor } from '@/components/ClaudeFileEditor';
 import type { ClaudeMdFile } from '@/lib/api';
+import { logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 
 const Agents = lazy(() => import('@/components/Agents').then((m) => ({ default: m.Agents })));
 const UsageDashboard = lazy(() => import('@/components/UsageDashboard').then((m) => ({ default: m.UsageDashboard })));
@@ -17,6 +18,60 @@ interface UtilityOverlayHostProps {
   overlay: UtilityOverlayType;
   payload: any;
   onClose: () => void;
+}
+
+interface UtilityOverlayErrorBoundaryProps {
+  children: React.ReactNode;
+  overlay: UtilityOverlayType;
+}
+
+interface UtilityOverlayErrorBoundaryState {
+  hasError: boolean;
+}
+
+class UtilityOverlayErrorBoundary extends React.Component<
+  UtilityOverlayErrorBoundaryProps,
+  UtilityOverlayErrorBoundaryState
+> {
+  state: UtilityOverlayErrorBoundaryState = {
+    hasError: false,
+  };
+
+  static getDerivedStateFromError(): UtilityOverlayErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error): void {
+    logWorkspaceEvent({
+      category: 'error',
+      action: 'utility_overlay_render_failed',
+      message: error.message,
+      payload: { overlay: this.props.overlay },
+    });
+  }
+
+  componentDidUpdate(prevProps: UtilityOverlayErrorBoundaryProps): void {
+    if (prevProps.overlay !== this.props.overlay && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  render(): React.ReactNode {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-full items-center justify-center p-6">
+          <div className="max-w-sm text-center">
+            <p className="text-sm font-medium">Utility panel failed to render.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Open Diagnostics from the top menu to inspect logs.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
 }
 
 function toClaudeFile(payload: any): ClaudeMdFile | null {
@@ -35,6 +90,15 @@ function toClaudeFile(payload: any): ClaudeMdFile | null {
 
 export const UtilityOverlayHost: React.FC<UtilityOverlayHostProps> = ({ overlay, payload, onClose }) => {
   const file = toClaudeFile(payload);
+
+  useEffect(() => {
+    if (!overlay) return;
+    logWorkspaceEvent({
+      category: 'state_action',
+      action: 'utility_overlay_opened',
+      payload: { overlay },
+    });
+  }, [overlay]);
 
   const renderContent = () => {
     switch (overlay) {
@@ -83,15 +147,17 @@ export const UtilityOverlayHost: React.FC<UtilityOverlayHostProps> = ({ overlay,
               </Button>
             </div>
             <div className="h-[calc(100%-44px)] overflow-hidden">
-              <Suspense
-                fallback={
-                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                    Loading...
-                  </div>
-                }
-              >
-                {renderContent()}
-              </Suspense>
+              <UtilityOverlayErrorBoundary overlay={overlay}>
+                <Suspense
+                  fallback={
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      Loading...
+                    </div>
+                  }
+                >
+                  {renderContent()}
+                </Suspense>
+              </UtilityOverlayErrorBoundary>
             </div>
           </motion.aside>
         </>

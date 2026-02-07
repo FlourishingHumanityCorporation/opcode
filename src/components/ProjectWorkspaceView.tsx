@@ -128,7 +128,7 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ work
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background">
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-card/70 px-2">
+      <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-[var(--color-chrome-border)]/90 bg-[var(--color-chrome-bg)] px-2">
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-hide">
           {workspace.terminalTabs.map((terminal, index) => {
             const isActive = terminal.id === activeTerminal.id;
@@ -139,25 +139,25 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ work
                 onClick={() => setActiveTerminalTab(workspace.id, terminal.id)}
                 onDoubleClick={() => handleRenameTerminal(terminal)}
                 className={cn(
-                  'group flex h-8 min-w-[140px] max-w-[260px] items-center gap-2 rounded-md border px-2 text-xs',
+                  'group flex h-6 min-w-[132px] max-w-[280px] items-center gap-1 rounded-md border px-1.5 text-[11px] tracking-[0.01em]',
                   isActive
-                    ? 'border-primary/50 bg-background text-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.04)]'
-                    : 'border-transparent bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground'
+                    ? 'border-[var(--color-chrome-border)] bg-[var(--color-chrome-active)] text-[var(--color-chrome-text-active)] font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_1px_1px_rgba(0,0,0,0.05)]'
+                    : 'border-transparent bg-[var(--color-chrome-surface)] text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)] font-medium'
                 )}
                 data-testid={`terminal-tab-${terminal.id}`}
               >
-                <Terminal className="h-3.5 w-3.5 shrink-0" />
+                <Terminal className="h-2.5 w-2.5 shrink-0" />
                 <span className="truncate text-left">{getTerminalTitle(terminal, index)}</span>
                 <Button
                   size="icon"
                   variant="ghost"
-                  className={cn('h-5 w-5 shrink-0 p-0', isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
+                  className={cn('h-3.5 w-3.5 shrink-0 p-0', isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
                   onClick={(event) => {
                     event.stopPropagation();
                     closeTerminalTab(workspace.id, terminal.id);
                   }}
                 >
-                  <X className="h-3 w-3" />
+                  <X className="h-2 w-2" />
                 </Button>
               </motion.button>
             );
@@ -167,12 +167,12 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ work
         <Button
           size="icon"
           variant="ghost"
-          className="h-8 w-8 shrink-0"
+          className="h-6 w-6 shrink-0 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
           onClick={handleCreateTerminal}
           title="New terminal tab"
           data-testid="workspace-new-terminal"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-3 w-3" />
         </Button>
       </div>
 

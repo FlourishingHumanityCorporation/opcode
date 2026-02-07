@@ -139,6 +139,43 @@ async fn get_usage() -> Json<ApiResponse<Vec<serde_json::Value>>> {
     Json(ApiResponse::success(vec![]))
 }
 
+/// Simple usage range endpoint - return empty for now
+async fn get_usage_range() -> Json<ApiResponse<Vec<serde_json::Value>>> {
+    Json(ApiResponse::success(vec![]))
+}
+
+/// Simple usage sessions endpoint - return empty for now
+async fn get_usage_sessions() -> Json<ApiResponse<Vec<serde_json::Value>>> {
+    Json(ApiResponse::success(vec![]))
+}
+
+/// Simple usage details endpoint - return empty for now
+async fn get_usage_details() -> Json<ApiResponse<Vec<serde_json::Value>>> {
+    Json(ApiResponse::success(vec![]))
+}
+
+/// Usage index status endpoint - return idle defaults for web mode
+async fn get_usage_index_status() -> Json<ApiResponse<serde_json::Value>> {
+    Json(ApiResponse::success(serde_json::json!({
+        "state": "idle",
+        "files_total": 0,
+        "files_processed": 0,
+        "lines_processed": 0,
+        "entries_indexed": 0,
+        "cancelled": false
+    })))
+}
+
+/// Start usage index sync endpoint - no-op in web mode
+async fn start_usage_index_sync() -> Json<ApiResponse<serde_json::Value>> {
+    get_usage_index_status().await
+}
+
+/// Cancel usage index sync endpoint - no-op in web mode
+async fn cancel_usage_index_sync() -> Json<ApiResponse<serde_json::Value>> {
+    get_usage_index_status().await
+}
+
 /// Get Claude settings - return basic defaults for web mode
 async fn get_claude_settings() -> Json<ApiResponse<serde_json::Value>> {
     let default_settings = serde_json::json!({
@@ -788,6 +825,12 @@ pub async fn create_web_server(port: u16) -> Result<(), Box<dyn std::error::Erro
         .route("/api/projects/{project_id}/sessions", get(get_sessions))
         .route("/api/agents", get(get_agents))
         .route("/api/usage", get(get_usage))
+        .route("/api/usage/range", get(get_usage_range))
+        .route("/api/usage/sessions", get(get_usage_sessions))
+        .route("/api/usage/details", get(get_usage_details))
+        .route("/api/usage/index/status", get(get_usage_index_status))
+        .route("/api/usage/index/sync", get(start_usage_index_sync))
+        .route("/api/usage/index/cancel", get(cancel_usage_index_sync))
         // Settings and configuration
         .route("/api/settings/claude", get(get_claude_settings))
         .route("/api/settings/claude/version", get(check_claude_version))

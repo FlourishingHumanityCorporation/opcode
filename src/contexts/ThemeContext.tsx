@@ -1,7 +1,8 @@
-import React, { createContext, useState, useContext, useCallback, useEffect } from 'react';
+import React, { createContext, useState, useContext, useCallback, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
 
 export type ThemeMode = 'dark' | 'gray' | 'light' | 'custom';
+export type ThemePreference = ThemeMode | 'system';
 
 export interface CustomThemeColors {
   background: string;
@@ -25,8 +26,9 @@ export interface CustomThemeColors {
 
 interface ThemeContextType {
   theme: ThemeMode;
+  themePreference: ThemePreference;
   customColors: CustomThemeColors;
-  setTheme: (theme: ThemeMode) => Promise<void>;
+  setTheme: (theme: ThemePreference) => Promise<void>;
   setCustomColors: (colors: Partial<CustomThemeColors>) => Promise<void>;
   isLoading: boolean;
 }
@@ -35,6 +37,17 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 const THEME_STORAGE_KEY = 'theme_preference';
 const CUSTOM_COLORS_STORAGE_KEY = 'theme_custom_colors';
+
+const getSystemTheme = (): 'dark' | 'light' => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'dark';
+  }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+};
+
+const isThemePreference = (value: string | null): value is ThemePreference => {
+  return value === 'dark' || value === 'gray' || value === 'light' || value === 'custom' || value === 'system';
+};
 
 // Default custom theme colors (based on current dark theme)
 const DEFAULT_CUSTOM_COLORS: CustomThemeColors = {
@@ -58,51 +71,23 @@ const DEFAULT_CUSTOM_COLORS: CustomThemeColors = {
 };
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setThemeState] = useState<ThemeMode>('dark');
+  const [theme, setThemeState] = useState<ThemeMode>(() => getSystemTheme());
+  const [themePreference, setThemePreferenceState] = useState<ThemePreference>('system');
   const [customColors, setCustomColorsState] = useState<CustomThemeColors>(DEFAULT_CUSTOM_COLORS);
   const [isLoading, setIsLoading] = useState(true);
+  const themePreferenceRef = useRef<ThemePreference>('system');
+  const customColorsRef = useRef<CustomThemeColors>(DEFAULT_CUSTOM_COLORS);
 
-  // Load theme preference and custom colors from storage
   useEffect(() => {
-    const loadTheme = async () => {
-      try {
-        // Load theme preference
-        const savedTheme = await api.getSetting(THEME_STORAGE_KEY);
-        
-        if (savedTheme) {
-          const themeMode = savedTheme as ThemeMode;
-          document.documentElement.classList.remove('warp-default');
-          setThemeState(themeMode);
-          await applyTheme(themeMode, customColors);
-        } else {
-          // No saved preference: apply Warp-inspired dark default.
-          document.documentElement.classList.add('warp-default');
-          setThemeState('dark');
-          await applyTheme('dark', customColors);
-        }
+    themePreferenceRef.current = themePreference;
+  }, [themePreference]);
 
-        // Load custom colors
-        const savedColors = await api.getSetting(CUSTOM_COLORS_STORAGE_KEY);
-        
-        if (savedColors) {
-          const colors = JSON.parse(savedColors) as CustomThemeColors;
-          setCustomColorsState(colors);
-          if (theme === 'custom') {
-            await applyTheme('custom', colors);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to load theme settings:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadTheme();
-  }, []);
+  useEffect(() => {
+    customColorsRef.current = customColors;
+  }, [customColors]);
 
   // Apply theme to document
-  const applyTheme = useCallback(async (themeMode: ThemeMode, colors: CustomThemeColors) => {
+  const applyTheme = useCallback((themeMode: ThemeMode, colors: CustomThemeColors) => {
     const root = document.documentElement;
     
     // Remove all theme classes
@@ -125,37 +110,134 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
     }
 
+    if (themeMode === 'light') {
+      root.style.colorScheme = 'light';
+    } else {
+      root.style.colorScheme = 'dark';
+    }
+
     // Note: Window theme updates removed since we're using custom titlebar
   }, []);
 
-  const setTheme = useCallback(async (newTheme: ThemeMode) => {
+  // Load theme preference and custom colors from storage
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadTheme = async () => {
+      try {
+        // Load custom colors
+        const savedColors = await api.getSetting(CUSTOM_COLORS_STORAGE_KEY);
+        let nextCustomColors = DEFAULT_CUSTOM_COLORS;
+        
+        if (savedColors) {
+          try {
+            nextCustomColors = JSON.parse(savedColors) as CustomThemeColors;
+          } catch (parseError) {
+            console.error('Failed to parse custom theme settings:', parseError);
+          }
+        }
+
+        if (isMounted) {
+          setCustomColorsState(nextCustomColors);
+          customColorsRef.current = nextCustomColors;
+        }
+
+        // Load theme preference
+        const savedTheme = await api.getSetting(THEME_STORAGE_KEY);
+        const nextThemePreference: ThemePreference = isThemePreference(savedTheme) ? savedTheme : 'system';
+        const resolvedTheme: ThemeMode = nextThemePreference === 'system' ? getSystemTheme() : nextThemePreference;
+
+        if (isMounted) {
+          document.documentElement.classList.remove('warp-default');
+          themePreferenceRef.current = nextThemePreference;
+          setThemePreferenceState(nextThemePreference);
+          setThemeState(resolvedTheme);
+          applyTheme(resolvedTheme, nextCustomColors);
+        }
+
+        if (!isThemePreference(savedTheme)) {
+          await api.saveSetting(THEME_STORAGE_KEY, 'system');
+        }
+      } catch (error) {
+        console.error('Failed to load theme settings:', error);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadTheme();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [applyTheme]);
+
+  // Listen for system theme changes only once and apply when preference is "system"
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => {
+      if (themePreferenceRef.current !== 'system') {
+        return;
+      }
+      const nextTheme: ThemeMode = mediaQuery.matches ? 'dark' : 'light';
+      setThemeState(nextTheme);
+      applyTheme(nextTheme, customColorsRef.current);
+    };
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleChange);
+    } else if (typeof mediaQuery.addListener === 'function') {
+      mediaQuery.addListener(handleChange);
+    }
+
+    return () => {
+      if (typeof mediaQuery.removeEventListener === 'function') {
+        mediaQuery.removeEventListener('change', handleChange);
+      } else if (typeof mediaQuery.removeListener === 'function') {
+        mediaQuery.removeListener(handleChange);
+      }
+    };
+  }, [applyTheme]);
+
+  const setTheme = useCallback(async (newThemePreference: ThemePreference) => {
     try {
       setIsLoading(true);
       document.documentElement.classList.remove('warp-default');
       
       // Apply theme immediately
-      setThemeState(newTheme);
-      await applyTheme(newTheme, customColors);
+      themePreferenceRef.current = newThemePreference;
+      setThemePreferenceState(newThemePreference);
+      const resolvedTheme: ThemeMode = newThemePreference === 'system' ? getSystemTheme() : newThemePreference;
+      setThemeState(resolvedTheme);
+      applyTheme(resolvedTheme, customColorsRef.current);
       
       // Save to storage
-      await api.saveSetting(THEME_STORAGE_KEY, newTheme);
+      await api.saveSetting(THEME_STORAGE_KEY, newThemePreference);
     } catch (error) {
       console.error('Failed to save theme preference:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [customColors, applyTheme]);
+  }, [applyTheme]);
 
   const setCustomColors = useCallback(async (colors: Partial<CustomThemeColors>) => {
     try {
       setIsLoading(true);
       
       const newColors = { ...customColors, ...colors };
+      customColorsRef.current = newColors;
       setCustomColorsState(newColors);
       
       // Apply immediately if custom theme is active
-      if (theme === 'custom') {
-        await applyTheme('custom', newColors);
+      if (themePreference === 'custom') {
+        setThemeState('custom');
+        applyTheme('custom', newColors);
       }
       
       // Save to storage
@@ -165,10 +247,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setIsLoading(false);
     }
-  }, [theme, customColors, applyTheme]);
+  }, [themePreference, customColors, applyTheme]);
 
   const value: ThemeContextType = {
     theme,
+    themePreference,
     customColors,
     setTheme,
     setCustomColors,

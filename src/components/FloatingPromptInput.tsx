@@ -18,11 +18,12 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Popover } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { TooltipProvider, TooltipSimple, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip-modern";
 import { FilePicker } from "./FilePicker";
 import { SlashCommandPicker } from "./SlashCommandPicker";
 import { ImagePreview } from "./ImagePreview";
-import { type FileEntry, type SlashCommand } from "@/lib/api";
+import { api, type FileEntry, type SlashCommand } from "@/lib/api";
 import {
   getDefaultModelForProvider,
   getProviderDisplayName,
@@ -157,6 +158,10 @@ const THINKING_MODES: ThinkingModeConfig[] = [
   }
 ];
 
+const THINKING_PROMPT_HINTS_ENABLED_KEY = "thinking_prompt_hints_enabled";
+const MIN_COMPOSER_HEIGHT = 29;
+const MAX_COMPOSER_HEIGHT = 144;
+
 /**
  * ThinkingModeIndicator component - Shows visual indicator bars for thinking level
  */
@@ -212,6 +217,7 @@ const FloatingPromptInputInner = (
     defaultModel ?? getDefaultModelForProvider(providerId)
   );
   const [selectedThinkingMode, setSelectedThinkingMode] = useState<ThinkingMode>("auto");
+  const [thinkingPromptHintsEnabled, setThinkingPromptHintsEnabled] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [thinkingModePickerOpen, setThinkingModePickerOpen] = useState(false);
@@ -226,7 +232,7 @@ const FloatingPromptInputInner = (
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement>(null);
   const unlistenDragDropRef = useRef<(() => void) | null>(null);
-  const [textareaHeight, setTextareaHeight] = useState<number>(48);
+  const [textareaHeight, setTextareaHeight] = useState<number>(MIN_COMPOSER_HEIGHT);
   const isIMEComposingRef = useRef(false);
   const modelOptions = useMemo(
     () => getProviderModelOptions(providerId),
@@ -248,6 +254,39 @@ const FloatingPromptInputInner = (
       return modelOptions[0]?.id ?? "";
     });
   }, [defaultModel, modelOptions]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadThinkingPromptHintsSetting = async () => {
+      try {
+        const savedValue = await api.getSetting(THINKING_PROMPT_HINTS_ENABLED_KEY);
+        if (!isMounted) return;
+        if (savedValue === null) {
+          setThinkingPromptHintsEnabled(true);
+          return;
+        }
+        setThinkingPromptHintsEnabled(savedValue === "true");
+      } catch (error) {
+        console.error("Failed to load thinking prompt hints setting:", error);
+      }
+    };
+
+    loadThinkingPromptHintsSetting();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleThinkingPromptHintsToggle = async (enabled: boolean) => {
+    setThinkingPromptHintsEnabled(enabled);
+    try {
+      await api.saveSetting(THINKING_PROMPT_HINTS_ENABLED_KEY, enabled ? "true" : "false");
+    } catch (error) {
+      console.error("Failed to save thinking prompt hints setting:", error);
+    }
+  };
 
   const getModelIcon = (option: ProviderModelOption) => {
     if (providerId === "claude" && option.id === "opus") {
@@ -392,7 +431,7 @@ const FloatingPromptInputInner = (
     if (textareaRef.current && !isExpanded) {
       textareaRef.current.style.height = 'auto';
       const scrollHeight = textareaRef.current.scrollHeight;
-      const newHeight = Math.min(Math.max(scrollHeight, 48), 240);
+      const newHeight = Math.min(Math.max(scrollHeight, MIN_COMPOSER_HEIGHT), MAX_COMPOSER_HEIGHT);
       setTextareaHeight(newHeight);
       textareaRef.current.style.height = `${newHeight}px`;
     }
@@ -494,8 +533,8 @@ const FloatingPromptInputInner = (
       // Reset height to auto to get the actual scrollHeight
       textareaRef.current.style.height = 'auto';
       const scrollHeight = textareaRef.current.scrollHeight;
-      // Set min height to 48px and max to 240px (about 10 lines)
-      const newHeight = Math.min(Math.max(scrollHeight, 48), 240);
+      // Single-line default with controlled growth when needed
+      const newHeight = Math.min(Math.max(scrollHeight, MIN_COMPOSER_HEIGHT), MAX_COMPOSER_HEIGHT);
       setTextareaHeight(newHeight);
       textareaRef.current.style.height = `${newHeight}px`;
     }
@@ -740,16 +779,16 @@ const FloatingPromptInputInner = (
     if (prompt.trim() && !disabled) {
       let finalPrompt = prompt.trim();
 
-      // Append thinking phrase if not auto mode
+      // Append thinking phrase only when prompt hints are enabled
       const thinkingMode = THINKING_MODES.find(m => m.id === selectedThinkingMode);
-      if (thinkingMode && thinkingMode.phrase) {
+      if (thinkingPromptHintsEnabled && thinkingMode && thinkingMode.phrase) {
         finalPrompt = `${finalPrompt}.\n\n${thinkingMode.phrase}.`;
       }
 
       onSend(finalPrompt, selectedModel);
       setPrompt("");
       setEmbeddedImages([]);
-      setTextareaHeight(48); // Reset height after sending
+      setTextareaHeight(MIN_COMPOSER_HEIGHT); // Reset height after sending
     }
   };
 
@@ -1061,6 +1100,20 @@ const FloatingPromptInputInner = (
                               <ThinkingModeIndicator level={mode.level} />
                             </button>
                           ))}
+                          <div className="mt-1 border-t border-border/60 px-2 py-2">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-0.5">
+                                <div className="text-xs font-medium">Prompt Hints</div>
+                                <div className="text-[11px] text-muted-foreground">
+                                  Append think/ultrathink words
+                                </div>
+                              </div>
+                              <Switch
+                                checked={thinkingPromptHintsEnabled}
+                                onCheckedChange={handleThinkingPromptHintsToggle}
+                              />
+                            </div>
+                          </div>
                         </div>
                       }
                       open={thinkingModePickerOpen}
@@ -1099,7 +1152,7 @@ const FloatingPromptInputInner = (
       {/* Fixed Position Input Bar */}
       <div
         className={cn(
-          "fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border shadow-lg",
+          "fixed bottom-0 left-0 right-0 z-40 bg-background border-t border-[var(--color-chrome-border)]",
           dragActive && "ring-2 ring-primary ring-offset-2",
           className
         )}
@@ -1108,7 +1161,7 @@ const FloatingPromptInputInner = (
         onDragOver={handleDrag}
         onDrop={handleDrop}
       >
-        <div className="container mx-auto">
+        <div className="w-full">
           {/* Image previews */}
           {embeddedImages.length > 0 && (
             <ImagePreview
@@ -1118,10 +1171,10 @@ const FloatingPromptInputInner = (
             />
           )}
 
-          <div className="p-3">
-            <div className="flex items-end gap-2">
+          <div className="px-2 py-0">
+            <div className="flex items-center gap-0.5 min-h-8">
               {/* Model & Thinking Mode Selectors - Left side, fixed at bottom */}
-              <div className="flex items-center gap-1 shrink-0 mb-1">
+              <div className="flex items-center gap-0 shrink-0">
                 <Popover
                   trigger={
                     <Tooltip>
@@ -1134,17 +1187,17 @@ const FloatingPromptInputInner = (
                               variant="ghost"
                               size="sm"
                               disabled={disabled}
-                              className="h-9 px-2 hover:bg-accent/50 gap-1"
+                              className="h-5 px-1 hover:bg-accent/50 gap-0.5"
                             >
                               <span className={getModelIconColorClass()}>
-                                {selectedModelData ? getModelIcon(selectedModelData) : <Zap className="h-3.5 w-3.5" />}
+                                {selectedModelData ? getModelIcon(selectedModelData) : <Zap className="h-2.5 w-2.5" />}
                               </span>
                               {selectedModelData && (
-                                <span className="text-[10px] font-bold opacity-70">
+                                <span className="text-[9px] font-semibold opacity-70">
                                   {selectedModelData.shortName}
                                 </span>
                               )}
-                              <ChevronUp className="h-3 w-3 ml-0.5 opacity-50" />
+                              <ChevronUp className="h-2 w-2 opacity-50" />
                             </Button>
                           </motion.div>
                         </TooltipTrigger>
@@ -1204,15 +1257,15 @@ const FloatingPromptInputInner = (
                               variant="ghost"
                               size="sm"
                               disabled={disabled}
-                              className="h-9 px-2 hover:bg-accent/50 gap-1"
+                              className="h-5 px-1 hover:bg-accent/50 gap-0.5"
                             >
                               <span className={THINKING_MODES.find(m => m.id === selectedThinkingMode)?.color}>
                                 {THINKING_MODES.find(m => m.id === selectedThinkingMode)?.icon}
                               </span>
-                              <span className="text-[10px] font-semibold opacity-70">
+                              <span className="text-[9px] font-semibold opacity-70">
                                 {THINKING_MODES.find(m => m.id === selectedThinkingMode)?.shortName}
                               </span>
-                              <ChevronUp className="h-3 w-3 ml-0.5 opacity-50" />
+                              <ChevronUp className="h-2 w-2 opacity-50" />
                             </Button>
                           </motion.div>
                         </TooltipTrigger>
@@ -1251,6 +1304,20 @@ const FloatingPromptInputInner = (
                         <ThinkingModeIndicator level={mode.level} />
                       </button>
                     ))}
+                    <div className="mt-1 border-t border-border/60 px-2 py-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="text-xs font-medium">Prompt Hints</div>
+                          <div className="text-[11px] text-muted-foreground">
+                            Append think/ultrathink words
+                          </div>
+                        </div>
+                        <Switch
+                          checked={thinkingPromptHintsEnabled}
+                          onCheckedChange={handleThinkingPromptHintsToggle}
+                        />
+                      </div>
+                    </div>
                   </div>
                 }
                 open={thinkingModePickerOpen}
@@ -1265,6 +1332,7 @@ const FloatingPromptInputInner = (
               <div className="flex-1 relative">
                 <Textarea
                   ref={textareaRef}
+                  rows={1}
                   value={prompt}
                   onChange={handleTextChange}
                   onKeyDown={handleKeyDown}
@@ -1278,18 +1346,18 @@ const FloatingPromptInputInner = (
                   }
                   disabled={disabled}
                   className={cn(
-                    "resize-none pr-20 pl-3 py-2.5 transition-all duration-150",
+                    "resize-none box-border pr-11 !pl-2 !py-1 !text-[12px] leading-[1.2] rounded-[8px] transition-all duration-150",
                     dragActive && "border-primary",
-                    textareaHeight >= 240 && "overflow-y-auto scrollbar-thin"
+                    textareaHeight >= MAX_COMPOSER_HEIGHT && "overflow-y-auto scrollbar-thin"
                   )}
                   style={{
                     height: `${textareaHeight}px`,
-                    overflowY: textareaHeight >= 240 ? 'auto' : 'hidden'
+                    overflowY: textareaHeight >= MAX_COMPOSER_HEIGHT ? 'auto' : 'hidden'
                   }}
                 />
 
                 {/* Action buttons inside input - fixed at bottom right */}
-                <div className="absolute right-1.5 bottom-1.5 flex items-center gap-0.5">
+                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
                   <TooltipSimple content="Expand (Ctrl+Shift+E)" side="top">
                     <motion.div
                       whileTap={{ scale: 0.97 }}
@@ -1300,9 +1368,9 @@ const FloatingPromptInputInner = (
                         size="icon"
                         onClick={() => setIsExpanded(true)}
                         disabled={disabled}
-                        className="h-8 w-8 hover:bg-accent/50 transition-colors"
+                        className="h-5 w-5 hover:bg-accent/50 transition-colors"
                       >
-                        <Maximize2 className="h-3.5 w-3.5" />
+                        <Maximize2 className="h-2.5 w-2.5" />
                       </Button>
                     </motion.div>
                   </TooltipSimple>
@@ -1318,14 +1386,14 @@ const FloatingPromptInputInner = (
                         variant={isLoading ? "destructive" : prompt.trim() ? "default" : "ghost"}
                         size="icon"
                         className={cn(
-                          "h-8 w-8 transition-all",
+                          "h-5 w-5 transition-all",
                           prompt.trim() && !isLoading && "shadow-sm"
                         )}
                       >
                         {isLoading ? (
-                          <Square className="h-4 w-4" />
+                          <Square className="h-2.5 w-2.5" />
                         ) : (
-                          <Send className="h-4 w-4" />
+                          <Send className="h-2.5 w-2.5" />
                         )}
                       </Button>
                     </motion.div>
@@ -1359,7 +1427,7 @@ const FloatingPromptInputInner = (
 
               {/* Extra menu items - Right side, fixed at bottom */}
               {extraMenuItems && (
-                <div className="flex items-center gap-0.5 shrink-0 mb-1">
+                <div className="flex items-center gap-0 shrink-0">
                   {extraMenuItems}
                 </div>
               )}
