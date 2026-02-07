@@ -186,7 +186,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     prompt: string;
     model: string;
     providerId: string;
-    reasoningEffort?: string;
+    reasoningEffort?: PromptSendOptions["reasoningEffort"];
   };
 
   const [projectPath, setProjectPath] = useState(initialProjectPath || session?.project_path || "");

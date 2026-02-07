@@ -757,7 +757,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
                       setModel(defaultModel);
                     }
                   }}
-                  placeholder="e.g., gpt-5-codex or claude-sonnet-4-5"
+                  placeholder="e.g., gpt-5.3-codex or claude-sonnet-4-5"
                   className="h-9"
                   disabled={isRunning}
                 />

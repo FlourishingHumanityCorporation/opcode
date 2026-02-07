@@ -25,12 +25,6 @@ const PROVIDER_MODEL_OPTIONS: Record<string, ProviderModelOption[]> = {
       shortName: "H",
       description: "Haiku 4.5 · Fastest for quick answers",
     },
-    {
-      id: "opus",
-      name: "Opus",
-      shortName: "O",
-      description: "Legacy Opus alias",
-    },
   ],
   codex: [
     {

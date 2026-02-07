@@ -410,7 +410,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
                     id="custom-model"
                     value={customModelInput}
                     onChange={(e) => handleCustomModelChange(e.target.value)}
-                    placeholder="e.g., gpt-5-codex or claude-sonnet-4-5"
+                    placeholder="e.g., gpt-5.3-codex or claude-sonnet-4-5"
                     className="h-9"
                   />
                   <p className="text-caption text-muted-foreground">

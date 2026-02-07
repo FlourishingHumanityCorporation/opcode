@@ -215,7 +215,7 @@ test.describe("Multiprovider agent smoke", () => {
 
     const providers = [
       { id: "claude", modelLabel: "Claude 4 Sonnet" },
-      { id: "codex", modelLabel: "GPT-5 Codex" },
+      { id: "codex", modelLabel: "GPT-5.3-Codex" },
       { id: "gemini", modelLabel: "Gemini 2.5 Flash" },
     ];
 
