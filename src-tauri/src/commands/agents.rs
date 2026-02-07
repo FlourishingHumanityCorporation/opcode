@@ -2089,6 +2089,13 @@ pub async fn get_claude_binary_path(db: State<'_, AgentDb>) -> Result<Option<Str
 pub async fn set_claude_binary_path(db: State<'_, AgentDb>, path: String) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
+    if crate::claude_binary::is_disallowed_claude_path(&path) {
+        return Err(
+            "Selected path points to a GUI app bundle. Please select the Claude CLI binary."
+                .to_string(),
+        );
+    }
+
     // Validate that the path exists and is executable
     let path_buf = std::path::PathBuf::from(&path);
     if !path_buf.exists() {

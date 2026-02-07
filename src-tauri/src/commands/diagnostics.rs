@@ -1,6 +1,6 @@
 use crate::claude_binary::find_claude_binary;
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tokio::io::AsyncReadExt;
@@ -230,6 +230,50 @@ fn consume_stdout_chunk(
             parse_error_count,
         );
     }
+}
+
+fn parse_which_output(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let first_line = trimmed.lines().next().unwrap_or_default().trim();
+    if first_line.is_empty() {
+        return None;
+    }
+    if first_line.starts_with("claude:") && first_line.contains("aliased to") {
+        return first_line
+            .split("aliased to")
+            .nth(1)
+            .map(|value| value.trim().to_string());
+    }
+    Some(first_line.to_string())
+}
+
+fn resolve_iterm_probe_binary(app: &AppHandle) -> Result<String, String> {
+    if let Ok(output) = std::process::Command::new("which").arg("claude").output() {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(candidate) = parse_which_output(&stdout) {
+                if !crate::claude_binary::is_disallowed_claude_path(&candidate) {
+                    if candidate == "claude"
+                        || (PathBuf::from(&candidate).exists() && PathBuf::from(&candidate).is_file())
+                    {
+                        return Ok(candidate);
+                    }
+                }
+            }
+        }
+    }
+
+    let discovered = find_claude_binary(app)?;
+    if crate::claude_binary::is_disallowed_claude_path(&discovered) {
+        return Err(
+            "Resolved Claude path points to a GUI app bundle. Please configure a CLI binary."
+                .to_string(),
+        );
+    }
+    Ok(discovered)
 }
 
 async fn run_direct_probe(
@@ -598,7 +642,10 @@ pub async fn run_session_startup_probe(
         _ => ProbeBenchmarkKind::Startup,
     };
 
-    let claude_path = find_claude_binary(&app)?;
+    let claude_path = match benchmark_kind.clone() {
+        ProbeBenchmarkKind::AssistantIterm => resolve_iterm_probe_binary(&app)?,
+        _ => find_claude_binary(&app)?,
+    };
     let args = build_probe_args(&prompt, &model, include_partial_messages);
 
     match benchmark_kind.clone() {

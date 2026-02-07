@@ -30,6 +30,15 @@ pub struct ClaudeInstallation {
     pub installation_type: InstallationType,
 }
 
+/// Returns true when a path points to a GUI app bundle instead of a CLI binary.
+/// We explicitly reject these for command execution because they can launch UI windows.
+pub fn is_disallowed_claude_path(path: &str) -> bool {
+    let normalized = path.trim().to_ascii_lowercase();
+    normalized.ends_with(".app")
+        || normalized.contains(".app/contents/macos/")
+        || normalized.contains("\\.app\\contents\\macos\\")
+}
+
 /// Main function to find the Claude binary
 /// Checks database first for stored path and preference, then prioritizes accordingly
 pub fn find_claude_binary(app_handle: &tauri::AppHandle) -> Result<String, String> {
@@ -47,13 +56,19 @@ pub fn find_claude_binary(app_handle: &tauri::AppHandle) -> Result<String, Strin
                     |row| row.get::<_, String>(0),
                 ) {
                     info!("Found stored claude path in database: {}", stored_path);
-
-                    // Check if the path still exists
-                    let path_buf = PathBuf::from(&stored_path);
-                    if path_buf.exists() && path_buf.is_file() {
-                        return Ok(stored_path);
+                    if is_disallowed_claude_path(&stored_path) {
+                        warn!(
+                            "Ignoring stored Claude path because it points to an app bundle, not CLI: {}",
+                            stored_path
+                        );
                     } else {
-                        warn!("Stored claude path no longer exists: {}", stored_path);
+                        // Check if the path still exists
+                        let path_buf = PathBuf::from(&stored_path);
+                        if path_buf.exists() && path_buf.is_file() {
+                            return Ok(stored_path);
+                        } else {
+                            warn!("Stored claude path no longer exists: {}", stored_path);
+                        }
                     }
                 }
 
@@ -161,6 +176,19 @@ fn discover_system_installations() -> Vec<ClaudeInstallation> {
     // Remove duplicates by path
     let mut unique_paths = std::collections::HashSet::new();
     installations.retain(|install| unique_paths.insert(install.path.clone()));
+
+    // Filter out GUI app bundle paths; only CLI binaries are valid for execution.
+    installations.retain(|install| {
+        if is_disallowed_claude_path(&install.path) {
+            warn!(
+                "Skipping Claude installation candidate because it is an app bundle path: {}",
+                install.path
+            );
+            false
+        } else {
+            true
+        }
+    });
 
     installations
 }
@@ -690,4 +718,31 @@ pub fn create_command_with_env(program: &str) -> Command {
     }
 
     cmd
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_disallowed_claude_path;
+
+    #[test]
+    fn rejects_macos_app_bundle_paths() {
+        assert!(is_disallowed_claude_path(
+            "/Applications/Claude.app/Contents/MacOS/claude"
+        ));
+        assert!(is_disallowed_claude_path("/Applications/Claude.app"));
+    }
+
+    #[test]
+    fn rejects_case_insensitive_app_bundle_paths() {
+        assert!(is_disallowed_claude_path(
+            "/applications/claude.APP/contents/macos/claude"
+        ));
+    }
+
+    #[test]
+    fn accepts_normal_cli_paths() {
+        assert!(!is_disallowed_claude_path("/opt/homebrew/bin/claude"));
+        assert!(!is_disallowed_claude_path("/Users/test/.local/bin/claude"));
+        assert!(!is_disallowed_claude_path("claude"));
+    }
 }
