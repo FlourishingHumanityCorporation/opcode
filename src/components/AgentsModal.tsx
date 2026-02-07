@@ -22,6 +22,7 @@ import { Toast } from '@/components/ui/toast';
 import { api, type Agent, type AgentRunWithMetrics } from '@/lib/api';
 import { useTabState } from '@/hooks/useTabState';
 import { formatISOTimestamp } from '@/lib/date-utils';
+import { getModelDisplayName } from '@/lib/providerModels';
 import { open as openDialog, save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { GitHubAgentBrowser } from '@/components/GitHubAgentBrowser';
@@ -76,16 +77,9 @@ export const AgentsModal: React.FC<AgentsModalProps> = ({ open, onOpenChange }) 
   const loadRunningAgents = async () => {
     try {
       const runs = await api.listRunningAgentSessions();
-      const agentRuns = runs.map(run => ({
-        id: run.id,
-        agent_id: run.agent_id,
-        agent_name: run.agent_name,
-        task: run.task,
-        model: run.model,
-        status: 'running' as const,
-        created_at: run.created_at,
-        project_path: run.project_path,
-      } as AgentRunWithMetrics));
+      const agentRuns: AgentRunWithMetrics[] = runs.map((run) => ({
+        ...run,
+      }));
       
       setRunningAgents(agentRuns);
     } catch (error) {
@@ -378,7 +372,7 @@ export const AgentsModal: React.FC<AgentsModalProps> = ({ open, onOpenChange }) 
                               <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                                 <span>Started: {formatISOTimestamp(run.created_at)}</span>
                                 <Badge variant="outline" className="text-xs">
-                                  {run.model === 'opus' ? 'Claude 4 Opus' : 'Claude 4 Sonnet'}
+                                  {getModelDisplayName(run.provider_id || "claude", run.model)}
                                 </Badge>
                               </div>
                             </div>

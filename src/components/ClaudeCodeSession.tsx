@@ -16,37 +16,43 @@ import { Popover } from "@/components/ui/popover";
 import { api, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-// Conditional imports for Tauri APIs
-let tauriListen: any;
+// Tauri event listener — use dynamic import to work with Vite's ESM environment.
+// `require()` does not work in Vite; `import()` returns the correct ESM module.
 type UnlistenFn = () => void;
 
-try {
-  if (typeof window !== 'undefined' && window.__TAURI__) {
-    tauriListen = require("@tauri-apps/api/event").listen;
+// Resolved lazily on first use via getTauriListen()
+let _tauriListenPromise: Promise<any> | null = null;
+
+function getTauriListen(): Promise<any> {
+  if (!_tauriListenPromise) {
+    _tauriListenPromise = (typeof window !== 'undefined' && (window as any).__TAURI__)
+      ? import("@tauri-apps/api/event").then(m => m.listen).catch(() => null)
+      : Promise.resolve(null);
   }
-} catch (e) {
-  console.log('[ClaudeCodeSession] Tauri APIs not available, using web mode');
+  return _tauriListenPromise;
 }
 
-// Web-compatible replacements
-const listen = tauriListen || ((eventName: string, callback: (event: any) => void) => {
+// DOM-based fallback for web mode (non-Tauri)
+const domListen = (eventName: string, callback: (event: any) => void): Promise<UnlistenFn> => {
   console.log('[ClaudeCodeSession] Setting up DOM event listener for:', eventName);
-
-  // In web mode, listen for DOM events
   const domEventHandler = (event: any) => {
     console.log('[ClaudeCodeSession] DOM event received:', eventName, event.detail);
-    // Simulate Tauri event structure
     callback({ payload: event.detail });
   };
-
   window.addEventListener(eventName, domEventHandler);
-
-  // Return unlisten function
   return Promise.resolve(() => {
-    console.log('[ClaudeCodeSession] Removing DOM event listener for:', eventName);
     window.removeEventListener(eventName, domEventHandler);
   });
-});
+};
+
+// Unified listen function: uses Tauri IPC when available, DOM events as fallback
+const listen = async (eventName: string, callback: (event: any) => void): Promise<UnlistenFn> => {
+  const tauriListen = await getTauriListen();
+  if (tauriListen) {
+    return tauriListen(eventName, callback);
+  }
+  return domListen(eventName, callback);
+};
 import { StreamMessage } from "./StreamMessage";
 import { FloatingPromptInput, type FloatingPromptInputRef } from "./FloatingPromptInput";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -61,6 +67,11 @@ import type { ClaudeStreamMessage } from "./AgentExecution";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTrackEvent, useComponentMetrics, useWorkflowTracking } from "@/hooks";
 import { SessionPersistenceService } from "@/services/sessionPersistence";
+import {
+  getDefaultModelForProvider,
+  getModelDisplayName,
+  getProviderDisplayName,
+} from "@/lib/providerModels";
 
 interface ClaudeCodeSessionProps {
   /**
@@ -91,6 +102,14 @@ interface ClaudeCodeSessionProps {
    * Callback when project path changes
    */
   onProjectPathChange?: (path: string) => void;
+  /**
+   * Agent provider ID (defaults to "claude")
+   */
+  providerId?: string;
+  /**
+   * Callback when provider changes
+   */
+  onProviderChange?: (providerId: string) => void;
 }
 
 /**
@@ -105,7 +124,16 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   className,
   onStreamingChange,
   onProjectPathChange,
+  providerId: initialProviderId = "claude",
+  onProviderChange,
 }) => {
+  type QueuedPrompt = {
+    id: string;
+    prompt: string;
+    model: string;
+    providerId: string;
+  };
+
   const [projectPath] = useState(initialProjectPath || session?.project_path || "");
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -125,7 +153,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [forkSessionName, setForkSessionName] = useState("");
   
   // Queued prompts state
-  const [queuedPrompts, setQueuedPrompts] = useState<Array<{ id: string; prompt: string; model: "sonnet" | "opus" }>>([]);
+  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   
   // New state for preview feature
   const [showPreview, setShowPreview] = useState(false);
@@ -137,11 +165,16 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   // Add collapsed state for queued prompts
   const [queuedPromptsCollapsed, setQueuedPromptsCollapsed] = useState(false);
 
+  // Provider state
+  const [activeProviderId, setActiveProviderId] = useState(initialProviderId);
+  const [detectedProviders, setDetectedProviders] = useState<Array<{ providerId: string; binaryPath: string; version: string | null; source: string }>>([]);
+  const [showProviderMenu, setShowProviderMenu] = useState(false);
+
   const parentRef = useRef<HTMLDivElement>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
   const hasActiveSessionRef = useRef(false);
   const floatingPromptRef = useRef<FloatingPromptInputRef>(null);
-  const queuedPromptsRef = useRef<Array<{ id: string; prompt: string; model: "sonnet" | "opus" }>>([]);
+  const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
   const isMountedRef = useRef(true);
   const isListeningRef = useRef(false);
   const sessionStartTime = useRef<number>(Date.now());
@@ -177,6 +210,57 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       onProjectPathChange(projectPath);
     }
   }, []); // Only run on mount
+
+  // Sync local provider state if parent tab updates provider.
+  useEffect(() => {
+    setActiveProviderId(initialProviderId || "claude");
+  }, [initialProviderId]);
+
+  // Detect available providers on mount
+  useEffect(() => {
+    let isCancelled = false;
+
+    api.listDetectedAgents()
+      .then((agents: any[]) => {
+        if (isCancelled) return;
+
+        const providers = agents.map((a: any) => ({
+          providerId: a.provider_id,
+          binaryPath: a.binary_path,
+          version: a.version,
+          source: a.source,
+        }));
+
+        setDetectedProviders(providers);
+
+        if (providers.length === 0) return;
+
+        // If the active provider isn't installed, auto-fallback to a detected one.
+        setActiveProviderId((current) => {
+          const currentDetected = providers.some((p: any) => p.providerId === current);
+          if (currentDetected) return current;
+
+          const fallback =
+            providers.find((p: any) => p.providerId === initialProviderId) ||
+            providers.find((p: any) => p.providerId === "claude") ||
+            providers[0];
+
+          if (fallback && fallback.providerId !== current) {
+            onProviderChange?.(fallback.providerId);
+            return fallback.providerId;
+          }
+          return current;
+        });
+      })
+      .catch((err: any) => {
+        if (isCancelled) return;
+        console.warn('[ClaudeCodeSession] Failed to detect agents:', err);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
   
   // Keep ref in sync with state
   useEffect(() => {
@@ -487,8 +571,19 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   // Project path selection handled by parent tab controls
 
-  const handleSendPrompt = async (prompt: string, model: "sonnet" | "opus") => {
-    console.log('[ClaudeCodeSession] handleSendPrompt called with:', { prompt, model, projectPath, claudeSessionId, effectiveSession });
+  const handleSendPrompt = async (prompt: string, model: string, providerIdOverride?: string) => {
+    const providerToUse = providerIdOverride || activeProviderId;
+    const isClaudeProviderForRun = providerToUse === "claude";
+    const modelForTracking = model || "default";
+
+    console.log('[ClaudeCodeSession] handleSendPrompt called with:', {
+      prompt,
+      model,
+      providerToUse,
+      projectPath,
+      claudeSessionId,
+      effectiveSession
+    });
     
     if (!projectPath) {
       setError("Please select a project directory first");
@@ -500,7 +595,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       const newPrompt = {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         prompt,
-        model
+        model,
+        providerId: providerToUse,
       };
       setQueuedPrompts(prev => [...prev, newPrompt]);
       return;
@@ -744,7 +840,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               // Session context
               model: metrics.modelChanges.length > 0 
                 ? metrics.modelChanges[metrics.modelChanges.length - 1].to 
-                : 'sonnet',
+                : (getDefaultModelForProvider(providerToUse) || "default"),
               has_checkpoints: metrics.checkpointCount > 0,
               checkpoint_count: metrics.checkpointCount,
               was_resumed: metrics.wasResumed,
@@ -792,7 +888,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             
             // Small delay to ensure UI updates
             setTimeout(() => {
-              handleSendPrompt(nextPrompt.prompt, nextPrompt.model);
+              handleSendPrompt(nextPrompt.prompt, nextPrompt.model, nextPrompt.providerId);
             }, 100);
           }
         };
@@ -836,14 +932,15 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         }
         
         // Track model changes
+        const defaultModelForProvider = getDefaultModelForProvider(providerToUse) || "default";
         const lastModel = sessionMetrics.current.modelChanges.length > 0 
           ? sessionMetrics.current.modelChanges[sessionMetrics.current.modelChanges.length - 1].to
-          : (sessionMetrics.current.wasResumed ? 'sonnet' : model); // Default to sonnet if resumed
+          : (sessionMetrics.current.wasResumed ? defaultModelForProvider : modelForTracking);
         
-        if (lastModel !== model) {
+        if (lastModel !== modelForTracking) {
           sessionMetrics.current.modelChanges.push({
             from: lastModel,
-            to: model,
+            to: modelForTracking,
             timestamp: Date.now()
           });
         }
@@ -857,7 +954,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         
         trackEvent.enhancedPromptSubmitted({
           prompt_length: prompt.length,
-          model: model,
+          model: modelForTracking,
           has_attachments: false, // TODO: Add attachment support when implemented
           source: 'keyboard', // TODO: Track actual source (keyboard vs button)
           word_count: wordCount,
@@ -868,18 +965,26 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           session_age_ms: sessionAge
         });
 
-        // Execute the appropriate command
+        // Execute the appropriate command (provider-aware)
         if (effectiveSession && !isFirstPrompt) {
-          console.log('[ClaudeCodeSession] Resuming session:', effectiveSession.id);
+          console.log('[ClaudeCodeSession] Resuming session:', effectiveSession.id, 'provider:', providerToUse);
           trackEvent.sessionResumed(effectiveSession.id);
-          trackEvent.modelSelected(model);
-          await api.resumeClaudeCode(projectPath, effectiveSession.id, prompt, model);
+          trackEvent.modelSelected(modelForTracking);
+          if (isClaudeProviderForRun) {
+            await api.resumeClaudeCode(projectPath, effectiveSession.id, prompt, model);
+          } else {
+            await api.resumeAgentSession(providerToUse, projectPath, effectiveSession.id, prompt, model);
+          }
         } else {
-          console.log('[ClaudeCodeSession] Starting new session');
+          console.log('[ClaudeCodeSession] Starting new session, provider:', providerToUse);
           setIsFirstPrompt(false);
-          trackEvent.sessionCreated(model, 'prompt_input');
-          trackEvent.modelSelected(model);
-          await api.executeClaudeCode(projectPath, prompt, model);
+          trackEvent.sessionCreated(modelForTracking, 'prompt_input');
+          trackEvent.modelSelected(modelForTracking);
+          if (isClaudeProviderForRun) {
+            await api.executeClaudeCode(projectPath, prompt, model);
+          } else {
+            await api.executeAgentSession(providerToUse, projectPath, prompt, model);
+          }
         }
       }
     } catch (err) {
@@ -1027,7 +1132,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         // Session context
         model: metrics.modelChanges.length > 0 
           ? metrics.modelChanges[metrics.modelChanges.length - 1].to 
-          : 'sonnet', // Default to sonnet
+          : (getDefaultModelForProvider(activeProviderId) || "default"),
         has_checkpoints: metrics.checkpointCount > 0,
         checkpoint_count: metrics.checkpointCount,
         was_resumed: metrics.wasResumed,
@@ -1287,7 +1392,58 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     </div>
   );
 
-  const projectPathInput = null; // Removed project path display
+  // Provider names for display
+  const providerNames: Record<string, string> = {
+    claude: "Claude Code",
+    codex: "Codex CLI",
+    gemini: "Gemini CLI",
+    aider: "Aider",
+    goose: "Goose",
+    opencode: "OpenCode",
+  };
+
+  const handleProviderChange = (newProviderId: string) => {
+    setActiveProviderId(newProviderId);
+    setShowProviderMenu(false);
+    onProviderChange?.(newProviderId);
+  };
+
+  // Provider selector bar (only shown when multiple providers detected)
+  const projectPathInput = detectedProviders.length > 0 ? (
+    <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border/50 text-xs">
+      <div className="relative">
+        <button
+          onClick={() => setShowProviderMenu(!showProviderMenu)}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-accent/50 transition-colors text-muted-foreground hover:text-foreground"
+        >
+          <span className="font-medium">{providerNames[activeProviderId] || activeProviderId}</span>
+          <ChevronDown className="h-3 w-3" />
+        </button>
+        {showProviderMenu && (
+          <div className="absolute top-full left-0 mt-1 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[160px]">
+            {detectedProviders.map((agent) => (
+              <button
+                key={agent.providerId}
+                onClick={() => handleProviderChange(agent.providerId)}
+                className={cn(
+                  "w-full text-left px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors flex items-center justify-between",
+                  agent.providerId === activeProviderId && "bg-accent/30 text-foreground font-medium"
+                )}
+              >
+                <span>{providerNames[agent.providerId] || agent.providerId}</span>
+                {agent.version && (
+                  <span className="text-muted-foreground ml-2">v{agent.version}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {projectPath && (
+        <span className="text-muted-foreground truncate">{projectPath.replace(/^\/Users\/[^/]+\//, '~/')}</span>
+      )}
+    </div>
+  ) : null;
 
   // If preview is maximized, render only the WebviewPreview in full screen
   if (showPreview && isPreviewMaximized) {
@@ -1407,7 +1563,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-medium text-muted-foreground">#{index + 1}</span>
                           <span className="text-xs px-1.5 py-0.5 bg-primary/10 text-primary rounded">
-                            {queuedPrompt.model === "opus" ? "Opus" : "Sonnet"}
+                            {getProviderDisplayName(queuedPrompt.providerId)} · {getModelDisplayName(queuedPrompt.providerId, queuedPrompt.model)}
                           </span>
                         </div>
                         <p className="text-sm line-clamp-2 break-words">{queuedPrompt.prompt}</p>
@@ -1526,6 +1682,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               onCancel={handleCancelExecution}
               isLoading={isLoading}
               disabled={!projectPath}
+              providerId={activeProviderId}
+              defaultModel={getDefaultModelForProvider(activeProviderId)}
               projectPath={projectPath}
               extraMenuItems={
                 <>

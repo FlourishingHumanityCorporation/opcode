@@ -34,6 +34,12 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { HooksEditor } from "./HooksEditor";
 import { useTrackEvent, useComponentMetrics, useFeatureAdoptionTracking } from "@/hooks";
 import { useTabState } from "@/hooks/useTabState";
+import {
+  getDefaultModelForProvider,
+  getModelDisplayName,
+  getProviderDisplayName,
+  getProviderModelOptions,
+} from "@/lib/providerModels";
 
 interface AgentExecutionProps {
   /**
@@ -88,9 +94,18 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
   onBack,
   className,
 }) => {
+  const providerId = agent.provider_id || "claude";
+  const modelOptions = getProviderModelOptions(providerId);
+  const defaultModel = getDefaultModelForProvider(providerId);
+  const initialModel = agent.model || defaultModel;
+  const initialCustomModel = modelOptions.some((option) => option.id === initialModel)
+    ? ""
+    : initialModel;
+
   const [projectPath] = useState(initialProjectPath || "");
   const [task, setTask] = useState(agent.default_task || "");
-  const [model, setModel] = useState(agent.model || "sonnet");
+  const [model, setModel] = useState(initialModel);
+  const [customModelInput, setCustomModelInput] = useState(initialCustomModel);
   const [isRunning, setIsRunning] = useState(false);
   
   // Get tab state functions
@@ -445,7 +460,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
     if (isRunning) {
       // Show confirmation dialog before navigating away during execution
       const shouldLeave = window.confirm(
-        "An agent is currently running. If you navigate away, the agent will continue running in the background. You can view running sessions in the 'Running Sessions' tab within CC Agents.\n\nDo you want to continue?"
+        "An agent is currently running. If you navigate away, the agent will continue running in the background. You can view running sessions in the 'Running Sessions' tab.\n\nDo you want to continue?"
       );
       if (!shouldLeave) {
         return;
@@ -469,7 +484,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
   const handleCopyAsMarkdown = async () => {
     let markdown = `# Agent Execution: ${agent.name}\n\n`;
     markdown += `**Task:** ${task}\n`;
-    markdown += `**Model:** ${model === 'opus' ? 'Claude 4 Opus' : 'Claude 4 Sonnet'}\n`;
+    markdown += `**Model:** ${getModelDisplayName(providerId, model)}\n`;
     markdown += `**Date:** ${new Date().toISOString()}\n\n`;
     markdown += `---\n\n`;
 
@@ -553,7 +568,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
               <div>
                 <h1 className="text-heading-1">{agent.name}</h1>
                 <p className="mt-1 text-body-small text-muted-foreground">
-                  {isRunning ? 'Running' : messages.length > 0 ? 'Complete' : 'Ready'} • {model === 'opus' ? 'Claude 4 Opus' : 'Claude 4 Sonnet'}
+                  {isRunning ? 'Running' : messages.length > 0 ? 'Complete' : 'Ready'} • {getProviderDisplayName(providerId)} · {getModelDisplayName(providerId, model)}
                 </p>
               </div>
             </div>
@@ -593,65 +608,61 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
             <div className="space-y-3">
               <Label className="text-caption text-muted-foreground">Model Selection</Label>
               <div className="flex gap-2">
-                <motion.button
-                  type="button"
-                  onClick={() => !isRunning && setModel("sonnet")}
-                  whileTap={{ scale: 0.97 }}
-                  transition={{ duration: 0.15 }}
-                  className={cn(
-                    "flex-1 px-4 py-3 rounded-md border transition-all",
-                    model === "sonnet" 
-                      ? "border-primary bg-primary/10 text-primary" 
-                      : "border-border hover:border-primary/50 hover:bg-accent",
-                    isRunning && "opacity-50 cursor-not-allowed"
-                  )}
-                  disabled={isRunning}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={cn(
-                      "w-4 h-4 rounded-full border-2 flex items-center justify-center",
-                      model === "sonnet" ? "border-primary" : "border-muted-foreground"
-                    )}>
-                      {model === "sonnet" && (
-                        <div className="w-2 h-2 rounded-full bg-primary" />
-                      )}
-                    </div>
+                {modelOptions.map((option) => (
+                  <motion.button
+                    key={option.id}
+                    type="button"
+                    onClick={() => {
+                      if (isRunning) return;
+                      setModel(option.id);
+                      setCustomModelInput("");
+                    }}
+                    whileTap={{ scale: 0.97 }}
+                    transition={{ duration: 0.15 }}
+                    className={cn(
+                      "flex-1 px-4 py-3 rounded-md border transition-all",
+                      model === option.id
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border hover:border-primary/50 hover:bg-accent",
+                      isRunning && "opacity-50 cursor-not-allowed"
+                    )}
+                    disabled={isRunning}
+                  >
                     <div className="text-left">
-                      <div className="text-body-small font-medium">Claude 4 Sonnet</div>
-                      <div className="text-caption text-muted-foreground">Faster, efficient</div>
+                      <div className="text-body-small font-medium">{option.name}</div>
+                      <div className="text-caption text-muted-foreground">{option.description}</div>
                     </div>
-                  </div>
-                </motion.button>
-                
-                <motion.button
-                  type="button"
-                  onClick={() => !isRunning && setModel("opus")}
-                  whileTap={{ scale: 0.97 }}
-                  transition={{ duration: 0.15 }}
-                  className={cn(
-                    "flex-1 px-4 py-3 rounded-md border transition-all",
-                    model === "opus" 
-                      ? "border-primary bg-primary/10 text-primary" 
-                      : "border-border hover:border-primary/50 hover:bg-accent",
-                    isRunning && "opacity-50 cursor-not-allowed"
-                  )}
+                  </motion.button>
+                ))}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="agent-custom-model" className="text-caption text-muted-foreground">
+                  Custom Model ID (Optional)
+                </Label>
+                <Input
+                  id="agent-custom-model"
+                  value={customModelInput}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setCustomModelInput(value);
+
+                    const trimmed = value.trim();
+                    if (trimmed) {
+                      setModel(trimmed);
+                      return;
+                    }
+
+                    if (!modelOptions.some((option) => option.id === model)) {
+                      setModel(defaultModel);
+                    }
+                  }}
+                  placeholder="e.g., gpt-5-codex or claude-sonnet-4-5"
+                  className="h-9"
                   disabled={isRunning}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={cn(
-                      "w-4 h-4 rounded-full border-2 flex items-center justify-center",
-                      model === "opus" ? "border-primary" : "border-muted-foreground"
-                    )}>
-                      {model === "opus" && (
-                        <div className="w-2 h-2 rounded-full bg-primary" />
-                      )}
-                    </div>
-                    <div className="text-left">
-                      <div className="text-body-small font-medium">Claude 4 Opus</div>
-                      <div className="text-caption text-muted-foreground">More capable</div>
-                    </div>
-                  </div>
-                </motion.button>
+                />
+                <p className="text-caption text-muted-foreground">
+                  Current selection: <span className="font-mono">{getModelDisplayName(providerId, model)}</span>
+                </p>
               </div>
             </div>
 
@@ -659,7 +670,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label className="text-caption text-muted-foreground">Task Description</Label>
-                {projectPath && (
+                {projectPath && providerId === "claude" && (
                   <Button
                     variant="ghost"
                     size="sm"

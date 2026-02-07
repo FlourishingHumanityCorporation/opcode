@@ -96,12 +96,17 @@ export const Settings: React.FC<SettingsProps> = ({
   const [tabPersistenceEnabled, setTabPersistenceEnabled] = useState(true);
   // Startup intro preference
   const [startupIntroEnabled, setStartupIntroEnabled] = useState(true);
+
+  // Provider detection state
+  const [detectedAgents, setDetectedAgents] = useState<Array<{ provider_id: string; binary_path: string; version: string | null; source: string }>>([]);
+  const [detectingAgents, setDetectingAgents] = useState(false);
   
   // Load settings on mount
   useEffect(() => {
     loadSettings();
     loadClaudeBinaryPath();
     loadAnalyticsSettings();
+    loadDetectedAgents();
     // Load tab persistence setting
     setTabPersistenceEnabled(TabPersistenceService.isEnabled());
     // Load startup intro setting (default to true if not set)
@@ -130,6 +135,21 @@ export const Settings: React.FC<SettingsProps> = ({
       setCurrentBinaryPath(path);
     } catch (err) {
       console.error("Failed to load Claude binary path:", err);
+    }
+  };
+
+  /**
+   * Loads detected CLI agents
+   */
+  const loadDetectedAgents = async () => {
+    try {
+      setDetectingAgents(true);
+      const agents = await api.listDetectedAgents();
+      setDetectedAgents(agents);
+    } catch (err) {
+      console.error("Failed to detect agents:", err);
+    } finally {
+      setDetectingAgents(false);
     }
   };
 
@@ -393,8 +413,9 @@ export const Settings: React.FC<SettingsProps> = ({
       ) : (
         <div className="flex-1 overflow-y-auto p-6">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid grid-cols-8 w-full mb-6 h-auto p-1">
+            <TabsList className="grid grid-cols-9 w-full mb-6 h-auto p-1">
               <TabsTrigger value="general" className="py-2.5 px-3">General</TabsTrigger>
+              <TabsTrigger value="providers" className="py-2.5 px-3">Providers</TabsTrigger>
               <TabsTrigger value="permissions" className="py-2.5 px-3">Permissions</TabsTrigger>
               <TabsTrigger value="environment" className="py-2.5 px-3">Environment</TabsTrigger>
               <TabsTrigger value="advanced" className="py-2.5 px-3">Advanced</TabsTrigger>
@@ -772,6 +793,81 @@ export const Settings: React.FC<SettingsProps> = ({
               </Card>
             </TabsContent>
             
+            {/* Providers Settings */}
+            <TabsContent value="providers" className="space-y-6">
+              <Card className="p-6">
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-heading-4 mb-2">Detected Agents</h3>
+                    <p className="text-body-small text-muted-foreground mb-4">
+                      CLI coding agents found on your system. These can be used in session tabs.
+                    </p>
+                  </div>
+
+                  {detectingAgents ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Scanning for agents...
+                    </div>
+                  ) : detectedAgents.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">
+                      No agents detected. Make sure Claude Code or other CLI agents are installed and in your PATH.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {detectedAgents.map((agent) => {
+                        const providerMeta: Record<string, { name: string; color: string }> = {
+                          claude: { name: "Claude Code", color: "text-amber-500" },
+                          codex: { name: "Codex CLI", color: "text-emerald-500" },
+                          gemini: { name: "Gemini CLI", color: "text-blue-500" },
+                          aider: { name: "Aider", color: "text-violet-500" },
+                          goose: { name: "Goose", color: "text-yellow-500" },
+                          opencode: { name: "OpenCode", color: "text-cyan-500" },
+                        };
+                        const meta = providerMeta[agent.provider_id] || { name: agent.provider_id, color: "text-foreground" };
+
+                        return (
+                          <div
+                            key={agent.provider_id}
+                            className="flex items-center justify-between p-3 rounded-lg border border-border/50 bg-accent/5"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={cn("flex items-center gap-2", meta.color)}>
+                                <Check className="h-4 w-4" />
+                                <span className="font-medium text-sm">{meta.name}</span>
+                              </div>
+                              {agent.version && (
+                                <span className="text-xs text-muted-foreground bg-accent/20 px-2 py-0.5 rounded">
+                                  v{agent.version}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground font-mono truncate max-w-[300px]">
+                              {agent.binary_path}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="pt-4 border-t border-border/50">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadDetectedAgents}
+                      disabled={detectingAgents}
+                    >
+                      {detectingAgents ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : null}
+                      Re-scan
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            </TabsContent>
+
             {/* Permissions Settings */}
             <TabsContent value="permissions" className="space-y-6">
               <Card className="p-6">

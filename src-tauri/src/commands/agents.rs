@@ -14,6 +14,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
 use tokio::process::Command;
 
+fn default_provider_id() -> String {
+    "claude".to_string()
+}
+
 /// Finds the full path to the claude binary
 /// This is necessary because macOS apps have a limited PATH environment
 fn find_claude_binary(app_handle: &AppHandle) -> Result<String, String> {
@@ -28,6 +32,8 @@ pub struct Agent {
     pub icon: String,
     pub system_prompt: String,
     pub default_task: Option<String>,
+    #[serde(default = "default_provider_id")]
+    pub provider_id: String,
     pub model: String,
     pub enable_file_read: bool,
     pub enable_file_write: bool,
@@ -44,10 +50,13 @@ pub struct AgentRun {
     pub agent_id: i64,
     pub agent_name: String,
     pub agent_icon: String,
+    #[serde(default = "default_provider_id")]
+    pub provider_id: String,
     pub task: String,
     pub model: String,
     pub project_path: String,
     pub session_id: String, // UUID session ID from Claude Code
+    pub output: Option<String>,
     pub status: String,     // 'pending', 'running', 'completed', 'failed', 'cancelled'
     pub pid: Option<u32>,
     pub process_started_at: Option<String>,
@@ -70,7 +79,6 @@ pub struct AgentRunWithMetrics {
     #[serde(flatten)]
     pub run: AgentRun,
     pub metrics: Option<AgentRunMetrics>,
-    pub output: Option<String>, // Real-time JSONL content
 }
 
 /// Agent export format
@@ -88,6 +96,8 @@ pub struct AgentData {
     pub icon: String,
     pub system_prompt: String,
     pub default_task: Option<String>,
+    #[serde(default = "default_provider_id")]
+    pub provider_id: String,
     pub model: String,
     pub hooks: Option<String>,
 }
@@ -193,22 +203,29 @@ pub async fn read_session_jsonl(session_id: &str, project_path: &str) -> Result<
 
 /// Get agent run with real-time metrics
 pub async fn get_agent_run_with_metrics(run: AgentRun) -> AgentRunWithMetrics {
-    match read_session_jsonl(&run.session_id, &run.project_path).await {
-        Ok(jsonl_content) => {
+    let db_output = run.output.clone();
+
+    // Claude sessions can be loaded directly from Claude JSONL files.
+    if run.provider_id == "claude" && !run.session_id.is_empty() {
+        if let Ok(jsonl_content) = read_session_jsonl(&run.session_id, &run.project_path).await {
             let metrics = AgentRunMetrics::from_jsonl(&jsonl_content);
-            AgentRunWithMetrics {
+            return AgentRunWithMetrics {
                 run,
                 metrics: Some(metrics),
-                output: Some(jsonl_content),
-            }
+            };
         }
-        Err(e) => {
-            log::warn!("Failed to read JSONL for session {}: {}", run.session_id, e);
-            AgentRunWithMetrics {
-                run,
-                metrics: None,
-                output: None,
-            }
+    }
+
+    if let Some(output) = db_output {
+        let metrics = AgentRunMetrics::from_jsonl(&output);
+        AgentRunWithMetrics {
+            run,
+            metrics: Some(metrics),
+        }
+    } else {
+        AgentRunWithMetrics {
+            run,
+            metrics: None,
         }
     }
 }
@@ -232,6 +249,7 @@ pub fn init_database(app: &AppHandle) -> SqliteResult<Connection> {
             icon TEXT NOT NULL,
             system_prompt TEXT NOT NULL,
             default_task TEXT,
+            provider_id TEXT NOT NULL DEFAULT 'claude',
             model TEXT NOT NULL DEFAULT 'sonnet',
             enable_file_read BOOLEAN NOT NULL DEFAULT 1,
             enable_file_write BOOLEAN NOT NULL DEFAULT 1,
@@ -245,6 +263,10 @@ pub fn init_database(app: &AppHandle) -> SqliteResult<Connection> {
 
     // Add columns to existing table if they don't exist
     let _ = conn.execute("ALTER TABLE agents ADD COLUMN default_task TEXT", []);
+    let _ = conn.execute(
+        "ALTER TABLE agents ADD COLUMN provider_id TEXT DEFAULT 'claude'",
+        [],
+    );
     let _ = conn.execute(
         "ALTER TABLE agents ADD COLUMN model TEXT DEFAULT 'sonnet'",
         [],
@@ -262,6 +284,10 @@ pub fn init_database(app: &AppHandle) -> SqliteResult<Connection> {
         "ALTER TABLE agents ADD COLUMN enable_network BOOLEAN DEFAULT 0",
         [],
     );
+    let _ = conn.execute(
+        "UPDATE agents SET provider_id = 'claude' WHERE provider_id IS NULL OR provider_id = ''",
+        [],
+    );
 
     // Create agent_runs table
     conn.execute(
@@ -270,10 +296,12 @@ pub fn init_database(app: &AppHandle) -> SqliteResult<Connection> {
             agent_id INTEGER NOT NULL,
             agent_name TEXT NOT NULL,
             agent_icon TEXT NOT NULL,
+            provider_id TEXT NOT NULL DEFAULT 'claude',
             task TEXT NOT NULL,
             model TEXT NOT NULL,
             project_path TEXT NOT NULL,
             session_id TEXT NOT NULL,
+            output TEXT,
             status TEXT NOT NULL DEFAULT 'pending',
             pid INTEGER,
             process_started_at TEXT,
@@ -286,6 +314,11 @@ pub fn init_database(app: &AppHandle) -> SqliteResult<Connection> {
 
     // Migrate existing agent_runs table if needed
     let _ = conn.execute("ALTER TABLE agent_runs ADD COLUMN session_id TEXT", []);
+    let _ = conn.execute(
+        "ALTER TABLE agent_runs ADD COLUMN provider_id TEXT DEFAULT 'claude'",
+        [],
+    );
+    let _ = conn.execute("ALTER TABLE agent_runs ADD COLUMN output TEXT", []);
     let _ = conn.execute(
         "ALTER TABLE agent_runs ADD COLUMN status TEXT DEFAULT 'pending'",
         [],
@@ -304,6 +337,10 @@ pub fn init_database(app: &AppHandle) -> SqliteResult<Connection> {
     );
     let _ = conn.execute("UPDATE agent_runs SET status = 'completed' WHERE status IS NULL AND completed_at IS NOT NULL", []);
     let _ = conn.execute("UPDATE agent_runs SET status = 'failed' WHERE status IS NULL AND completed_at IS NOT NULL AND session_id = ''", []);
+    let _ = conn.execute(
+        "UPDATE agent_runs SET provider_id = 'claude' WHERE provider_id IS NULL OR provider_id = ''",
+        [],
+    );
     let _ = conn.execute(
         "UPDATE agent_runs SET status = 'pending' WHERE status IS NULL",
         [],
@@ -351,7 +388,7 @@ pub async fn list_agents(db: State<'_, AgentDb>) -> Result<Vec<Agent>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
     let mut stmt = conn
-        .prepare("SELECT id, name, icon, system_prompt, default_task, model, enable_file_read, enable_file_write, enable_network, hooks, created_at, updated_at FROM agents ORDER BY created_at DESC")
+        .prepare("SELECT id, name, icon, system_prompt, default_task, provider_id, model, enable_file_read, enable_file_write, enable_network, hooks, created_at, updated_at FROM agents ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
 
     let agents = stmt
@@ -362,15 +399,18 @@ pub async fn list_agents(db: State<'_, AgentDb>) -> Result<Vec<Agent>, String> {
                 icon: row.get(2)?,
                 system_prompt: row.get(3)?,
                 default_task: row.get(4)?,
-                model: row
+                provider_id: row
                     .get::<_, String>(5)
+                    .unwrap_or_else(|_| "claude".to_string()),
+                model: row
+                    .get::<_, String>(6)
                     .unwrap_or_else(|_| "sonnet".to_string()),
-                enable_file_read: row.get::<_, bool>(6).unwrap_or(true),
-                enable_file_write: row.get::<_, bool>(7).unwrap_or(true),
-                enable_network: row.get::<_, bool>(8).unwrap_or(false),
-                hooks: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
+                enable_file_read: row.get::<_, bool>(7).unwrap_or(true),
+                enable_file_write: row.get::<_, bool>(8).unwrap_or(true),
+                enable_network: row.get::<_, bool>(9).unwrap_or(false),
+                hooks: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -388,6 +428,7 @@ pub async fn create_agent(
     icon: String,
     system_prompt: String,
     default_task: Option<String>,
+    provider_id: Option<String>,
     model: Option<String>,
     enable_file_read: Option<bool>,
     enable_file_write: Option<bool>,
@@ -395,14 +436,15 @@ pub async fn create_agent(
     hooks: Option<String>,
 ) -> Result<Agent, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let provider_id = provider_id.unwrap_or_else(|| "claude".to_string());
     let model = model.unwrap_or_else(|| "sonnet".to_string());
     let enable_file_read = enable_file_read.unwrap_or(true);
     let enable_file_write = enable_file_write.unwrap_or(true);
     let enable_network = enable_network.unwrap_or(false);
 
     conn.execute(
-        "INSERT INTO agents (name, icon, system_prompt, default_task, model, enable_file_read, enable_file_write, enable_network, hooks) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![name, icon, system_prompt, default_task, model, enable_file_read, enable_file_write, enable_network, hooks],
+        "INSERT INTO agents (name, icon, system_prompt, default_task, provider_id, model, enable_file_read, enable_file_write, enable_network, hooks) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![name, icon, system_prompt, default_task, provider_id, model, enable_file_read, enable_file_write, enable_network, hooks],
     )
     .map_err(|e| e.to_string())?;
 
@@ -411,7 +453,7 @@ pub async fn create_agent(
     // Fetch the created agent
     let agent = conn
         .query_row(
-            "SELECT id, name, icon, system_prompt, default_task, model, enable_file_read, enable_file_write, enable_network, hooks, created_at, updated_at FROM agents WHERE id = ?1",
+            "SELECT id, name, icon, system_prompt, default_task, provider_id, model, enable_file_read, enable_file_write, enable_network, hooks, created_at, updated_at FROM agents WHERE id = ?1",
             params![id],
             |row| {
                 Ok(Agent {
@@ -420,13 +462,16 @@ pub async fn create_agent(
                     icon: row.get(2)?,
                     system_prompt: row.get(3)?,
                     default_task: row.get(4)?,
-                    model: row.get(5)?,
-                    enable_file_read: row.get(6)?,
-                    enable_file_write: row.get(7)?,
-                    enable_network: row.get(8)?,
-                    hooks: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
+                    provider_id: row
+                        .get::<_, String>(5)
+                        .unwrap_or_else(|_| "claude".to_string()),
+                    model: row.get(6)?,
+                    enable_file_read: row.get(7)?,
+                    enable_file_write: row.get(8)?,
+                    enable_network: row.get(9)?,
+                    hooks: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
                 })
             },
         )
@@ -444,6 +489,7 @@ pub async fn update_agent(
     icon: String,
     system_prompt: String,
     default_task: Option<String>,
+    provider_id: Option<String>,
     model: Option<String>,
     enable_file_read: Option<bool>,
     enable_file_write: Option<bool>,
@@ -454,18 +500,17 @@ pub async fn update_agent(
     let model = model.unwrap_or_else(|| "sonnet".to_string());
 
     // Build dynamic query based on provided parameters
-    let mut query =
-        "UPDATE agents SET name = ?1, icon = ?2, system_prompt = ?3, default_task = ?4, model = ?5, hooks = ?6"
-            .to_string();
+    let mut query = "UPDATE agents SET name = ?1, icon = ?2, system_prompt = ?3, default_task = ?4, provider_id = COALESCE(?5, provider_id), model = ?6, hooks = ?7".to_string();
     let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![
         Box::new(name),
         Box::new(icon),
         Box::new(system_prompt),
         Box::new(default_task),
+        Box::new(provider_id),
         Box::new(model),
         Box::new(hooks),
     ];
-    let mut param_count = 6;
+    let mut param_count = 7;
 
     if let Some(efr) = enable_file_read {
         param_count += 1;
@@ -496,7 +541,7 @@ pub async fn update_agent(
     // Fetch the updated agent
     let agent = conn
         .query_row(
-            "SELECT id, name, icon, system_prompt, default_task, model, enable_file_read, enable_file_write, enable_network, hooks, created_at, updated_at FROM agents WHERE id = ?1",
+            "SELECT id, name, icon, system_prompt, default_task, provider_id, model, enable_file_read, enable_file_write, enable_network, hooks, created_at, updated_at FROM agents WHERE id = ?1",
             params![id],
             |row| {
                 Ok(Agent {
@@ -505,13 +550,16 @@ pub async fn update_agent(
                     icon: row.get(2)?,
                     system_prompt: row.get(3)?,
                     default_task: row.get(4)?,
-                    model: row.get(5)?,
-                    enable_file_read: row.get(6)?,
-                    enable_file_write: row.get(7)?,
-                    enable_network: row.get(8)?,
-                    hooks: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
+                    provider_id: row
+                        .get::<_, String>(5)
+                        .unwrap_or_else(|_| "claude".to_string()),
+                    model: row.get(6)?,
+                    enable_file_read: row.get(7)?,
+                    enable_file_write: row.get(8)?,
+                    enable_network: row.get(9)?,
+                    hooks: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
                 })
             },
         )
@@ -538,7 +586,7 @@ pub async fn get_agent(db: State<'_, AgentDb>, id: i64) -> Result<Agent, String>
 
     let agent = conn
         .query_row(
-            "SELECT id, name, icon, system_prompt, default_task, model, enable_file_read, enable_file_write, enable_network, hooks, created_at, updated_at FROM agents WHERE id = ?1",
+            "SELECT id, name, icon, system_prompt, default_task, provider_id, model, enable_file_read, enable_file_write, enable_network, hooks, created_at, updated_at FROM agents WHERE id = ?1",
             params![id],
             |row| {
                 Ok(Agent {
@@ -547,13 +595,16 @@ pub async fn get_agent(db: State<'_, AgentDb>, id: i64) -> Result<Agent, String>
                     icon: row.get(2)?,
                     system_prompt: row.get(3)?,
                     default_task: row.get(4)?,
-                    model: row.get::<_, String>(5).unwrap_or_else(|_| "sonnet".to_string()),
-                    enable_file_read: row.get::<_, bool>(6).unwrap_or(true),
-                    enable_file_write: row.get::<_, bool>(7).unwrap_or(true),
-                    enable_network: row.get::<_, bool>(8).unwrap_or(false),
-                    hooks: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
+                    provider_id: row
+                        .get::<_, String>(5)
+                        .unwrap_or_else(|_| "claude".to_string()),
+                    model: row.get::<_, String>(6).unwrap_or_else(|_| "sonnet".to_string()),
+                    enable_file_read: row.get::<_, bool>(7).unwrap_or(true),
+                    enable_file_write: row.get::<_, bool>(8).unwrap_or(true),
+                    enable_network: row.get::<_, bool>(9).unwrap_or(false),
+                    hooks: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
                 })
             },
         )
@@ -571,10 +622,10 @@ pub async fn list_agent_runs(
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
     let query = if agent_id.is_some() {
-        "SELECT id, agent_id, agent_name, agent_icon, task, model, project_path, session_id, status, pid, process_started_at, created_at, completed_at 
+        "SELECT id, agent_id, agent_name, agent_icon, provider_id, task, model, project_path, session_id, output, status, pid, process_started_at, created_at, completed_at
          FROM agent_runs WHERE agent_id = ?1 ORDER BY created_at DESC"
     } else {
-        "SELECT id, agent_id, agent_name, agent_icon, task, model, project_path, session_id, status, pid, process_started_at, created_at, completed_at 
+        "SELECT id, agent_id, agent_name, agent_icon, provider_id, task, model, project_path, session_id, output, status, pid, process_started_at, created_at, completed_at
          FROM agent_runs ORDER BY created_at DESC"
     };
 
@@ -586,21 +637,27 @@ pub async fn list_agent_runs(
             agent_id: row.get(1)?,
             agent_name: row.get(2)?,
             agent_icon: row.get(3)?,
-            task: row.get(4)?,
-            model: row.get(5)?,
-            project_path: row.get(6)?,
-            session_id: row.get(7)?,
+            provider_id: row
+                .get::<_, String>(4)
+                .unwrap_or_else(|_| "claude".to_string()),
+            task: row.get(5)?,
+            model: row.get(6)?,
+            project_path: row.get(7)?,
+            session_id: row.get(8)?,
+            output: row
+                .get::<_, Option<String>>(9)?
+                .filter(|s| !s.is_empty()),
             status: row
-                .get::<_, String>(8)
+                .get::<_, String>(10)
                 .unwrap_or_else(|_| "pending".to_string()),
             pid: row
-                .get::<_, Option<i64>>(9)
+                .get::<_, Option<i64>>(11)
                 .ok()
                 .flatten()
                 .map(|p| p as u32),
-            process_started_at: row.get(10)?,
-            created_at: row.get(11)?,
-            completed_at: row.get(12)?,
+            process_started_at: row.get(12)?,
+            created_at: row.get(13)?,
+            completed_at: row.get(14)?,
         })
     };
 
@@ -623,7 +680,7 @@ pub async fn get_agent_run(db: State<'_, AgentDb>, id: i64) -> Result<AgentRun, 
 
     let run = conn
         .query_row(
-            "SELECT id, agent_id, agent_name, agent_icon, task, model, project_path, session_id, status, pid, process_started_at, created_at, completed_at 
+            "SELECT id, agent_id, agent_name, agent_icon, provider_id, task, model, project_path, session_id, output, status, pid, process_started_at, created_at, completed_at
              FROM agent_runs WHERE id = ?1",
             params![id],
             |row| {
@@ -632,15 +689,23 @@ pub async fn get_agent_run(db: State<'_, AgentDb>, id: i64) -> Result<AgentRun, 
                     agent_id: row.get(1)?,
                     agent_name: row.get(2)?,
                     agent_icon: row.get(3)?,
-                    task: row.get(4)?,
-                    model: row.get(5)?,
-                    project_path: row.get(6)?,
-                    session_id: row.get(7)?,
-                    status: row.get::<_, String>(8).unwrap_or_else(|_| "pending".to_string()),
-                    pid: row.get::<_, Option<i64>>(9).ok().flatten().map(|p| p as u32),
-                    process_started_at: row.get(10)?,
-                    created_at: row.get(11)?,
-                    completed_at: row.get(12)?,
+                    provider_id: row
+                        .get::<_, String>(4)
+                        .unwrap_or_else(|_| "claude".to_string()),
+                    task: row.get(5)?,
+                    model: row.get(6)?,
+                    project_path: row.get(7)?,
+                    session_id: row.get(8)?,
+                    output: row
+                        .get::<_, Option<String>>(9)?
+                        .filter(|s| !s.is_empty()),
+                    status: row
+                        .get::<_, String>(10)
+                        .unwrap_or_else(|_| "pending".to_string()),
+                    pid: row.get::<_, Option<i64>>(11).ok().flatten().map(|p| p as u32),
+                    process_started_at: row.get(12)?,
+                    created_at: row.get(13)?,
+                    completed_at: row.get(14)?,
                 })
             },
         )
@@ -691,10 +756,21 @@ pub async fn execute_agent(
 
     // Get the agent from database
     let agent = get_agent(db.clone(), agent_id).await?;
+    let provider_id = if agent.provider_id.is_empty() {
+        "claude".to_string()
+    } else {
+        agent.provider_id.clone()
+    };
     let execution_model = model.unwrap_or(agent.model.clone());
+    let initial_session_id = if provider_id == "claude" {
+        String::new()
+    } else {
+        format!("{}-run-{}", provider_id, chrono::Utc::now().timestamp_millis())
+    };
 
-    // Create .claude/settings.json with agent hooks if it doesn't exist
-    if let Some(hooks_json) = &agent.hooks {
+    // Create .claude/settings.json with agent hooks for Claude providers.
+    if provider_id == "claude" && agent.hooks.is_some() {
+        let hooks_json = agent.hooks.as_ref().expect("checked is_some");
         let claude_dir = std::path::Path::new(&project_path).join(".claude");
         let settings_path = claude_dir.join("settings.json");
 
@@ -736,61 +812,161 @@ pub async fn execute_agent(
     let run_id = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "INSERT INTO agent_runs (agent_id, agent_name, agent_icon, task, model, project_path, session_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![agent_id, agent.name, agent.icon, task, execution_model, project_path, ""],
+            "INSERT INTO agent_runs (agent_id, agent_name, agent_icon, provider_id, task, model, project_path, session_id, output) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                agent_id,
+                agent.name.clone(),
+                agent.icon.clone(),
+                provider_id.clone(),
+                task.clone(),
+                execution_model.clone(),
+                project_path.clone(),
+                initial_session_id.clone(),
+                "",
+            ],
         )
         .map_err(|e| e.to_string())?;
         conn.last_insert_rowid()
     };
 
-    // Find Claude binary
-    info!("Running agent '{}'", agent.name);
-    let claude_path = match find_claude_binary(&app) {
-        Ok(path) => path,
-        Err(e) => {
-            error!("Failed to find claude binary: {}", e);
-            return Err(e);
-        }
-    };
+    info!(
+        "Running agent '{}' with provider '{}'",
+        agent.name, provider_id
+    );
+    let binary_path = resolve_provider_binary(&app, &provider_id).await?;
+    let args = build_provider_args(
+        &provider_id,
+        &task,
+        &execution_model,
+        Some(&agent.system_prompt),
+    );
 
-    // Build arguments
-    let args = vec![
-        "-p".to_string(),
-        task.clone(),
-        "--system-prompt".to_string(),
-        agent.system_prompt.clone(),
-        "--model".to_string(),
-        execution_model.clone(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-        "--dangerously-skip-permissions".to_string(),
-    ];
-
-    // Always use system binary execution (sidecar removed)
     spawn_agent_system(
         app,
         run_id,
         agent_id,
         agent.name.clone(),
-        claude_path,
+        provider_id,
+        binary_path,
         args,
         project_path,
         task,
         execution_model,
+        initial_session_id,
         db,
         registry,
     )
     .await
 }
 
+async fn resolve_provider_binary(app: &AppHandle, provider_id: &str) -> Result<String, String> {
+    if provider_id == "claude" {
+        return find_claude_binary(app);
+    }
+
+    // Discover other providers dynamically.
+    let agents = crate::agent_binary::discover_all_agents(app).await;
+    agents
+        .into_iter()
+        .find(|a| a.provider_id == provider_id)
+        .map(|a| a.binary_path)
+        .ok_or_else(|| format!("Provider '{}' is not installed or not detected", provider_id))
+}
+
+fn build_provider_args(
+    provider_id: &str,
+    task: &str,
+    model: &str,
+    system_prompt: Option<&str>,
+) -> Vec<String> {
+    match provider_id {
+        "claude" => vec![
+            "-p".to_string(),
+            task.to_string(),
+            "--system-prompt".to_string(),
+            system_prompt.unwrap_or("").to_string(),
+            "--model".to_string(),
+            model.to_string(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--verbose".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ],
+        "codex" => {
+            let mut args = vec!["exec".to_string(), "--json".to_string(), task.to_string()];
+            if !model.is_empty() {
+                args.extend(["--model".to_string(), model.to_string()]);
+            }
+            args
+        }
+        "aider" => {
+            let mut args = vec![
+                "--message".to_string(),
+                task.to_string(),
+                "--yes".to_string(),
+            ];
+            if !model.is_empty() {
+                args.extend(["--model".to_string(), model.to_string()]);
+            }
+            args
+        }
+        "goose" => vec!["run".to_string(), "--text".to_string(), task.to_string()],
+        "gemini" => {
+            let mut args = vec![
+                "--prompt".to_string(),
+                task.to_string(),
+                "--approval-mode".to_string(),
+                "yolo".to_string(),
+            ];
+            if !model.is_empty() {
+                args.extend(["--model".to_string(), model.to_string()]);
+            }
+            args
+        }
+        "opencode" => vec![task.to_string()],
+        _ => vec![task.to_string()],
+    }
+}
+
+fn wrap_as_assistant_text(text: &str) -> String {
+    serde_json::json!({
+        "type": "assistant",
+        "message": {
+            "content": [{ "type": "text", "text": text }]
+        }
+    })
+    .to_string()
+}
+
+fn transform_provider_output(provider_id: &str, line: &str) -> Option<String> {
+    match provider_id {
+        "claude" => Some(line.to_string()),
+        "codex" => crate::commands::codex_transform::transform_codex_line(line),
+        _ => {
+            // For unknown provider JSON formats, wrap as text unless it's already
+            // in Claude-compatible stream shape.
+            if let Ok(parsed) = serde_json::from_str::<JsonValue>(line) {
+                let has_type = parsed.get("type").and_then(|v| v.as_str()).is_some();
+                let has_message_content = parsed
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .is_some();
+                if has_type && has_message_content {
+                    return Some(line.to_string());
+                }
+            }
+            Some(wrap_as_assistant_text(line))
+        }
+    }
+}
+
 /// Creates a system binary command for agent execution
 fn create_agent_system_command(
-    claude_path: &str,
+    binary_path: &str,
     args: Vec<String>,
     project_path: &str,
 ) -> Command {
-    let mut cmd = create_command_with_env(claude_path);
+    let mut cmd = create_command_with_env(binary_path);
 
     // Add all arguments
     for arg in args {
@@ -811,22 +987,24 @@ async fn spawn_agent_system(
     run_id: i64,
     agent_id: i64,
     agent_name: String,
-    claude_path: String,
+    provider_id: String,
+    binary_path: String,
     args: Vec<String>,
     project_path: String,
     task: String,
     execution_model: String,
+    initial_session_id: String,
     db: State<'_, AgentDb>,
     registry: State<'_, crate::process::ProcessRegistryState>,
 ) -> Result<i64, String> {
     // Build the command
-    let mut cmd = create_agent_system_command(&claude_path, args, &project_path);
+    let mut cmd = create_agent_system_command(&binary_path, args, &project_path);
 
     // Spawn the process
-    info!("🚀 Spawning Claude system process...");
+    info!("🚀 Spawning {} system process...", provider_id);
     let mut child = cmd.spawn().map_err(|e| {
-        error!("❌ Failed to spawn Claude process: {}", e);
-        format!("Failed to spawn Claude: {}", e)
+        error!("❌ Failed to spawn {} process: {}", provider_id, e);
+        format!("Failed to spawn {}: {}", provider_id, e)
     })?;
 
     info!("🔌 Using Stdio::null() for stdin - no input expected");
@@ -834,7 +1012,10 @@ async fn spawn_agent_system(
     // Get the PID and register the process
     let pid = child.id().unwrap_or(0);
     let now = chrono::Utc::now().to_rfc3339();
-    info!("✅ Claude process spawned successfully with PID: {}", pid);
+    info!(
+        "✅ {} process spawned successfully with PID: {}",
+        provider_id, pid
+    );
 
     // Update the database with PID and status
     {
@@ -863,21 +1044,46 @@ async fn spawn_agent_system(
     let db_path = app_dir.join("agents.db");
 
     // Shared state for collecting session ID and live output
-    let session_id = std::sync::Arc::new(Mutex::new(String::new()));
+    let session_id = std::sync::Arc::new(Mutex::new(initial_session_id.clone()));
     let live_output = std::sync::Arc::new(Mutex::new(String::new()));
     let start_time = std::time::Instant::now();
+
+    // Non-Claude providers don't emit a Claude-style init event, so emit one ourselves.
+    if provider_id != "claude" {
+        let init_line = serde_json::json!({
+            "type": "system",
+            "subtype": "init",
+            "session_id": initial_session_id,
+            "provider_id": provider_id,
+            "cwd": project_path,
+            "model": execution_model,
+        })
+        .to_string();
+
+        if let Ok(mut output) = live_output.lock() {
+            output.push_str(&init_line);
+            output.push('\n');
+        }
+
+        let _ = registry.0.append_live_output(run_id, &init_line);
+        let _ = app.emit(&format!("agent-output:{}", run_id), &init_line);
+        let _ = app.emit("agent-output", &init_line);
+    }
 
     // Spawn tasks to read stdout and stderr
     let app_handle = app.clone();
     let session_id_clone = session_id.clone();
     let live_output_clone = live_output.clone();
     let registry_clone = registry.0.clone();
-    let first_output = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let first_output = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+        provider_id != "claude",
+    ));
     let first_output_clone = first_output.clone();
     let db_path_for_stdout = db_path.clone(); // Clone the db_path for the stdout task
+    let provider_stdout = provider_id.clone();
 
     let stdout_task = tokio::spawn(async move {
-        info!("📖 Starting to read Claude stdout...");
+        info!("📖 Starting to read {} stdout...", provider_stdout);
         let mut lines = stdout_reader.lines();
         let mut line_count = 0;
 
@@ -887,7 +1093,8 @@ async fn spawn_agent_system(
             // Log first output
             if !first_output_clone.load(std::sync::atomic::Ordering::Relaxed) {
                 info!(
-                    "🎉 First output received from Claude process! Line: {}",
+                    "🎉 First output received from {} process! Line: {}",
+                    provider_stdout,
                     line
                 );
                 first_output_clone.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -899,43 +1106,43 @@ async fn spawn_agent_system(
                 debug!("stdout[{}]: {}", line_count, line);
             }
 
-            // Store live output in both local buffer and registry
+            let Some(emitted_line) = transform_provider_output(&provider_stdout, &line) else {
+                continue;
+            };
+
             if let Ok(mut output) = live_output_clone.lock() {
-                output.push_str(&line);
+                output.push_str(&emitted_line);
                 output.push('\n');
             }
 
-            // Also store in process registry for cross-session access
-            let _ = registry_clone.append_live_output(run_id, &line);
+            let _ = registry_clone.append_live_output(run_id, &emitted_line);
 
             // Extract session ID from JSONL output
-            if let Ok(json) = serde_json::from_str::<JsonValue>(&line) {
+            if provider_stdout == "claude" {
+                if let Ok(json) = serde_json::from_str::<JsonValue>(&emitted_line) {
                 // Claude Code uses "session_id" (underscore), not "sessionId"
-                if json.get("type").and_then(|t| t.as_str()) == Some("system")
-                    && json.get("subtype").and_then(|s| s.as_str()) == Some("init")
-                {
-                    if let Some(sid) = json.get("session_id").and_then(|s| s.as_str()) {
-                        if let Ok(mut current_session_id) = session_id_clone.lock() {
-                            if current_session_id.is_empty() {
-                                *current_session_id = sid.to_string();
-                                info!("🔑 Extracted session ID: {}", sid);
+                    if json.get("type").and_then(|t| t.as_str()) == Some("system")
+                        && json.get("subtype").and_then(|s| s.as_str()) == Some("init")
+                    {
+                        if let Some(sid) = json.get("session_id").and_then(|s| s.as_str()) {
+                            if let Ok(mut current_session_id) = session_id_clone.lock() {
+                                if current_session_id.is_empty() {
+                                    *current_session_id = sid.to_string();
+                                    info!("🔑 Extracted session ID: {}", sid);
 
-                                // Update database immediately with session ID
-                                if let Ok(conn) = Connection::open(&db_path_for_stdout) {
-                                    match conn.execute(
-                                        "UPDATE agent_runs SET session_id = ?1 WHERE id = ?2",
-                                        params![sid, run_id],
-                                    ) {
-                                        Ok(rows) => {
-                                            if rows > 0 {
-                                                info!("✅ Updated agent run {} with session ID immediately", run_id);
+                                    if let Ok(conn) = Connection::open(&db_path_for_stdout) {
+                                        match conn.execute(
+                                            "UPDATE agent_runs SET session_id = ?1 WHERE id = ?2",
+                                            params![sid, run_id],
+                                        ) {
+                                            Ok(rows) => {
+                                                if rows > 0 {
+                                                    info!("✅ Updated agent run {} with session ID immediately", run_id);
+                                                }
                                             }
-                                        }
-                                        Err(e) => {
-                                            error!(
-                                                "❌ Failed to update session ID immediately: {}",
-                                                e
-                                            );
+                                            Err(e) => {
+                                                error!("❌ Failed to update session ID immediately: {}", e);
+                                            }
                                         }
                                     }
                                 }
@@ -946,23 +1153,26 @@ async fn spawn_agent_system(
             }
 
             // Emit the line to the frontend with run_id for isolation
-            let _ = app_handle.emit(&format!("agent-output:{}", run_id), &line);
+            let _ = app_handle.emit(&format!("agent-output:{}", run_id), &emitted_line);
             // Also emit to the generic event for backward compatibility
-            let _ = app_handle.emit("agent-output", &line);
+            let _ = app_handle.emit("agent-output", &emitted_line);
         }
 
         info!(
-            "📖 Finished reading Claude stdout. Total lines: {}",
-            line_count
+            "📖 Finished reading {} stdout. Total lines: {}",
+            provider_stdout, line_count
         );
     });
 
     let app_handle_stderr = app.clone();
     let first_error = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let first_error_clone = first_error.clone();
+    let provider_stderr = provider_id.clone();
+    let live_output_stderr = live_output.clone();
+    let registry_stderr = registry.0.clone();
 
     let stderr_task = tokio::spawn(async move {
-        info!("📖 Starting to read Claude stderr...");
+        info!("📖 Starting to read {} stderr...", provider_stderr);
         let mut lines = stderr_reader.lines();
         let mut error_count = 0;
 
@@ -971,31 +1181,47 @@ async fn spawn_agent_system(
 
             // Log first error
             if !first_error_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                warn!("⚠️ First error output from Claude process! Line: {}", line);
+                warn!(
+                    "⚠️ First error output from {} process! Line: {}",
+                    provider_stderr, line
+                );
                 first_error_clone.store(true, std::sync::atomic::Ordering::Relaxed);
             }
 
             error!("stderr[{}]: {}", error_count, line);
-            // Emit error lines to the frontend with run_id for isolation
+
+            if provider_stderr == "claude" {
+                let _ = app_handle_stderr.emit(&format!("agent-error:{}", run_id), &line);
+                let _ = app_handle_stderr.emit("agent-error", &line);
+                continue;
+            }
+
+            let wrapped = wrap_as_assistant_text(&line);
+            if let Ok(mut output) = live_output_stderr.lock() {
+                output.push_str(&wrapped);
+                output.push('\n');
+            }
+            let _ = registry_stderr.append_live_output(run_id, &wrapped);
+            let _ = app_handle_stderr.emit(&format!("agent-output:{}", run_id), &wrapped);
+            let _ = app_handle_stderr.emit("agent-output", &wrapped);
             let _ = app_handle_stderr.emit(&format!("agent-error:{}", run_id), &line);
-            // Also emit to the generic event for backward compatibility
             let _ = app_handle_stderr.emit("agent-error", &line);
         }
 
         if error_count > 0 {
             warn!(
-                "📖 Finished reading Claude stderr. Total error lines: {}",
-                error_count
+                "📖 Finished reading {} stderr. Total error lines: {}",
+                provider_stderr, error_count
             );
         } else {
-            info!("📖 Finished reading Claude stderr. No errors.");
+            info!("📖 Finished reading {} stderr. No errors.", provider_stderr);
         }
     });
 
-    // Register the process in the registry for live output tracking (after stdout/stderr setup)
+    // Register in registry using PID-based tracking; the wait task retains the child handle.
     registry
         .0
-        .register_process(
+        .register_sidecar_process(
             run_id,
             agent_id,
             agent_name,
@@ -1003,12 +1229,20 @@ async fn spawn_agent_system(
             project_path.clone(),
             task.clone(),
             execution_model.clone(),
-            child,
         )
         .map_err(|e| format!("Failed to register process: {}", e))?;
     info!("📋 Registered process in registry");
 
     let db_path_for_monitor = db_path.clone(); // Clone for the monitor task
+    let provider_monitor = provider_id.clone();
+    let initial_session_id_monitor = if let Ok(sid) = session_id.lock() {
+        sid.clone()
+    } else {
+        String::new()
+    };
+    let live_output_monitor = live_output.clone();
+    let registry_monitor = registry.0.clone();
+    let mut child_for_wait = child;
 
     // Monitor process status and wait for completion
     tokio::spawn(async move {
@@ -1026,10 +1260,13 @@ async fn spawn_agent_system(
             }
 
             if i == 299 {
-                warn!("⏰ TIMEOUT: No output from Claude process after 30 seconds");
+                warn!(
+                    "⏰ TIMEOUT: No output from {} process after 30 seconds",
+                    provider_monitor
+                );
                 warn!("💡 This usually means:");
-                warn!("   1. Claude process is waiting for user input");
-                warn!("   3. Claude failed to initialize but didn't report an error");
+                warn!("   1. Provider process is waiting for user input");
+                warn!("   3. Provider failed to initialize but didn't report an error");
                 warn!("   4. Network connectivity issues");
                 warn!("   5. Authentication issues (API key not found/invalid)");
 
@@ -1061,12 +1298,19 @@ async fn spawn_agent_system(
 
                 // Update database
                 if let Ok(conn) = Connection::open(&db_path_for_monitor) {
+                    let final_output = live_output_monitor
+                        .lock()
+                        .map(|o| o.clone())
+                        .unwrap_or_default();
                     let _ = conn.execute(
-                        "UPDATE agent_runs SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = ?1",
-                        params![run_id],
+                        "UPDATE agent_runs
+                         SET output = ?1, status = 'failed', completed_at = CURRENT_TIMESTAMP
+                         WHERE id = ?2 AND status = 'running'",
+                        params![final_output, run_id],
                     );
                 }
 
+                let _ = registry_monitor.unregister_process(run_id);
                 let _ = app.emit("agent-complete", false);
                 let _ = app.emit(&format!("agent-complete:{}", run_id), false);
                 return;
@@ -1082,6 +1326,19 @@ async fn spawn_agent_system(
 
         let duration_ms = start_time.elapsed().as_millis() as i64;
         info!("⏱️ Process execution took {} ms", duration_ms);
+        let process_success = match child_for_wait.wait().await {
+            Ok(status) => {
+                info!(
+                    "✅ {} exited with status: {}",
+                    provider_monitor, status
+                );
+                status.success()
+            }
+            Err(e) => {
+                error!("❌ Failed to wait for {} process: {}", provider_monitor, e);
+                false
+            }
+        };
 
         // Get the session ID that was extracted
         let extracted_session_id = if let Ok(sid) = session_id.lock() {
@@ -1089,29 +1346,48 @@ async fn spawn_agent_system(
         } else {
             String::new()
         };
+        let final_session_id = if extracted_session_id.is_empty() {
+            initial_session_id_monitor
+        } else {
+            extracted_session_id
+        };
+        let final_output = live_output_monitor
+            .lock()
+            .map(|o| o.clone())
+            .unwrap_or_default();
 
         // Wait for process completion and update status
-        info!("✅ Claude process execution monitoring complete");
+        info!("✅ {} process execution monitoring complete", provider_monitor);
 
-        // Update the run record with session ID and mark as completed - open a new connection
+        // Update the run record with session/output and mark as completed.
         if let Ok(conn) = Connection::open(&db_path_for_monitor) {
             info!(
-                "🔄 Updating database with extracted session ID: {}",
-                extracted_session_id
+                "🔄 Updating database with final session ID: {}",
+                final_session_id
             );
             match conn.execute(
-                "UPDATE agent_runs SET session_id = ?1, status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?2",
-                params![extracted_session_id, run_id],
+                "UPDATE agent_runs
+                 SET session_id = ?1,
+                     output = ?2,
+                     status = ?3,
+                     completed_at = CURRENT_TIMESTAMP
+                 WHERE id = ?4 AND status = 'running'",
+                params![
+                    final_session_id,
+                    final_output,
+                    if process_success { "completed" } else { "failed" },
+                    run_id
+                ],
             ) {
                 Ok(rows_affected) => {
                     if rows_affected > 0 {
-                        info!("✅ Successfully updated agent run {} with session ID: {}", run_id, extracted_session_id);
+                        info!("✅ Successfully updated agent run {} metadata", run_id);
                     } else {
-                        warn!("⚠️ No rows affected when updating agent run {} with session ID", run_id);
+                        warn!("⚠️ No rows affected when updating agent run {}", run_id);
                     }
                 }
                 Err(e) => {
-                    error!("❌ Failed to update agent run {} with session ID: {}", run_id, e);
+                    error!("❌ Failed to update agent run {} metadata: {}", run_id, e);
                 }
             }
         } else {
@@ -1122,9 +1398,9 @@ async fn spawn_agent_system(
         }
 
         // Cleanup will be handled by the cleanup_finished_processes function
-
-        let _ = app.emit("agent-complete", true);
-        let _ = app.emit(&format!("agent-complete:{}", run_id), true);
+        let _ = registry_monitor.unregister_process(run_id);
+        let _ = app.emit("agent-complete", process_success);
+        let _ = app.emit(&format!("agent-complete:{}", run_id), process_success);
     });
 
     Ok(run_id)
@@ -1140,7 +1416,7 @@ pub async fn list_running_sessions(
 
     // First get all running sessions from the database
     let mut stmt = conn.prepare(
-        "SELECT id, agent_id, agent_name, agent_icon, task, model, project_path, session_id, status, pid, process_started_at, created_at, completed_at 
+        "SELECT id, agent_id, agent_name, agent_icon, provider_id, task, model, project_path, session_id, output, status, pid, process_started_at, created_at, completed_at
          FROM agent_runs WHERE status = 'running' ORDER BY process_started_at DESC"
     ).map_err(|e| e.to_string())?;
 
@@ -1151,21 +1427,27 @@ pub async fn list_running_sessions(
                 agent_id: row.get(1)?,
                 agent_name: row.get(2)?,
                 agent_icon: row.get(3)?,
-                task: row.get(4)?,
-                model: row.get(5)?,
-                project_path: row.get(6)?,
-                session_id: row.get(7)?,
+                provider_id: row
+                    .get::<_, String>(4)
+                    .unwrap_or_else(|_| "claude".to_string()),
+                task: row.get(5)?,
+                model: row.get(6)?,
+                project_path: row.get(7)?,
+                session_id: row.get(8)?,
+                output: row
+                    .get::<_, Option<String>>(9)?
+                    .filter(|s| !s.is_empty()),
                 status: row
-                    .get::<_, String>(8)
+                    .get::<_, String>(10)
                     .unwrap_or_else(|_| "pending".to_string()),
                 pid: row
-                    .get::<_, Option<i64>>(9)
+                    .get::<_, Option<i64>>(11)
                     .ok()
                     .flatten()
                     .map(|p| p as u32),
-                process_started_at: row.get(10)?,
-                created_at: row.get(11)?,
-                completed_at: row.get(12)?,
+                process_started_at: row.get(12)?,
+                created_at: row.get(13)?,
+                completed_at: row.get(14)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -1241,9 +1523,14 @@ pub async fn kill_agent_session(
 
     // Update the database to mark as cancelled
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let live_output = registry.0.get_live_output(run_id).unwrap_or_default();
     let updated = conn.execute(
-        "UPDATE agent_runs SET status = 'cancelled', completed_at = CURRENT_TIMESTAMP WHERE id = ?1 AND status = 'running'",
-        params![run_id],
+        "UPDATE agent_runs
+         SET status = 'cancelled',
+             output = CASE WHEN ?2 != '' THEN ?2 ELSE output END,
+             completed_at = CURRENT_TIMESTAMP
+         WHERE id = ?1 AND status = 'running'",
+        params![run_id, live_output],
     ).map_err(|e| e.to_string())?;
 
     // Emit cancellation event with run_id for proper isolation
@@ -1356,6 +1643,18 @@ pub async fn get_session_output(
     // Get the session information
     let run = get_agent_run(db, run_id).await?;
 
+    // Persisted output is the most reliable source across restarts/providers.
+    if let Some(output) = &run.output {
+        if !output.is_empty() {
+            return Ok(output.clone());
+        }
+    }
+
+    // Non-Claude providers don't write ~/.claude JSONL session files.
+    if run.provider_id != "claude" {
+        return registry.0.get_live_output(run_id);
+    }
+
     // If no session ID yet, try to get live output from registry
     if run.session_id.is_empty() {
         let live_output = registry.0.get_live_output(run_id)?;
@@ -1449,6 +1748,11 @@ pub async fn stream_session_output(
     // Get the session information
     let run = get_agent_run(db, run_id).await?;
 
+    // Non-Claude providers stream directly via agent-output events.
+    if run.provider_id != "claude" {
+        return Ok(());
+    }
+
     // If no session ID yet, can't stream
     if run.session_id.is_empty() {
         return Err("Session not started yet".to_string());
@@ -1534,7 +1838,7 @@ pub async fn export_agent(db: State<'_, AgentDb>, id: i64) -> Result<String, Str
     // Fetch the agent
     let agent = conn
         .query_row(
-            "SELECT name, icon, system_prompt, default_task, model, hooks FROM agents WHERE id = ?1",
+            "SELECT name, icon, system_prompt, default_task, provider_id, model, hooks FROM agents WHERE id = ?1",
             params![id],
             |row| {
                 Ok(serde_json::json!({
@@ -1542,8 +1846,9 @@ pub async fn export_agent(db: State<'_, AgentDb>, id: i64) -> Result<String, Str
                     "icon": row.get::<_, String>(1)?,
                     "system_prompt": row.get::<_, String>(2)?,
                     "default_task": row.get::<_, Option<String>>(3)?,
-                    "model": row.get::<_, String>(4)?,
-                    "hooks": row.get::<_, Option<String>>(5)?
+                    "provider_id": row.get::<_, String>(4)?,
+                    "model": row.get::<_, String>(5)?,
+                    "hooks": row.get::<_, Option<String>>(6)?
                 }))
             },
         )
@@ -1650,24 +1955,9 @@ fn create_command_with_env(program: &str) -> Command {
     // Create a new tokio Command from the program path
     let mut tokio_cmd = Command::new(program);
 
-    // Copy over all environment variables from the std::process::Command
-    // This is a workaround since we can't directly convert between the two types
+    // Inherit full environment so all providers receive auth/config vars.
     for (key, value) in std::env::vars() {
-        if key == "PATH"
-            || key == "HOME"
-            || key == "USER"
-            || key == "SHELL"
-            || key == "LANG"
-            || key == "LC_ALL"
-            || key.starts_with("LC_")
-            || key == "NODE_PATH"
-            || key == "NVM_DIR"
-            || key == "NVM_BIN"
-            || key == "HOMEBREW_PREFIX"
-            || key == "HOMEBREW_CELLAR"
-        {
-            tokio_cmd.env(&key, &value);
-        }
+        tokio_cmd.env(&key, &value);
     }
 
     // Add NVM support if the program is in an NVM directory
@@ -1735,12 +2025,13 @@ pub async fn import_agent(db: State<'_, AgentDb>, json_data: String) -> Result<A
 
     // Create the agent
     conn.execute(
-        "INSERT INTO agents (name, icon, system_prompt, default_task, model, enable_file_read, enable_file_write, enable_network, hooks) VALUES (?1, ?2, ?3, ?4, ?5, 1, 1, 0, ?6)",
+        "INSERT INTO agents (name, icon, system_prompt, default_task, provider_id, model, enable_file_read, enable_file_write, enable_network, hooks) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 1, 0, ?7)",
         params![
             final_name,
             agent_data.icon,
             agent_data.system_prompt,
             agent_data.default_task,
+            agent_data.provider_id,
             agent_data.model,
             agent_data.hooks
         ],
@@ -1752,7 +2043,7 @@ pub async fn import_agent(db: State<'_, AgentDb>, json_data: String) -> Result<A
     // Fetch the created agent
     let agent = conn
         .query_row(
-            "SELECT id, name, icon, system_prompt, default_task, model, enable_file_read, enable_file_write, enable_network, hooks, created_at, updated_at FROM agents WHERE id = ?1",
+            "SELECT id, name, icon, system_prompt, default_task, provider_id, model, enable_file_read, enable_file_write, enable_network, hooks, created_at, updated_at FROM agents WHERE id = ?1",
             params![id],
             |row| {
                 Ok(Agent {
@@ -1761,13 +2052,16 @@ pub async fn import_agent(db: State<'_, AgentDb>, json_data: String) -> Result<A
                     icon: row.get(2)?,
                     system_prompt: row.get(3)?,
                     default_task: row.get(4)?,
-                    model: row.get(5)?,
-                    enable_file_read: row.get(6)?,
-                    enable_file_write: row.get(7)?,
-                    enable_network: row.get(8)?,
-                    hooks: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
+                    provider_id: row
+                        .get::<_, String>(5)
+                        .unwrap_or_else(|_| "claude".to_string()),
+                    model: row.get(6)?,
+                    enable_file_read: row.get(7)?,
+                    enable_file_write: row.get(8)?,
+                    enable_network: row.get(9)?,
+                    hooks: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
                 })
             },
         )
@@ -1992,5 +2286,56 @@ pub async fn load_agent_session_history(
         Ok(messages)
     } else {
         Err(format!("Session file not found: {}", session_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_provider_args_claude_contains_expected_flags() {
+        let args = build_provider_args(
+            "claude",
+            "test task",
+            "sonnet",
+            Some("system prompt here"),
+        );
+        assert_eq!(args[0], "-p");
+        assert_eq!(args[1], "test task");
+        assert!(args.contains(&"--system-prompt".to_string()));
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+    }
+
+    #[test]
+    fn build_provider_args_codex_contains_exec_json() {
+        let args = build_provider_args("codex", "refactor code", "gpt-5-codex", None);
+        assert_eq!(
+            args,
+            vec![
+                "exec".to_string(),
+                "--json".to_string(),
+                "refactor code".to_string(),
+                "--model".to_string(),
+                "gpt-5-codex".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn transform_provider_output_wraps_plain_text_for_generic_provider() {
+        let wrapped = transform_provider_output("gemini", "hello world").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&wrapped).unwrap();
+        assert_eq!(parsed["type"], "assistant");
+        assert_eq!(parsed["message"]["content"][0]["text"], "hello world");
+    }
+
+    #[test]
+    fn transform_provider_output_passes_claude_json_line_through() {
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}"#;
+        let transformed = transform_provider_output("claude", line).unwrap();
+        assert_eq!(line, transformed);
     }
 }

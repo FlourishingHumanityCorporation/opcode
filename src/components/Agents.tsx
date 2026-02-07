@@ -208,7 +208,7 @@ export const Agents: React.FC = () => {
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Agents</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Manage your Claude Code agents
+                Manage your coding agents
               </p>
             </div>
             <div className="flex items-center gap-2">

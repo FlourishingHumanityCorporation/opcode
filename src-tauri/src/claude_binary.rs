@@ -516,7 +516,7 @@ fn get_claude_version(path: &str) -> Result<Option<String>, String> {
 }
 
 /// Extract version string from command output
-fn extract_version_from_output(stdout: &[u8]) -> Option<String> {
+pub fn extract_version_from_output(stdout: &[u8]) -> Option<String> {
     let output_str = String::from_utf8_lossy(stdout);
 
     // Debug log the raw output

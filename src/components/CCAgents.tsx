@@ -310,7 +310,7 @@ export const CCAgents: React.FC<CCAgentsProps> = ({ onBack, className }) => {
               <div>
                 <h1 className="text-heading-1">CC Agents</h1>
                 <p className="mt-1 text-body-small text-muted-foreground">
-                  Manage your Claude Code agents
+                  Manage your coding agents
                 </p>
               </div>
             </div>

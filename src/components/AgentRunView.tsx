@@ -16,6 +16,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Popover } from "@/components/ui/popover";
 import { api, type AgentRunWithMetrics } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { getModelDisplayName } from "@/lib/providerModels";
 import { formatISOTimestamp } from "@/lib/date-utils";
 import { StreamMessage } from "./StreamMessage";
 import { AGENT_ICONS } from "./CCAgents";
@@ -65,8 +66,8 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({
       const runData = await api.getAgentRunWithRealTimeMetrics(runId);
       setRun(runData);
       
-      // If we have a session_id, try to load from JSONL file first
-      if (runData.session_id && runData.session_id !== '') {
+      // Claude sessions can be loaded from ~/.claude JSONL history.
+      if (runData.provider_id === "claude" && runData.session_id && runData.session_id !== '') {
         try {
           const history = await api.loadAgentSessionHistory(runData.session_id);
           
@@ -327,7 +328,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({
                 <h3 className="text-sm font-medium">Task:</h3>
                 <p className="text-sm text-muted-foreground flex-1">{run.task}</p>
                 <Badge variant="outline" className="text-xs">
-                  {run.model === 'opus' ? 'Claude 4 Opus' : 'Claude 4 Sonnet'}
+                  {getModelDisplayName(run.provider_id || "claude", run.model)}
                 </Badge>
               </div>
               

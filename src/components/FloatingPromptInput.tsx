@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send,
@@ -23,6 +23,12 @@ import { FilePicker } from "./FilePicker";
 import { SlashCommandPicker } from "./SlashCommandPicker";
 import { ImagePreview } from "./ImagePreview";
 import { type FileEntry, type SlashCommand } from "@/lib/api";
+import {
+  getDefaultModelForProvider,
+  getProviderDisplayName,
+  getProviderModelOptions,
+  type ProviderModelOption,
+} from "@/lib/providerModels";
 
 // Conditional import for Tauri webview window
 let tauriGetCurrentWebviewWindow: any;
@@ -41,7 +47,7 @@ interface FloatingPromptInputProps {
   /**
    * Callback when prompt is sent
    */
-  onSend: (prompt: string, model: "sonnet" | "opus") => void;
+  onSend: (prompt: string, model: string) => void;
   /**
    * Whether the input is loading
    */
@@ -53,7 +59,11 @@ interface FloatingPromptInputProps {
   /**
    * Default model to select
    */
-  defaultModel?: "sonnet" | "opus";
+  defaultModel?: string;
+  /**
+   * Active provider ID for provider-specific model options
+   */
+  providerId?: string;
   /**
    * Project path for file picker
    */
@@ -172,34 +182,6 @@ const ThinkingModeIndicator: React.FC<{ level: number; color?: string }> = ({ le
   );
 };
 
-type Model = {
-  id: "sonnet" | "opus";
-  name: string;
-  description: string;
-  icon: React.ReactNode;
-  shortName: string;
-  color: string;
-};
-
-const MODELS: Model[] = [
-  {
-    id: "sonnet",
-    name: "Claude 4 Sonnet",
-    description: "Faster, efficient for most tasks",
-    icon: <Zap className="h-3.5 w-3.5" />,
-    shortName: "S",
-    color: "text-primary"
-  },
-  {
-    id: "opus",
-    name: "Claude 4 Opus",
-    description: "More capable, better for complex tasks",
-    icon: <Zap className="h-3.5 w-3.5" />,
-    shortName: "O",
-    color: "text-primary"
-  }
-];
-
 /**
  * FloatingPromptInput component - Fixed position prompt input with model picker
  * 
@@ -216,7 +198,8 @@ const FloatingPromptInputInner = (
     onSend,
     isLoading = false,
     disabled = false,
-    defaultModel = "sonnet",
+    defaultModel,
+    providerId = "claude",
     projectPath,
     className,
     onCancel,
@@ -225,7 +208,9 @@ const FloatingPromptInputInner = (
   ref: React.Ref<FloatingPromptInputRef>,
 ) => {
   const [prompt, setPrompt] = useState("");
-  const [selectedModel, setSelectedModel] = useState<"sonnet" | "opus">(defaultModel);
+  const [selectedModel, setSelectedModel] = useState<string>(
+    defaultModel ?? getDefaultModelForProvider(providerId)
+  );
   const [selectedThinkingMode, setSelectedThinkingMode] = useState<ThinkingMode>("auto");
   const [isExpanded, setIsExpanded] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -243,6 +228,61 @@ const FloatingPromptInputInner = (
   const unlistenDragDropRef = useRef<(() => void) | null>(null);
   const [textareaHeight, setTextareaHeight] = useState<number>(48);
   const isIMEComposingRef = useRef(false);
+  const modelOptions = useMemo(
+    () => getProviderModelOptions(providerId),
+    [providerId]
+  );
+  const providerDisplayName = getProviderDisplayName(providerId);
+
+  useEffect(() => {
+    setSelectedModel((current) => {
+      const hasCurrentModel = modelOptions.some((option) => option.id === current);
+      if (hasCurrentModel) {
+        return current;
+      }
+
+      if (defaultModel && modelOptions.some((option) => option.id === defaultModel)) {
+        return defaultModel;
+      }
+
+      return modelOptions[0]?.id ?? "";
+    });
+  }, [defaultModel, modelOptions]);
+
+  const getModelIcon = (option: ProviderModelOption) => {
+    if (providerId === "claude" && option.id === "opus") {
+      return <Sparkles className="h-3.5 w-3.5" />;
+    }
+
+    if (providerId === "codex") {
+      return <Cpu className="h-3.5 w-3.5" />;
+    }
+
+    if (providerId === "gemini") {
+      return <Sparkles className="h-3.5 w-3.5" />;
+    }
+
+    if (providerId === "goose") {
+      return <Rocket className="h-3.5 w-3.5" />;
+    }
+
+    return <Zap className="h-3.5 w-3.5" />;
+  };
+
+  const getModelIconColorClass = () => {
+    switch (providerId) {
+      case "codex":
+        return "text-emerald-500";
+      case "gemini":
+        return "text-blue-500";
+      case "goose":
+        return "text-amber-500";
+      case "opencode":
+        return "text-cyan-500";
+      default:
+        return "text-primary";
+    }
+  };
 
   // Expose a method to add images programmatically
   React.useImperativeHandle(
@@ -844,7 +884,7 @@ const FloatingPromptInputInner = (
     setPrompt(newPrompt.trim());
   };
 
-  const selectedModelData = MODELS.find(m => m.id === selectedModel) || MODELS[0];
+  const selectedModelData = modelOptions.find((m) => m.id === selectedModel) || modelOptions[0];
 
   return (
     <TooltipProvider>
@@ -923,15 +963,15 @@ const FloatingPromptInputInner = (
                           onClick={() => setModelPickerOpen(!modelPickerOpen)}
                           className="gap-2"
                         >
-                          <span className={selectedModelData.color}>
-                            {selectedModelData.icon}
+                          <span className={getModelIconColorClass()}>
+                            {selectedModelData ? getModelIcon(selectedModelData) : <Zap className="h-3.5 w-3.5" />}
                           </span>
-                          {selectedModelData.name}
+                          {selectedModelData?.name || "Model"}
                         </Button>
                       }
                       content={
                         <div className="w-[300px] p-1">
-                          {MODELS.map((model) => (
+                          {modelOptions.map((model) => (
                             <button
                               key={model.id}
                               onClick={() => {
@@ -945,8 +985,8 @@ const FloatingPromptInputInner = (
                               )}
                             >
                               <div className="mt-0.5">
-                                <span className={model.color}>
-                                  {model.icon}
+                                <span className={getModelIconColorClass()}>
+                                  {getModelIcon(model)}
                                 </span>
                               </div>
                               <div className="flex-1 space-y-1">
@@ -1096,25 +1136,29 @@ const FloatingPromptInputInner = (
                               disabled={disabled}
                               className="h-9 px-2 hover:bg-accent/50 gap-1"
                             >
-                              <span className={selectedModelData.color}>
-                                {selectedModelData.icon}
+                              <span className={getModelIconColorClass()}>
+                                {selectedModelData ? getModelIcon(selectedModelData) : <Zap className="h-3.5 w-3.5" />}
                               </span>
-                              <span className="text-[10px] font-bold opacity-70">
-                                {selectedModelData.shortName}
-                              </span>
+                              {selectedModelData && (
+                                <span className="text-[10px] font-bold opacity-70">
+                                  {selectedModelData.shortName}
+                                </span>
+                              )}
                               <ChevronUp className="h-3 w-3 ml-0.5 opacity-50" />
                             </Button>
                           </motion.div>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          <p className="text-xs font-medium">{selectedModelData.name}</p>
-                          <p className="text-xs text-muted-foreground">{selectedModelData.description}</p>
+                          <p className="text-xs font-medium">{selectedModelData?.name || "Model"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {selectedModelData?.description || "Select a model"}
+                          </p>
                         </TooltipContent>
                       </Tooltip>
                   }
                 content={
                   <div className="w-[300px] p-1">
-                    {MODELS.map((model) => (
+                    {modelOptions.map((model) => (
                       <button
                         key={model.id}
                         onClick={() => {
@@ -1128,8 +1172,8 @@ const FloatingPromptInputInner = (
                         )}
                       >
                         <div className="mt-0.5">
-                          <span className={model.color}>
-                            {model.icon}
+                          <span className={getModelIconColorClass()}>
+                            {getModelIcon(model)}
                           </span>
                         </div>
                         <div className="flex-1 space-y-1">
@@ -1230,7 +1274,7 @@ const FloatingPromptInputInner = (
                   placeholder={
                     dragActive
                       ? "Drop images here..."
-                      : "Message Claude (@ for files, / for commands)..."
+                      : `Message ${providerDisplayName} (@ for files, / for commands)...`
                   }
                   disabled={disabled}
                   className={cn(

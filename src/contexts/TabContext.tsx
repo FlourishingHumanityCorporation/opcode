@@ -13,6 +13,7 @@ export interface Tab {
   claudeFileId?: string; // for claude-file tabs
   initialProjectPath?: string; // for chat tabs
   projectPath?: string; // for agent-execution tabs
+  providerId?: string; // agent provider: "claude" | "codex" | "gemini" | ...
   status: 'active' | 'idle' | 'running' | 'complete' | 'error';
   hasUnsavedChanges: boolean;
   order: number;

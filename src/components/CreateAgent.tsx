@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Save, Loader2, ChevronDown, Zap, AlertCircle } from "lucide-react";
+import { ArrowLeft, Save, Loader2, ChevronDown, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,12 @@ import { cn } from "@/lib/utils";
 import MDEditor from "@uiw/react-md-editor";
 import { type AgentIconName } from "./CCAgents";
 import { IconPicker, ICON_MAP } from "./IconPicker";
+import {
+  getDefaultModelForProvider,
+  getModelDisplayName,
+  getProviderDisplayName,
+  getProviderModelOptions,
+} from "@/lib/providerModels";
 
 
 interface CreateAgentProps {
@@ -44,17 +50,60 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
   onAgentCreated,
   className,
 }) => {
+  const initialProviderId = agent?.provider_id || "claude";
+  const initialModel = agent?.model || getDefaultModelForProvider(initialProviderId);
+  const initialModelOptions = getProviderModelOptions(initialProviderId);
+  const initialCustomModel = initialModelOptions.some((option) => option.id === initialModel)
+    ? ""
+    : initialModel;
+
+  const [providerId, setProviderId] = useState(initialProviderId);
   const [name, setName] = useState(agent?.name || "");
   const [selectedIcon, setSelectedIcon] = useState<AgentIconName>((agent?.icon as AgentIconName) || "bot");
   const [systemPrompt, setSystemPrompt] = useState(agent?.system_prompt || "");
   const [defaultTask, setDefaultTask] = useState(agent?.default_task || "");
-  const [model, setModel] = useState(agent?.model || "sonnet");
+  const [model, setModel] = useState(initialModel);
+  const [customModelInput, setCustomModelInput] = useState(initialCustomModel);
+  const [detectedProviderIds, setDetectedProviderIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [showIconPicker, setShowIconPicker] = useState(false);
 
   const isEditMode = !!agent;
+  const modelOptions = useMemo(() => getProviderModelOptions(providerId), [providerId]);
+  const defaultModel = useMemo(
+    () => getDefaultModelForProvider(providerId),
+    [providerId]
+  );
+  const providerOptions = useMemo(() => {
+    const base = new Set(["claude", "codex", "gemini", "aider", "goose", "opencode"]);
+    detectedProviderIds.forEach((id) => base.add(id));
+    if (agent?.provider_id) {
+      base.add(agent.provider_id);
+    }
+    return Array.from(base);
+  }, [agent?.provider_id, detectedProviderIds]);
+
+  useEffect(() => {
+    const loadDetectedProviders = async () => {
+      try {
+        const detected = await api.listDetectedAgents();
+        const ids = Array.from(
+          new Set(
+            detected
+              .map((entry: any) => entry?.provider_id)
+              .filter((id: string | undefined): id is string => !!id)
+          )
+        );
+        setDetectedProviderIds(ids);
+      } catch (err) {
+        console.warn("Failed to detect providers for agent form:", err);
+      }
+    };
+
+    loadDetectedProviders();
+  }, []);
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -78,6 +127,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
           selectedIcon, 
           systemPrompt, 
           defaultTask || undefined, 
+          providerId,
           model
         );
       } else {
@@ -86,6 +136,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
           selectedIcon, 
           systemPrompt, 
           defaultTask || undefined, 
+          providerId,
           model
         );
       }
@@ -108,11 +159,38 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
          selectedIcon !== (agent?.icon || "bot") || 
          systemPrompt !== (agent?.system_prompt || "") ||
          defaultTask !== (agent?.default_task || "") ||
-         model !== (agent?.model || "sonnet")) && 
+         providerId !== (agent?.provider_id || "claude") ||
+         model !== (agent?.model || getDefaultModelForProvider(agent?.provider_id || "claude"))) &&
         !confirm("You have unsaved changes. Are you sure you want to leave?")) {
       return;
     }
     onBack();
+  };
+
+  const handlePresetModelSelect = (modelId: string) => {
+    setModel(modelId);
+    setCustomModelInput("");
+  };
+
+  const handleCustomModelChange = (value: string) => {
+    setCustomModelInput(value);
+    const trimmed = value.trim();
+
+    if (trimmed) {
+      setModel(trimmed);
+      return;
+    }
+
+    if (!modelOptions.some((option) => option.id === model)) {
+      setModel(defaultModel);
+    }
+  };
+
+  const handleProviderChange = (nextProviderId: string) => {
+    setProviderId(nextProviderId);
+    const nextDefaultModel = getDefaultModelForProvider(nextProviderId);
+    setModel(nextDefaultModel);
+    setCustomModelInput("");
   };
 
   return (
@@ -146,7 +224,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
                   {isEditMode ? "Edit Agent" : "Create New Agent"}
                 </h1>
                 <p className="mt-1 text-body-small text-muted-foreground">
-                  {isEditMode ? "Update your Claude Code agent configuration" : "Configure a new Claude Code agent"}
+                  {isEditMode ? "Update your coding agent configuration" : "Configure a new coding agent"}
                 </p>
               </div>
             </div>
@@ -235,57 +313,61 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
                 </div>
               </div>
 
+              <div className="space-y-2 mt-4">
+                <Label htmlFor="provider" className="text-caption text-muted-foreground">Provider</Label>
+                <select
+                  id="provider"
+                  value={providerId}
+                  onChange={(e) => handleProviderChange(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {providerOptions.map((id) => (
+                    <option key={id} value={id}>
+                      {getProviderDisplayName(id)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Model Selection */}
               <div className="space-y-2 mt-4">
                 <Label className="text-caption text-muted-foreground">Model</Label>
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <motion.button
-                    type="button"
-                    onClick={() => setModel("sonnet")}
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ duration: 0.15 }}
-                    className={cn(
-                      "flex-1 px-4 py-3 rounded-md border transition-all",
-                      model === "sonnet" 
-                        ? "border-primary bg-primary/10 text-primary" 
-                        : "border-border hover:border-primary/50 hover:bg-accent"
-                    )}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Zap className={cn(
-                        "h-4 w-4",
-                        model === "sonnet" ? "text-primary" : "text-muted-foreground"
-                      )} />
+                  {modelOptions.map((option) => (
+                    <motion.button
+                      key={option.id}
+                      type="button"
+                      onClick={() => handlePresetModelSelect(option.id)}
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
+                      className={cn(
+                        "flex-1 px-4 py-3 rounded-md border transition-all",
+                        model === option.id
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border hover:border-primary/50 hover:bg-accent"
+                      )}
+                    >
                       <div className="text-left">
-                        <div className="text-body-small font-medium">Claude 4 Sonnet</div>
-                        <div className="text-caption text-muted-foreground">Faster, efficient for most tasks</div>
+                        <div className="text-body-small font-medium">{option.name}</div>
+                        <div className="text-caption text-muted-foreground">{option.description}</div>
                       </div>
-                    </div>
-                  </motion.button>
-                  
-                  <motion.button
-                    type="button"
-                    onClick={() => setModel("opus")}
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ duration: 0.15 }}
-                    className={cn(
-                      "flex-1 px-4 py-3 rounded-md border transition-all",
-                      model === "opus" 
-                        ? "border-primary bg-primary/10 text-primary" 
-                        : "border-border hover:border-primary/50 hover:bg-accent"
-                    )}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Zap className={cn(
-                        "h-4 w-4",
-                        model === "opus" ? "text-primary" : "text-muted-foreground"
-                      )} />
-                      <div className="text-left">
-                        <div className="text-body-small font-medium">Claude 4 Opus</div>
-                        <div className="text-caption text-muted-foreground">More capable, better for complex tasks</div>
-                      </div>
-                    </div>
-                  </motion.button>
+                    </motion.button>
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="custom-model" className="text-caption text-muted-foreground">
+                    Custom Model ID (Optional)
+                  </Label>
+                  <Input
+                    id="custom-model"
+                    value={customModelInput}
+                    onChange={(e) => handleCustomModelChange(e.target.value)}
+                    placeholder="e.g., gpt-5-codex or claude-sonnet-4-5"
+                    className="h-9"
+                  />
+                  <p className="text-caption text-muted-foreground">
+                    Current selection: <span className="font-mono">{getModelDisplayName(providerId, model)}</span>
+                  </p>
                 </div>
               </div>
             </Card>
@@ -314,7 +396,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
               <div className="mb-4">
                 <h3 className="text-heading-4 mb-1">System Prompt</h3>
                 <p className="text-caption text-muted-foreground">
-                  Define the behavior and capabilities of your Claude Code agent
+                  Define the behavior and capabilities of your coding agent
                 </p>
               </div>
               <div className="rounded-md border border-border overflow-hidden" data-color-mode="dark">

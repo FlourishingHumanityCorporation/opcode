@@ -118,6 +118,7 @@ export interface Agent {
   icon: string;
   system_prompt: string;
   default_task?: string;
+  provider_id: string;
   model: string;
   hooks?: string; // JSON string of HooksConfiguration
   created_at: string;
@@ -132,6 +133,7 @@ export interface AgentExport {
     icon: string;
     system_prompt: string;
     default_task?: string;
+    provider_id?: string;
     model: string;
     hooks?: string;
   };
@@ -150,10 +152,12 @@ export interface AgentRun {
   agent_id: number;
   agent_name: string;
   agent_icon: string;
+  provider_id: string;
   task: string;
   model: string;
   project_path: string;
   session_id: string;
+  output?: string;
   status: string; // 'pending', 'running', 'completed', 'failed', 'cancelled'
   pid?: number;
   process_started_at?: string;
@@ -173,6 +177,7 @@ export interface AgentRunWithMetrics {
   agent_id: number;
   agent_name: string;
   agent_icon: string;
+  provider_id: string;
   task: string;
   model: string;
   project_path: string;
@@ -707,6 +712,7 @@ export const api = {
     icon: string, 
     system_prompt: string, 
     default_task?: string, 
+    providerId?: string,
     model?: string,
     hooks?: string
   ): Promise<Agent> {
@@ -716,6 +722,7 @@ export const api = {
         icon, 
         systemPrompt: system_prompt,
         defaultTask: default_task,
+        providerId,
         model,
         hooks
       });
@@ -742,6 +749,7 @@ export const api = {
     icon: string, 
     system_prompt: string, 
     default_task?: string, 
+    providerId?: string,
     model?: string,
     hooks?: string
   ): Promise<Agent> {
@@ -752,6 +760,7 @@ export const api = {
         icon, 
         systemPrompt: system_prompt,
         defaultTask: default_task,
+        providerId,
         model,
         hooks
       });
@@ -1069,6 +1078,52 @@ export const api = {
    */
   async getClaudeSessionOutput(sessionId: string): Promise<string> {
     return apiCall("get_claude_session_output", { sessionId });
+  },
+
+  // ─── Multi-Provider Agent API ─────────────────────────────────────────
+
+  /**
+   * Lists all detected CLI coding agents on the system
+   */
+  async listDetectedAgents(): Promise<any[]> {
+    return apiCall("list_detected_agents");
+  },
+
+  /**
+   * Executes a new session with any detected CLI agent
+   */
+  async executeAgentSession(
+    providerId: string,
+    projectPath: string,
+    prompt: string,
+    model: string
+  ): Promise<void> {
+    return apiCall("execute_agent_session", { providerId, projectPath, prompt, model });
+  },
+
+  /**
+   * Continues an existing agent session
+   */
+  async continueAgentSession(
+    providerId: string,
+    projectPath: string,
+    prompt: string,
+    model: string
+  ): Promise<void> {
+    return apiCall("continue_agent_session", { providerId, projectPath, prompt, model });
+  },
+
+  /**
+   * Resumes an existing agent session by ID
+   */
+  async resumeAgentSession(
+    providerId: string,
+    projectPath: string,
+    sessionId: string,
+    prompt: string,
+    model: string
+  ): Promise<void> {
+    return apiCall("resume_agent_session", { providerId, projectPath, sessionId, prompt, model });
   },
 
   /**

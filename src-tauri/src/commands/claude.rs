@@ -1226,7 +1226,7 @@ async fn spawn_claude_process(
     let stdout_task = tokio::spawn(async move {
         let mut lines = stdout_reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            log::debug!("Claude stdout: {}", line);
+            log::info!("Claude stdout: {}", &line[..line.len().min(200)]);
 
             // Parse the line to check for init message with session ID
             if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
@@ -2186,6 +2186,360 @@ pub async fn validate_hook_command(command: String) -> Result<serde_json::Value,
         }
         Err(e) => Err(format!("Failed to validate command: {}", e)),
     }
+}
+
+// ─── Multi-Provider Agent Commands ─────────────────────────────────────────
+
+/// List all detected CLI coding agents on the system.
+#[tauri::command]
+pub async fn list_detected_agents(
+    app: AppHandle,
+) -> Result<Vec<crate::agent_binary::AgentInstallation>, String> {
+    let agents = crate::agent_binary::discover_all_agents(&app).await;
+    Ok(agents)
+}
+
+/// Execute a new session with any detected CLI agent.
+///
+/// For Claude, this delegates to the existing Claude-specific logic.
+/// For other providers, it spawns the binary with appropriate args and
+/// streams raw output via Tauri events.
+#[tauri::command]
+pub async fn execute_agent_session(
+    app: AppHandle,
+    provider_id: String,
+    project_path: String,
+    prompt: String,
+    model: String,
+) -> Result<(), String> {
+    log::info!(
+        "Starting agent session: provider={}, project={}, model={}",
+        provider_id,
+        project_path,
+        model
+    );
+
+    if provider_id == "claude" {
+        // Delegate to existing Claude execution (preserves all Claude-specific features)
+        return execute_claude_code(app, project_path, prompt, model).await;
+    }
+
+    // For non-Claude providers: find binary and spawn with generic streaming
+    let agents = crate::agent_binary::discover_all_agents(&app).await;
+    let agent = agents
+        .iter()
+        .find(|a| a.provider_id == provider_id)
+        .ok_or_else(|| format!("Provider '{}' not found on system", provider_id))?;
+
+    let binary_path = agent.binary_path.clone();
+
+    // Build args based on provider conventions
+    let args = build_provider_args(&provider_id, &prompt, &model);
+
+    let cmd = create_agent_command(&binary_path, args, &project_path);
+    spawn_agent_process(app, cmd, provider_id, prompt, model, project_path).await
+}
+
+/// Continue an existing session (provider-aware).
+#[tauri::command]
+pub async fn continue_agent_session(
+    app: AppHandle,
+    provider_id: String,
+    project_path: String,
+    prompt: String,
+    model: String,
+) -> Result<(), String> {
+    if provider_id == "claude" {
+        return continue_claude_code(app, project_path, prompt, model).await;
+    }
+
+    // Non-Claude providers: just execute again (most don't have "continue" concept)
+    execute_agent_session(app, provider_id, project_path, prompt, model).await
+}
+
+/// Resume an existing session (provider-aware).
+#[tauri::command]
+pub async fn resume_agent_session(
+    app: AppHandle,
+    provider_id: String,
+    project_path: String,
+    session_id: String,
+    prompt: String,
+    model: String,
+) -> Result<(), String> {
+    if provider_id == "claude" {
+        return resume_claude_code(app, project_path, session_id, prompt, model).await;
+    }
+
+    // Non-Claude providers: resume not supported, start new session
+    log::warn!(
+        "Provider '{}' does not support session resume, starting new session",
+        provider_id
+    );
+    execute_agent_session(app, provider_id, project_path, prompt, model).await
+}
+
+/// Build CLI arguments based on provider conventions.
+/// Each provider has different flags for non-interactive execution.
+fn build_provider_args(provider_id: &str, prompt: &str, model: &str) -> Vec<String> {
+    match provider_id {
+        "codex" => {
+            // Use `exec --json` for structured JSONL output (transformed in codex_transform.rs)
+            let mut args = vec!["exec".to_string(), "--json".to_string(), prompt.to_string()];
+            // Only pass --model if it's not a Claude model name (codex uses OpenAI models)
+            let claude_models = ["sonnet", "opus", "haiku", "claude"];
+            if !model.is_empty()
+                && !claude_models.iter().any(|m| model.to_lowercase().contains(m))
+            {
+                args.extend_from_slice(&["--model".to_string(), model.to_string()]);
+            }
+            args
+        }
+        "gemini" => {
+            let mut args = vec![
+                "--prompt".to_string(),
+                prompt.to_string(),
+                "--approval-mode".to_string(),
+                "yolo".to_string(),
+            ];
+            if !model.is_empty() {
+                args.extend_from_slice(&["--model".to_string(), model.to_string()]);
+            }
+            args
+        }
+        "aider" => {
+            let mut args = vec![
+                "--message".to_string(),
+                prompt.to_string(),
+                "--yes".to_string(), // auto-approve to avoid TTY prompts
+            ];
+            if !model.is_empty() {
+                args.extend_from_slice(&["--model".to_string(), model.to_string()]);
+            }
+            args
+        }
+        "goose" => {
+            vec!["run".to_string(), "--text".to_string(), prompt.to_string()]
+        }
+        _ => {
+            // Generic: just pass prompt as first arg
+            vec![prompt.to_string()]
+        }
+    }
+}
+
+/// Create a tokio Command for a non-Claude agent.
+/// Inherits ALL environment variables (fixes Issue #400 for non-Claude providers).
+/// Uses Stdio::null() for stdin since prompts are passed as args, not via stdin.
+fn create_agent_command(binary_path: &str, args: Vec<String>, project_path: &str) -> Command {
+    let mut cmd = Command::new(binary_path);
+
+    // Inherit full environment (no whitelist filtering)
+    for (key, value) in std::env::vars() {
+        cmd.env(&key, &value);
+    }
+
+    for arg in args {
+        cmd.arg(arg);
+    }
+
+    cmd.current_dir(project_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    cmd
+}
+
+/// Spawn a non-Claude agent process and stream output via Tauri events.
+///
+/// Uses generic event names: `agent-output:{runId}`, `agent-error:{runId}`,
+/// `agent-complete:{runId}`. The frontend handles mapping these per-provider.
+async fn spawn_agent_process(
+    app: AppHandle,
+    mut cmd: Command,
+    provider_id: String,
+    prompt: String,
+    model: String,
+    project_path: String,
+) -> Result<(), String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn {}: {}", provider_id, e))?;
+
+    let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
+
+    let pid = child.id().unwrap_or(0);
+    log::info!("Spawned {} process with PID: {}", provider_id, pid);
+
+    // Generate a unique run ID for this session
+    let run_id = format!(
+        "{}_{}_{}",
+        provider_id,
+        pid,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
+
+    // Register with process registry
+    let registry = app.state::<crate::process::ProcessRegistryState>();
+    let registry_clone = registry.0.clone();
+    let reg_id: Option<i64> = match registry.0.register_claude_session(
+        run_id.clone(),
+        pid,
+        project_path.clone(),
+        prompt.clone(),
+        model.clone(),
+    ) {
+        Ok(rid) => {
+            log::info!("Registered {} session with registry id: {}", provider_id, rid);
+            Some(rid)
+        }
+        Err(e) => {
+            log::error!("Failed to register {} session: {}", provider_id, e);
+            None
+        }
+    };
+
+    // Also emit a system:init-like event so the frontend can track this session
+    let init_msg = serde_json::json!({
+        "type": "system",
+        "subtype": "init",
+        "session_id": run_id,
+        "provider_id": provider_id,
+    });
+    let _ = app.emit("claude-output", &init_msg.to_string());
+    let _ = app.emit(&format!("claude-output:{}", run_id), &init_msg.to_string());
+
+    // Stream stdout — provider-aware transformation to Claude-compatible JSON
+    let app_stdout = app.clone();
+    let run_id_stdout = run_id.clone();
+    let registry_stdout = registry_clone.clone();
+    let reg_id_stdout = reg_id;
+    let provider_stdout = provider_id.clone();
+    let stdout_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            log::info!("{} stdout ({}): {}", run_id_stdout, provider_stdout, &line[..line.len().min(200)]);
+
+            // Store live output
+            if let Some(rid) = reg_id_stdout {
+                let _ = registry_stdout.append_live_output(rid, &line);
+            }
+
+            // Provider-aware transformation
+            let wrapped = match provider_stdout.as_str() {
+                "codex" => {
+                    // Use structured transformer for codex --json JSONL output
+                    let result = crate::commands::codex_transform::transform_codex_line(&line);
+                    if result.is_none() {
+                        log::debug!("{} codex line skipped (no renderable content)", run_id_stdout);
+                    }
+                    result
+                }
+                _ => {
+                    // Generic: wrap unknown JSON/text unless already Claude-compatible.
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
+                        let has_type = parsed.get("type").and_then(|v| v.as_str()).is_some();
+                        let has_message_content = parsed
+                            .get("message")
+                            .and_then(|m| m.get("content"))
+                            .is_some();
+                        if has_type && has_message_content {
+                            Some(line.clone())
+                        } else {
+                            Some(serde_json::json!({
+                                "type": "assistant",
+                                "message": {
+                                    "content": [{"type": "text", "text": line}]
+                                }
+                            }).to_string())
+                        }
+                    } else {
+                        Some(serde_json::json!({
+                            "type": "assistant",
+                            "message": {
+                                "content": [{"type": "text", "text": line}]
+                            }
+                        }).to_string())
+                    }
+                }
+            };
+
+            if let Some(ref w) = wrapped {
+                log::info!("{} emitting claude-output: {}", run_id_stdout, &w[..w.len().min(200)]);
+                let _ = app_stdout.emit(&format!("claude-output:{}", run_id_stdout), w);
+                let _ = app_stdout.emit("claude-output", w);
+            }
+        }
+    });
+
+    // Stream stderr — wrap as text and route to claude-output.
+    // With --json, codex stderr is empty. For other providers, stderr may contain
+    // useful output so we always forward it as assistant text messages.
+    let app_stderr = app.clone();
+    let run_id_stderr = run_id.clone();
+    let registry_stderr = registry_clone.clone();
+    let reg_id_stderr = reg_id;
+    let stderr_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            log::info!("{} stderr: {}", run_id_stderr, line);
+
+            // Store live output
+            if let Some(rid) = reg_id_stderr {
+                let _ = registry_stderr.append_live_output(rid, &line);
+            }
+
+            // Always wrap stderr as plain text — no JSON detection needed
+            let wrapped = serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": line}]
+                }
+            }).to_string();
+
+            let _ = app_stderr.emit(&format!("claude-output:{}", run_id_stderr), &wrapped);
+            let _ = app_stderr.emit("claude-output", &wrapped);
+        }
+    });
+
+    // Wait for completion
+    let app_wait = app.clone();
+    let run_id_wait = run_id.clone();
+    let registry_wait = registry_clone;
+    let reg_id_wait = reg_id;
+    tokio::spawn(async move {
+        let _ = stdout_task.await;
+        let _ = stderr_task.await;
+
+        match child.wait().await {
+            Ok(status) => {
+                log::info!("{} process exited with status: {}", run_id_wait, status);
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                let _ = app_wait.emit(&format!("claude-complete:{}", run_id_wait), status.success());
+                let _ = app_wait.emit("claude-complete", status.success());
+            }
+            Err(e) => {
+                log::error!("Failed to wait for {} process: {}", run_id_wait, e);
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                let _ = app_wait.emit(&format!("claude-complete:{}", run_id_wait), false);
+                let _ = app_wait.emit("claude-complete", false);
+            }
+        }
+
+        // Unregister from process registry
+        if let Some(rid) = reg_id_wait {
+            let _ = registry_wait.unregister_process(rid);
+        }
+    });
+
+    Ok(())
 }
 
 #[cfg(test)]
