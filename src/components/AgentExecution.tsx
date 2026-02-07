@@ -64,6 +64,19 @@ interface AgentExecutionProps {
   className?: string;
 }
 
+type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
+const CODEX_REASONING_OPTIONS: Array<{
+  id: CodexReasoningEffort;
+  name: string;
+  description: string;
+}> = [
+  { id: "low", name: "Low", description: "Lower reasoning effort" },
+  { id: "medium", name: "Medium", description: "Balanced reasoning effort" },
+  { id: "high", name: "High", description: "Higher reasoning effort" },
+  { id: "xhigh", name: "Extra High", description: "Maximum reasoning effort" },
+];
+
 export interface ClaudeStreamMessage {
   type: "system" | "assistant" | "user" | "result";
   subtype?: string;
@@ -126,6 +139,8 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
   const [task, setTask] = useState(agent.default_task || "");
   const [model, setModel] = useState(initialModel);
   const [customModelInput, setCustomModelInput] = useState(initialCustomModel);
+  const [codexReasoningEffort, setCodexReasoningEffort] =
+    useState<CodexReasoningEffort>("high");
   const [isRunning, setIsRunning] = useState(false);
   const [providerRuntime, setProviderRuntime] = useState<ProviderRuntimeStatus | null>(null);
   const [providerRuntimeLoading, setProviderRuntimeLoading] = useState(false);
@@ -375,7 +390,13 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
       unlistenRefs.current = [];
       
       // Execute the agent and get the run ID
-      const executionRunId = await api.executeAgent(agent.id!, projectPath, task, model);
+      const executionRunId = await api.executeAgent(
+        agent.id!,
+        projectPath,
+        task,
+        model,
+        providerId === "codex" ? codexReasoningEffort : undefined
+      );
       console.log("Agent execution started with run ID:", executionRunId);
       setRunId(executionRunId);
       
@@ -745,6 +766,39 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
                 </p>
               </div>
             </div>
+
+            {providerId === "codex" && (
+              <div className="space-y-3">
+                <Label className="text-caption text-muted-foreground">Reasoning Effort</Label>
+                <div className="flex gap-2">
+                  {CODEX_REASONING_OPTIONS.map((option) => (
+                    <motion.button
+                      key={option.id}
+                      type="button"
+                      onClick={() => {
+                        if (isRunning) return;
+                        setCodexReasoningEffort(option.id);
+                      }}
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
+                      className={cn(
+                        "flex-1 px-4 py-3 rounded-md border transition-all",
+                        codexReasoningEffort === option.id
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border hover:border-primary/50 hover:bg-accent",
+                        isRunning && "opacity-50 cursor-not-allowed"
+                      )}
+                      disabled={isRunning}
+                    >
+                      <div className="text-left">
+                        <div className="text-body-small font-medium">{option.name}</div>
+                        <div className="text-caption text-muted-foreground">{option.description}</div>
+                      </div>
+                    </motion.button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Task Input */}
             <div className="space-y-3">

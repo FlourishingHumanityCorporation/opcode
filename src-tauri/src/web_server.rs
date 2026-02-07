@@ -479,6 +479,15 @@ async fn claude_websocket_handler(socket: WebSocket, state: AppState) {
 }
 
 // Claude command execution functions for WebSocket streaming
+fn append_optional_model_arg(args: &mut Vec<String>, model: &str) {
+    let trimmed = model.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
+        return;
+    }
+
+    args.extend_from_slice(&["--model".to_string(), trimmed.to_string()]);
+}
+
 async fn execute_claude_command(
     project_path: String,
     prompt: String,
@@ -520,17 +529,15 @@ async fn execute_claude_command(
     // Create Claude command
     println!("[TRACE] Creating Claude command...");
     let mut cmd = Command::new(&claude_path);
-    let args = [
-        "-p",
-        &prompt,
-        "--model",
-        &model,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-    ];
-    cmd.args(args);
+    let mut args = vec!["-p".to_string(), prompt.clone()];
+    append_optional_model_arg(&mut args, &model);
+    args.extend_from_slice(&[
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+        "--dangerously-skip-permissions".to_string(),
+    ]);
+    cmd.args(&args);
     cmd.current_dir(&project_path);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
@@ -632,17 +639,19 @@ async fn continue_claude_command(
 
     // Create continue command
     let mut cmd = Command::new(&claude_path);
-    cmd.args([
-        "-c", // Continue flag
-        "-p",
-        &prompt,
-        "--model",
-        &model,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
+    let mut args = vec![
+        "-c".to_string(), // Continue flag
+        "-p".to_string(),
+        prompt.clone(),
+    ];
+    append_optional_model_arg(&mut args, &model);
+    args.extend_from_slice(&[
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+        "--dangerously-skip-permissions".to_string(),
     ]);
+    cmd.args(&args);
     cmd.current_dir(&project_path);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
@@ -719,19 +728,20 @@ async fn resume_claude_command(
     // Create resume command
     println!("[resume_claude_command] Creating command...");
     let mut cmd = Command::new(&claude_path);
-    let args = [
-        "--resume",
-        &claude_session_id,
-        "-p",
-        &prompt,
-        "--model",
-        &model,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
+    let mut args = vec![
+        "--resume".to_string(),
+        claude_session_id.clone(),
+        "-p".to_string(),
+        prompt.clone(),
     ];
-    cmd.args(args);
+    append_optional_model_arg(&mut args, &model);
+    args.extend_from_slice(&[
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+        "--dangerously-skip-permissions".to_string(),
+    ]);
+    cmd.args(&args);
     cmd.current_dir(&project_path);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());

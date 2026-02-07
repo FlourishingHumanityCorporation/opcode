@@ -904,6 +904,7 @@ pub async fn execute_agent(
     project_path: String,
     task: String,
     model: Option<String>,
+    reasoning_effort: Option<String>,
     db: State<'_, AgentDb>,
     registry: State<'_, crate::process::ProcessRegistryState>,
 ) -> Result<i64, String> {
@@ -1004,6 +1005,7 @@ pub async fn execute_agent(
         &task,
         &execution_model,
         Some(&agent.system_prompt),
+        reasoning_effort.as_deref(),
     );
 
     spawn_agent_system(
@@ -1043,6 +1045,7 @@ fn build_provider_args(
     task: &str,
     model: &str,
     system_prompt: Option<&str>,
+    reasoning_effort: Option<&str>,
 ) -> Vec<String> {
     let model = model.trim();
     let has_explicit_model = !model.is_empty() && !model.eq_ignore_ascii_case("default");
@@ -1070,6 +1073,14 @@ fn build_provider_args(
             let mut args = vec!["exec".to_string(), "--json".to_string(), task.to_string()];
             if has_explicit_model {
                 args.extend(["--model".to_string(), model.to_string()]);
+            }
+            if let Some(effort) = sanitize_reasoning_effort(reasoning_effort) {
+                args.extend([
+                    "-c".to_string(),
+                    format!("model_reasoning_effort=\"{}\"", effort),
+                ]);
+            } else if reasoning_effort.is_some() {
+                warn!("Ignoring invalid codex reasoning effort: {:?}", reasoning_effort);
             }
             args
         }
@@ -1120,6 +1131,25 @@ fn build_provider_args(
             args
         }
         _ => vec![task.to_string()],
+    }
+}
+
+fn sanitize_reasoning_effort(reasoning_effort: Option<&str>) -> Option<&'static str> {
+    match reasoning_effort
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+    {
+        Some(value) => match value.as_str() {
+            "none" => Some("none"),
+            "minimal" => Some("minimal"),
+            "low" => Some("low"),
+            "medium" => Some("medium"),
+            "high" => Some("high"),
+            "xhigh" => Some("xhigh"),
+            _ => None,
+        },
+        None => None,
     }
 }
 

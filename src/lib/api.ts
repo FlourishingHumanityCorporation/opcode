@@ -750,7 +750,7 @@ export const api = {
    * @param icon - The icon identifier
    * @param system_prompt - The system prompt for the agent
    * @param default_task - Optional default task
-   * @param model - Optional model (defaults to 'sonnet')
+   * @param model - Optional model (provider-specific default when omitted)
    * @param hooks - Optional hooks configuration as JSON string
    * @returns Promise resolving to the created agent
    */
@@ -895,9 +895,21 @@ export const api = {
    * @param model - Optional model override
    * @returns Promise resolving to the run ID when execution starts
    */
-  async executeAgent(agentId: number, projectPath: string, task: string, model?: string): Promise<number> {
+  async executeAgent(
+    agentId: number,
+    projectPath: string,
+    task: string,
+    model?: string,
+    reasoningEffort?: string
+  ): Promise<number> {
     try {
-      return await apiCall<number>('execute_agent', { agentId, projectPath, task, model });
+      return await apiCall<number>('execute_agent', {
+        agentId,
+        projectPath,
+        task,
+        model,
+        reasoningEffort,
+      });
     } catch (error) {
       console.error("Failed to execute agent:", error);
       // Return a sentinel value to indicate error
@@ -1173,9 +1185,16 @@ export const api = {
     providerId: string,
     projectPath: string,
     prompt: string,
-    model: string
+    model: string,
+    reasoningEffort?: string
   ): Promise<void> {
-    return apiCall("execute_agent_session", { providerId, projectPath, prompt, model });
+    return apiCall("execute_agent_session", {
+      providerId,
+      projectPath,
+      prompt,
+      model,
+      reasoningEffort,
+    });
   },
 
   /**
@@ -1185,9 +1204,16 @@ export const api = {
     providerId: string,
     projectPath: string,
     prompt: string,
-    model: string
+    model: string,
+    reasoningEffort?: string
   ): Promise<void> {
-    return apiCall("continue_agent_session", { providerId, projectPath, prompt, model });
+    return apiCall("continue_agent_session", {
+      providerId,
+      projectPath,
+      prompt,
+      model,
+      reasoningEffort,
+    });
   },
 
   /**
@@ -1198,9 +1224,17 @@ export const api = {
     projectPath: string,
     sessionId: string,
     prompt: string,
-    model: string
+    model: string,
+    reasoningEffort?: string
   ): Promise<void> {
-    return apiCall("resume_agent_session", { providerId, projectPath, sessionId, prompt, model });
+    return apiCall("resume_agent_session", {
+      providerId,
+      projectPath,
+      sessionId,
+      prompt,
+      model,
+      reasoningEffort,
+    });
   },
 
   /**

@@ -2225,6 +2225,7 @@ pub async fn execute_agent_session(
     project_path: String,
     prompt: String,
     model: String,
+    reasoning_effort: Option<String>,
 ) -> Result<(), String> {
     log::info!(
         "Starting agent session: provider={}, project={}, model={}",
@@ -2248,7 +2249,7 @@ pub async fn execute_agent_session(
     let binary_path = agent.binary_path.clone();
 
     // Build args based on provider conventions
-    let args = build_provider_args(&provider_id, &prompt, &model);
+    let args = build_provider_args(&provider_id, &prompt, &model, reasoning_effort.as_deref());
 
     let cmd = create_agent_command(&binary_path, args, &project_path);
     spawn_agent_process(app, cmd, provider_id, prompt, model, project_path).await
@@ -2262,13 +2263,22 @@ pub async fn continue_agent_session(
     project_path: String,
     prompt: String,
     model: String,
+    reasoning_effort: Option<String>,
 ) -> Result<(), String> {
     if provider_id == "claude" {
         return continue_claude_code(app, project_path, prompt, model).await;
     }
 
     // Non-Claude providers: just execute again (most don't have "continue" concept)
-    execute_agent_session(app, provider_id, project_path, prompt, model).await
+    execute_agent_session(
+        app,
+        provider_id,
+        project_path,
+        prompt,
+        model,
+        reasoning_effort,
+    )
+    .await
 }
 
 /// Resume an existing session (provider-aware).
@@ -2280,6 +2290,7 @@ pub async fn resume_agent_session(
     session_id: String,
     prompt: String,
     model: String,
+    reasoning_effort: Option<String>,
 ) -> Result<(), String> {
     if provider_id == "claude" {
         return resume_claude_code(app, project_path, session_id, prompt, model).await;
@@ -2290,12 +2301,25 @@ pub async fn resume_agent_session(
         "Provider '{}' does not support session resume, starting new session",
         provider_id
     );
-    execute_agent_session(app, provider_id, project_path, prompt, model).await
+    execute_agent_session(
+        app,
+        provider_id,
+        project_path,
+        prompt,
+        model,
+        reasoning_effort,
+    )
+    .await
 }
 
 /// Build CLI arguments based on provider conventions.
 /// Each provider has different flags for non-interactive execution.
-fn build_provider_args(provider_id: &str, prompt: &str, model: &str) -> Vec<String> {
+fn build_provider_args(
+    provider_id: &str,
+    prompt: &str,
+    model: &str,
+    reasoning_effort: Option<&str>,
+) -> Vec<String> {
     match provider_id {
         "codex" => {
             // Use `exec --json` for structured JSONL output (transformed in codex_transform.rs)
@@ -2306,6 +2330,14 @@ fn build_provider_args(provider_id: &str, prompt: &str, model: &str) -> Vec<Stri
                 && !claude_models.iter().any(|m| model.to_lowercase().contains(m))
             {
                 args.extend_from_slice(&["--model".to_string(), model.to_string()]);
+            }
+            if let Some(effort) = sanitize_reasoning_effort(reasoning_effort) {
+                args.extend([
+                    "-c".to_string(),
+                    format!("model_reasoning_effort=\"{}\"", effort),
+                ]);
+            } else if reasoning_effort.is_some() {
+                log::warn!("Ignoring invalid codex reasoning effort: {:?}", reasoning_effort);
             }
             args
         }
@@ -2359,6 +2391,25 @@ fn build_provider_args(provider_id: &str, prompt: &str, model: &str) -> Vec<Stri
             // Generic: just pass prompt as first arg
             vec![prompt.to_string()]
         }
+    }
+}
+
+fn sanitize_reasoning_effort(reasoning_effort: Option<&str>) -> Option<&'static str> {
+    match reasoning_effort
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+    {
+        Some(value) => match value.as_str() {
+            "none" => Some("none"),
+            "minimal" => Some("minimal"),
+            "low" => Some("low"),
+            "medium" => Some("medium"),
+            "high" => Some("high"),
+            "xhigh" => Some("xhigh"),
+            _ => None,
+        },
+        None => None,
     }
 }
 

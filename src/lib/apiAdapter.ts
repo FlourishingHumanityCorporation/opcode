@@ -309,7 +309,7 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
         command_type: command.replace('_claude_code', ''), // execute, continue, resume
         project_path: params?.projectPath || '',
         prompt: params?.prompt || '',
-        model: params?.model || 'claude-3-5-sonnet-20241022',
+        model: params?.model ?? '',
         session_id: params?.sessionId,
       };
       
