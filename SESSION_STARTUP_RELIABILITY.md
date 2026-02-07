@@ -56,7 +56,7 @@ Use this every time latency is reported:
 1. In app:
    - Open utility rail -> Diagnostics.
    - Use `Run Startup Probe` for first-output timing.
-   - Use `Run Assistant Benchmark` for first assistant-message timing.
+   - Use `Run Assistant Benchmark (iTerm)` for first assistant-message timing in iTerm execution context.
    - Results are shown in `Latest Probe` and logged into diagnostics timeline.
 
 2. CLI baseline probe:

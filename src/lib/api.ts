@@ -205,7 +205,7 @@ export interface ProviderRuntimeStatus {
 }
 
 export interface SessionStartupProbeResult {
-  benchmark_kind: "startup" | "assistant";
+  benchmark_kind: "startup" | "assistant" | "assistant_iterm";
   provider_id: string;
   project_path: string;
   model: string;
@@ -1153,7 +1153,7 @@ export const api = {
       prompt?: string;
       timeoutMs?: number;
       includePartialMessages?: boolean;
-      benchmarkKind?: "startup" | "assistant";
+      benchmarkKind?: "startup" | "assistant" | "assistant_iterm";
     }
   ): Promise<SessionStartupProbeResult> {
     return apiCall("run_session_startup_probe", {

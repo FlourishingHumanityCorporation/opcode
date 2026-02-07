@@ -74,7 +74,7 @@ export const DiagnosticsPanel: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const runProbe = async (kind: 'startup' | 'assistant') => {
+  const runProbe = async (kind: 'startup' | 'assistant' | 'assistant_iterm') => {
     if (!probeProjectPath) {
       setProbeError('No project path available in the active workspace.');
       return;
@@ -116,7 +116,7 @@ export const DiagnosticsPanel: React.FC = () => {
   };
 
   const handleRunStartupProbe = () => runProbe('startup');
-  const handleRunAssistantBenchmark = () => runProbe('assistant');
+  const handleRunAssistantBenchmark = () => runProbe('assistant_iterm');
 
   return (
     <div className="flex h-full flex-col">
@@ -146,7 +146,7 @@ export const DiagnosticsPanel: React.FC = () => {
             title={probeProjectPath || 'No project path available'}
           >
             <Activity className={`mr-1.5 h-4 w-4 ${isProbing ? 'animate-spin' : ''}`} />
-            {isProbing ? 'Probing...' : 'Run Assistant Benchmark'}
+            {isProbing ? 'Probing...' : 'Run Assistant Benchmark (iTerm)'}
           </Button>
           <Button size="icon" variant="ghost" onClick={refresh} title="Refresh diagnostics">
             <RefreshCw className="h-4 w-4" />
