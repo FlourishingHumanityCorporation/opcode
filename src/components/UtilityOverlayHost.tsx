@@ -11,6 +11,7 @@ const UsageDashboard = lazy(() => import('@/components/UsageDashboard').then((m)
 const MCPManager = lazy(() => import('@/components/MCPManager').then((m) => ({ default: m.MCPManager })));
 const Settings = lazy(() => import('@/components/Settings').then((m) => ({ default: m.Settings })));
 const MarkdownEditor = lazy(() => import('@/components/MarkdownEditor').then((m) => ({ default: m.MarkdownEditor })));
+const DiagnosticsPanel = lazy(() => import('@/components/DiagnosticsPanel').then((m) => ({ default: m.DiagnosticsPanel })));
 
 interface UtilityOverlayHostProps {
   overlay: UtilityOverlayType;
@@ -49,6 +50,8 @@ export const UtilityOverlayHost: React.FC<UtilityOverlayHostProps> = ({ overlay,
         return <MarkdownEditor onBack={onClose} />;
       case 'claude-file':
         return file ? <ClaudeFileEditor file={file} onBack={onClose} /> : <MarkdownEditor onBack={onClose} />;
+      case 'diagnostics':
+        return <DiagnosticsPanel />;
       default:
         return null;
     }

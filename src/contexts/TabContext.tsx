@@ -10,6 +10,7 @@ import React, {
 } from 'react';
 import { TabPersistenceService } from '@/services/tabPersistence';
 import { SessionPersistenceService } from '@/services/sessionPersistence';
+import { hashWorkspaceState, logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 
 export type UtilityOverlayType =
   | 'agents'
@@ -18,6 +19,7 @@ export type UtilityOverlayType =
   | 'settings'
   | 'claude-md'
   | 'claude-file'
+  | 'diagnostics'
   | null;
 
 export type WorkspaceStatus = 'active' | 'idle' | 'running' | 'complete' | 'error';
@@ -127,6 +129,7 @@ interface TabContextType {
     updates: Partial<PaneRuntimeState>
   ) => void;
   setActiveTab: (id: string) => void;
+  setWorkspaceOrderByIds: (orderedWorkspaceIds: string[]) => void;
   reorderTabs: (startIndex: number, endIndex: number) => void;
   getTabById: (id: string) => Tab | undefined;
   openUtilityOverlay: (overlay: Exclude<UtilityOverlayType, null>, payload?: any) => void;
@@ -353,7 +356,11 @@ type Action =
   | { type: 'create-workspace'; workspace: Tab }
   | { type: 'close-workspace'; id: string }
   | { type: 'update-workspace'; id: string; updates: Partial<Tab> }
+  | { type: 'set-workspace-order-by-ids'; orderedIds: string[] }
   | { type: 'reorder-workspaces'; startIndex: number; endIndex: number }
+  | { type: 'create-terminal'; workspaceId: string; terminal: TerminalTab }
+  | { type: 'close-terminal'; workspaceId: string; terminalTabId: string }
+  | { type: 'set-active-terminal'; workspaceId: string; terminalTabId: string }
   | { type: 'replace-workspaces'; tabs: Tab[]; activeTabId: string | null }
   | {
       type: 'replace-terminal';
@@ -371,7 +378,32 @@ const initialState: WorkspaceState = {
   utilityPayload: null,
 };
 
-function reducer(state: WorkspaceState, action: Action): WorkspaceState {
+export function orderWorkspacesByIds(tabs: Tab[], orderedIds: string[]): Tab[] {
+  if (orderedIds.length === 0) {
+    return tabs.map((tab, index) => ({ ...tab, order: index }));
+  }
+
+  const byId = new Map(tabs.map((tab) => [tab.id, tab]));
+  const ordered: Tab[] = [];
+  const consumed = new Set<string>();
+
+  orderedIds.forEach((id) => {
+    const tab = byId.get(id);
+    if (!tab || consumed.has(id)) return;
+    consumed.add(id);
+    ordered.push(tab);
+  });
+
+  tabs.forEach((tab) => {
+    if (!consumed.has(tab.id)) {
+      ordered.push(tab);
+    }
+  });
+
+  return ordered.map((tab, index) => ({ ...tab, order: index }));
+}
+
+export function tabReducer(state: WorkspaceState, action: Action): WorkspaceState {
   switch (action.type) {
     case 'hydrate':
       return {
@@ -436,6 +468,18 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
       };
     }
 
+    case 'set-workspace-order-by-ids': {
+      const tabs = orderWorkspacesByIds(state.tabs, action.orderedIds);
+      const activeTabId = state.activeTabId && tabs.some((tab) => tab.id === state.activeTabId)
+        ? state.activeTabId
+        : tabs[0]?.id || null;
+      return {
+        ...state,
+        tabs,
+        activeTabId,
+      };
+    }
+
     case 'reorder-workspaces': {
       if (
         action.startIndex < 0 ||
@@ -453,6 +497,80 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
       return {
         ...state,
         tabs: next.map((tab, index) => ({ ...tab, order: index })),
+      };
+    }
+
+    case 'create-terminal': {
+      const tabs = state.tabs.map((workspace) => {
+        if (workspace.id !== action.workspaceId) {
+          return workspace;
+        }
+        return {
+          ...workspace,
+          terminalTabs: [...workspace.terminalTabs, action.terminal],
+          activeTerminalTabId: action.terminal.id,
+          updatedAt: new Date(),
+          status: 'active' as WorkspaceStatus,
+        };
+      });
+      return {
+        ...state,
+        tabs,
+        activeTabId: action.workspaceId,
+      };
+    }
+
+    case 'close-terminal': {
+      const tabs = state.tabs.map((workspace) => {
+        if (workspace.id !== action.workspaceId) {
+          return workspace;
+        }
+        const filtered = workspace.terminalTabs.filter((terminal) => terminal.id !== action.terminalTabId);
+        const nextTerminalTabs = filtered.length > 0
+          ? filtered
+          : [
+              createTerminalTab(workspace.projectPath, {
+                kind: 'chat',
+                title: 'Terminal 1',
+                sessionState: {
+                  initialProjectPath: workspace.projectPath || undefined,
+                  projectPath: workspace.projectPath || undefined,
+                },
+              }),
+            ];
+        const activeTerminalTabId = nextTerminalTabs.some((terminal) => terminal.id === workspace.activeTerminalTabId)
+          ? workspace.activeTerminalTabId
+          : nextTerminalTabs[0].id;
+        return {
+          ...workspace,
+          terminalTabs: nextTerminalTabs,
+          activeTerminalTabId,
+          updatedAt: new Date(),
+        };
+      });
+      return {
+        ...state,
+        tabs,
+      };
+    }
+
+    case 'set-active-terminal': {
+      const tabs = state.tabs.map((workspace) => {
+        if (workspace.id !== action.workspaceId) {
+          return workspace;
+        }
+        if (!workspace.terminalTabs.some((terminal) => terminal.id === action.terminalTabId)) {
+          return workspace;
+        }
+        return {
+          ...workspace,
+          activeTerminalTabId: action.terminalTabId,
+          updatedAt: new Date(),
+        };
+      });
+      return {
+        ...state,
+        tabs,
       };
     }
 
@@ -496,7 +614,7 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
 }
 
 export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(tabReducer, initialState);
   const [isInitialized, setIsInitialized] = useState(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout>();
   const stateRef = useRef(state);
@@ -535,6 +653,22 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }));
 
       dispatch({ type: 'hydrate', tabs: restoredTabs, activeTabId });
+      stateRef.current = {
+        ...stateRef.current,
+        tabs: restoredTabs,
+        activeTabId,
+      };
+      logWorkspaceEvent({
+        category: 'persist_load',
+        action: 'hydrate_workspace',
+        tabCount: restoredTabs.length,
+        terminalCount: restoredTabs.reduce((count, workspace) => count + workspace.terminalTabs.length, 0),
+        activeWorkspaceId: activeTabId,
+        workspaceHash: hashWorkspaceState({
+          tabs: restoredTabs.map((workspace) => workspace.id),
+          activeTabId,
+        }),
+      });
       setIsInitialized(true);
     };
 
@@ -550,6 +684,16 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     saveTimeoutRef.current = setTimeout(() => {
       TabPersistenceService.saveWorkspace(state.tabs, state.activeTabId);
+      logWorkspaceEvent({
+        category: 'state_action',
+        action: 'autosave_workspace',
+        tabCount: state.tabs.length,
+        activeWorkspaceId: state.activeTabId,
+        workspaceHash: hashWorkspaceState({
+          tabs: state.tabs.map((workspace) => workspace.id),
+          activeTabId: state.activeTabId,
+        }),
+      });
     }, 400);
 
     return () => {
@@ -565,9 +709,23 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       TabPersistenceService.saveWorkspace(stateRef.current.tabs, stateRef.current.activeTabId);
     };
 
+    const handleVisibilityChange = () => {
+      if (!isInitialized) return;
+      if (document.visibilityState !== 'hidden') return;
+      TabPersistenceService.saveWorkspace(stateRef.current.tabs, stateRef.current.activeTabId);
+      logWorkspaceEvent({
+        category: 'state_action',
+        action: 'visibility_flush_workspace',
+        tabCount: stateRef.current.tabs.length,
+        activeWorkspaceId: stateRef.current.activeTabId,
+      });
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (isInitialized) {
         TabPersistenceService.saveWorkspace(stateRef.current.tabs, stateRef.current.activeTabId);
       }
@@ -592,6 +750,11 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const closeProjectWorkspaceTab = useCallback((id: string) => {
     dispatch({ type: 'close-workspace', id });
+    logWorkspaceEvent({
+      category: 'state_action',
+      action: 'close_workspace',
+      activeWorkspaceId: id,
+    });
   }, []);
 
   const updateProjectWorkspaceTab = useCallback((id: string, updates: Partial<Tab>) => {
@@ -602,9 +765,52 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     dispatch({ type: 'set-active-workspace', id });
   }, []);
 
-  const reorderTabs = useCallback((startIndex: number, endIndex: number) => {
-    dispatch({ type: 'reorder-workspaces', startIndex, endIndex });
+  const setWorkspaceOrderByIds = useCallback((orderedWorkspaceIds: string[]) => {
+    const nextTabs = orderWorkspacesByIds(stateRef.current.tabs, orderedWorkspaceIds);
+    const nextActiveTabId =
+      stateRef.current.activeTabId && nextTabs.some((tab) => tab.id === stateRef.current.activeTabId)
+        ? stateRef.current.activeTabId
+        : nextTabs[0]?.id || null;
+
+    stateRef.current = {
+      ...stateRef.current,
+      tabs: nextTabs,
+      activeTabId: nextActiveTabId,
+    };
+
+    dispatch({ type: 'set-workspace-order-by-ids', orderedIds: orderedWorkspaceIds });
+    TabPersistenceService.saveWorkspace(nextTabs, nextActiveTabId);
+    logWorkspaceEvent({
+      category: 'reorder',
+      action: 'set_workspace_order_by_ids',
+      tabCount: nextTabs.length,
+      activeWorkspaceId: nextActiveTabId,
+      workspaceHash: hashWorkspaceState({
+        orderedWorkspaceIds: nextTabs.map((tab) => tab.id),
+        activeTabId: nextActiveTabId,
+      }),
+      payload: {
+        orderedWorkspaceIds,
+      },
+    });
   }, []);
+
+  const reorderTabs = useCallback((startIndex: number, endIndex: number) => {
+    const currentTabs = stateRef.current.tabs;
+    if (
+      startIndex < 0 ||
+      endIndex < 0 ||
+      startIndex >= currentTabs.length ||
+      endIndex >= currentTabs.length
+    ) {
+      return;
+    }
+
+    const next = [...currentTabs];
+    const [moved] = next.splice(startIndex, 1);
+    next.splice(endIndex, 0, moved);
+    setWorkspaceOrderByIds(next.map((tab) => tab.id));
+  }, [setWorkspaceOrderByIds]);
 
   const createTerminalTabForWorkspace = useCallback((workspaceId: string, input?: CreateTerminalTabInput): string => {
     const workspace = stateRef.current.tabs.find((tab) => tab.id === workspaceId);
@@ -613,73 +819,31 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const terminal = createTerminalTab(workspace.projectPath, input);
-    const nextWorkspace: Tab = {
-      ...workspace,
-      terminalTabs: [...workspace.terminalTabs, terminal],
-      activeTerminalTabId: terminal.id,
-      updatedAt: new Date(),
-      status: 'active',
-    };
-
-    const tabs = stateRef.current.tabs.map((tab) => (tab.id === workspaceId ? nextWorkspace : tab));
-    dispatch({ type: 'replace-workspaces', tabs, activeTabId: workspaceId });
+    dispatch({ type: 'create-terminal', workspaceId, terminal });
+    logWorkspaceEvent({
+      category: 'state_action',
+      action: 'create_terminal',
+      activeWorkspaceId: workspaceId,
+      activeTerminalId: terminal.id,
+      payload: {
+        kind: terminal.kind,
+      },
+    });
     return terminal.id;
   }, []);
 
   const closeTerminalTab = useCallback((workspaceId: string, terminalTabId: string) => {
-    const workspace = stateRef.current.tabs.find((tab) => tab.id === workspaceId);
-    if (!workspace) return;
-
-    const filtered = workspace.terminalTabs.filter((terminal) => terminal.id !== terminalTabId);
-
-    const nextTerminalTabs = filtered.length > 0
-      ? filtered
-      : [
-          createTerminalTab(workspace.projectPath, {
-            kind: 'chat',
-            title: 'Terminal 1',
-            sessionState: {
-              initialProjectPath: workspace.projectPath || undefined,
-              projectPath: workspace.projectPath || undefined,
-            },
-          }),
-        ];
-
-    const activeTerminalTabId = nextTerminalTabs.some((terminal) => terminal.id === workspace.activeTerminalTabId)
-      ? workspace.activeTerminalTabId
-      : nextTerminalTabs[0].id;
-
-    const tabs = stateRef.current.tabs.map((tab) =>
-      tab.id === workspaceId
-        ? {
-            ...tab,
-            terminalTabs: nextTerminalTabs,
-            activeTerminalTabId,
-            updatedAt: new Date(),
-          }
-        : tab
-    );
-
-    dispatch({ type: 'replace-workspaces', tabs, activeTabId: stateRef.current.activeTabId });
+    dispatch({ type: 'close-terminal', workspaceId, terminalTabId });
+    logWorkspaceEvent({
+      category: 'state_action',
+      action: 'close_terminal',
+      activeWorkspaceId: workspaceId,
+      activeTerminalId: terminalTabId,
+    });
   }, []);
 
   const setActiveTerminalTab = useCallback((workspaceId: string, terminalTabId: string) => {
-    const tabs = mapWorkspaceTabs(stateRef.current.tabs, workspaceId, (workspace) => {
-      if (!workspace.terminalTabs.some((terminal) => terminal.id === terminalTabId)) {
-        return workspace;
-      }
-      return {
-        ...workspace,
-        activeTerminalTabId: terminalTabId,
-        updatedAt: new Date(),
-      };
-    });
-
-    dispatch({
-      type: 'replace-workspaces',
-      tabs,
-      activeTabId: stateRef.current.activeTabId,
-    });
+    dispatch({ type: 'set-active-terminal', workspaceId, terminalTabId });
   }, []);
 
   const updateTerminalTab = useCallback(
@@ -851,6 +1015,7 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       activatePane,
       updatePaneState,
       setActiveTab,
+      setWorkspaceOrderByIds,
       reorderTabs,
       getTabById,
       openUtilityOverlay,
@@ -871,6 +1036,7 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       activatePane,
       updatePaneState,
       setActiveTab,
+      setWorkspaceOrderByIds,
       reorderTabs,
       getTabById,
       openUtilityOverlay,

@@ -3,7 +3,7 @@ import { AnimatePresence, Reorder, motion } from 'framer-motion';
 import { Folder, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTabState } from '@/hooks/useTabState';
-import { useTabContext, type Tab } from '@/contexts/TabContext';
+import type { Tab } from '@/contexts/TabContext';
 
 interface TabManagerProps {
   className?: string;
@@ -22,11 +22,11 @@ const ProjectTabItem: React.FC<ProjectTabItemProps> = ({ tab, isActive, onClick,
       value={tab}
       id={tab.id}
       className={cn(
-        'group flex h-9 min-w-[170px] max-w-[260px] items-center gap-2 rounded-lg border px-3 text-sm',
+        'group flex h-9 min-w-[170px] max-w-[280px] items-center gap-2 rounded-lg border px-3 text-[13px] tracking-[0.01em]',
         'cursor-pointer select-none transition-colors',
         isActive
-          ? 'border-primary/40 bg-card text-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.04)]'
-          : 'border-border/40 bg-background text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+          ? 'border-[var(--color-chrome-border)] bg-[var(--color-chrome-active)] text-[var(--color-chrome-text-active)] shadow-sm font-semibold'
+          : 'border-[var(--color-chrome-border)]/60 bg-[var(--color-chrome-surface)] text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)] font-medium'
       )}
       onClick={() => onClick(tab.id)}
       data-testid={`workspace-tab-${tab.id}`}
@@ -57,8 +57,8 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
     switchToTab,
     closeProjectWorkspaceTab,
     createProjectWorkspaceTab,
+    setWorkspaceOrderByIds,
   } = useTabState();
-  const { reorderTabs } = useTabContext();
 
   const [showLeftScroll, setShowLeftScroll] = useState(false);
   const [showRightScroll, setShowRightScroll] = useState(false);
@@ -131,15 +131,8 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
   }, [activeTabId, closeProjectWorkspaceTab, createProjectWorkspaceTab, switchToTab, tabs]);
 
   const handleReorder = (newOrder: Tab[]) => {
-    const nextById = newOrder.map((tab) => tab.id);
-    const oldOrder = tabs.map((tab) => tab.id);
-    const movedId = nextById.find((id, index) => oldOrder[index] !== id);
-    if (!movedId) return;
-    const startIndex = oldOrder.indexOf(movedId);
-    const endIndex = nextById.indexOf(movedId);
-    if (startIndex !== -1 && endIndex !== -1 && startIndex !== endIndex) {
-      reorderTabs(startIndex, endIndex);
-    }
+    const orderedIds = newOrder.map((tab) => tab.id);
+    setWorkspaceOrderByIds(orderedIds);
   };
 
   const scrollTabs = (direction: 'left' | 'right') => {
@@ -152,14 +145,14 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
   };
 
   return (
-    <div className={cn('relative flex h-11 items-center border-b border-border/60 bg-[#0b0f14] px-2', className)}>
+    <div className={cn('relative flex h-11 items-center border-b border-[var(--color-chrome-border)]/90 bg-[var(--color-chrome-bg)] px-2.5', className)}>
       <AnimatePresence>
         {showLeftScroll && (
           <motion.button
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="z-10 mr-1 rounded-md border border-border/40 bg-background/70 px-2 py-1 text-xs"
+            className="z-10 mr-1 rounded-md border border-[var(--color-chrome-border)] bg-[var(--color-chrome-surface)] px-2 py-1 text-xs text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
             onClick={() => scrollTabs('left')}
           >
             {'<'}
@@ -187,7 +180,7 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="z-10 ml-1 rounded-md border border-border/40 bg-background/70 px-2 py-1 text-xs"
+            className="z-10 ml-1 rounded-md border border-[var(--color-chrome-border)] bg-[var(--color-chrome-surface)] px-2 py-1 text-xs text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
             onClick={() => scrollTabs('right')}
           >
             {'>'}
@@ -197,7 +190,7 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
 
       <button
         onClick={() => createProjectWorkspaceTab('', `Project ${tabs.length + 1}`)}
-        className="ml-2 flex h-8 w-8 items-center justify-center rounded-md border border-border/50 bg-card/70 hover:bg-card"
+        className="ml-2 flex h-8 w-8 items-center justify-center rounded-md border border-[var(--color-chrome-border)] bg-[var(--color-chrome-surface)] text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
         title="New Project Workspace"
         data-testid="workspace-new-project"
       >

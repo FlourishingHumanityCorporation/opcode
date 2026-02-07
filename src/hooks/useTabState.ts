@@ -44,11 +44,15 @@ interface UseTabStateReturn {
   createTerminalTab: (workspaceId?: string, input?: CreateTerminalTabInput) => string;
   closeTerminalTab: (workspaceId: string, terminalTabId: string) => void;
   setActiveTerminalTab: (workspaceId: string, terminalTabId: string) => void;
+  setWorkspaceOrderByIds: (orderedWorkspaceIds: string[]) => void;
   splitPane: (workspaceId: string, terminalTabId: string, paneId: string) => string | null;
   closePane: (workspaceId: string, terminalTabId: string, paneId: string) => void;
   activatePane: (workspaceId: string, terminalTabId: string, paneId: string) => void;
   runAgentInTerminalTab: (agent: any, projectPath?: string) => string;
-  openUtilityOverlay: (overlay: 'agents' | 'usage' | 'mcp' | 'settings' | 'claude-md' | 'claude-file', payload?: any) => void;
+  openUtilityOverlay: (
+    overlay: 'agents' | 'usage' | 'mcp' | 'settings' | 'claude-md' | 'claude-file' | 'diagnostics',
+    payload?: any
+  ) => void;
   closeUtilityOverlay: () => void;
 
   // Compatibility operations
@@ -107,6 +111,7 @@ export const useTabState = (): UseTabStateReturn => {
     closePane,
     activatePane,
     setActiveTab,
+    setWorkspaceOrderByIds,
     openUtilityOverlay,
     closeUtilityOverlay,
     getTabById,
@@ -473,6 +478,7 @@ export const useTabState = (): UseTabStateReturn => {
     splitPane,
     closePane,
     activatePane,
+    setWorkspaceOrderByIds,
     runAgentInTerminalTab,
     openUtilityOverlay,
     closeUtilityOverlay,

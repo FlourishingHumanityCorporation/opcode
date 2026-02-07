@@ -1,12 +1,12 @@
 import React from 'react';
-import { BarChart3, Bot, FileText, Network, Settings, X } from 'lucide-react';
+import { BarChart3, Bot, Bug, FileText, Network, Settings, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { UtilityOverlayType } from '@/contexts/TabContext';
 
 interface UtilityRailProps {
   active: UtilityOverlayType;
-  onOpen: (overlay: 'agents' | 'usage' | 'mcp' | 'settings' | 'claude-md') => void;
+  onOpen: (overlay: 'agents' | 'usage' | 'mcp' | 'settings' | 'claude-md' | 'diagnostics') => void;
   onClose: () => void;
 }
 
@@ -15,6 +15,7 @@ const utilityItems = [
   { id: 'usage', label: 'Usage', icon: BarChart3 },
   { id: 'mcp', label: 'MCP', icon: Network },
   { id: 'claude-md', label: 'CLAUDE.md', icon: FileText },
+  { id: 'diagnostics', label: 'Diagnostics', icon: Bug },
   { id: 'settings', label: 'Settings', icon: Settings },
 ] as const;
 

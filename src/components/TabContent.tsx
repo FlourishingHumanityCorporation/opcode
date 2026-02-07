@@ -4,7 +4,6 @@ import { FolderOpen, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTabState } from '@/hooks/useTabState';
 import { ProjectWorkspaceView } from '@/components/ProjectWorkspaceView';
-import { UtilityRail } from '@/components/UtilityRail';
 import { UtilityOverlayHost } from '@/components/UtilityOverlayHost';
 
 export const TabContent: React.FC = () => {
@@ -92,7 +91,7 @@ export const TabContent: React.FC = () => {
     };
 
     const handleOpenUtilityOverlay = (event: Event) => {
-      const detail = (event as CustomEvent<{ overlay: 'agents' | 'usage' | 'mcp' | 'settings' | 'claude-md'; payload?: any }>).detail;
+      const detail = (event as CustomEvent<{ overlay: 'agents' | 'usage' | 'mcp' | 'settings' | 'claude-md' | 'diagnostics'; payload?: any }>).detail;
       if (!detail?.overlay) return;
       openUtilityOverlay(detail.overlay, detail.payload);
     };
@@ -181,12 +180,6 @@ export const TabContent: React.FC = () => {
   return (
     <div className="relative h-full">
       {content}
-
-      <UtilityRail
-        active={utilityOverlay}
-        onOpen={(overlay) => openUtilityOverlay(overlay)}
-        onClose={closeUtilityOverlay}
-      />
 
       <UtilityOverlayHost overlay={utilityOverlay} payload={utilityPayload} onClose={closeUtilityOverlay} />
     </div>

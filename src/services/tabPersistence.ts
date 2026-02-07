@@ -9,6 +9,7 @@ import type {
   Tab,
   TerminalTab,
 } from '@/contexts/TabContext';
+import { hashWorkspaceState, logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 
 const STORAGE_KEY = 'opcode_workspace_v3';
 const PERSISTENCE_ENABLED_KEY = 'opcode_tab_persistence_enabled';
@@ -81,6 +82,11 @@ interface LegacyTabV2 {
   updatedAt?: string;
 }
 
+export interface WorkspaceValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
 function parseDate(value: string | Date | undefined): Date {
   if (!value) return new Date();
   const parsed = new Date(value);
@@ -151,6 +157,54 @@ function collectLeafIds(node: PaneNode): string[] {
     return [node.id];
   }
   return [...collectLeafIds(node.left), ...collectLeafIds(node.right)];
+}
+
+function countTerminalTabs(tabs: ProjectWorkspaceTab[]): number {
+  return tabs.reduce((count, workspace) => count + workspace.terminalTabs.length, 0);
+}
+
+export function validateWorkspaceGraph(
+  tabs: ProjectWorkspaceTab[],
+  activeTabId: string | null
+): WorkspaceValidationResult {
+  const errors: string[] = [];
+
+  if (activeTabId && !tabs.some((workspace) => workspace.id === activeTabId)) {
+    errors.push(`Active workspace ${activeTabId} is missing`);
+  }
+
+  tabs.forEach((workspace) => {
+    if (workspace.terminalTabs.length === 0) {
+      errors.push(`Workspace ${workspace.id} has no terminal tabs`);
+      return;
+    }
+
+    if (
+      workspace.activeTerminalTabId &&
+      !workspace.terminalTabs.some((terminal) => terminal.id === workspace.activeTerminalTabId)
+    ) {
+      errors.push(`Workspace ${workspace.id} active terminal ${workspace.activeTerminalTabId} is missing`);
+    }
+
+    workspace.terminalTabs.forEach((terminal) => {
+      if (!isPaneNode(terminal.paneTree)) {
+        errors.push(`Terminal ${terminal.id} has invalid pane tree`);
+        return;
+      }
+
+      const leaves = collectLeafIds(terminal.paneTree);
+      if (leaves.length === 0) {
+        errors.push(`Terminal ${terminal.id} has no leaf panes`);
+      } else if (!leaves.includes(terminal.activePaneId)) {
+        errors.push(`Terminal ${terminal.id} active pane ${terminal.activePaneId} is missing`);
+      }
+    });
+  });
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
 }
 
 function deserializeTerminal(serialized: SerializedTerminalTab): TerminalTab {
@@ -305,9 +359,7 @@ export class TabPersistenceService {
     if (!this.isEnabled()) return;
 
     try {
-      const orderedTabs = [...tabs]
-        .sort((a, b) => a.order - b.order)
-        .map((tab, index) => ({ ...tab, order: index }));
+      const orderedTabs = tabs.map((tab, index) => ({ ...tab, order: index }));
 
       const payload: SerializedWorkspace = {
         version: 3,
@@ -318,8 +370,21 @@ export class TabPersistenceService {
       };
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      logWorkspaceEvent({
+        category: 'persist_save',
+        action: 'save_workspace',
+        workspaceHash: hashWorkspaceState(payload),
+        activeWorkspaceId: payload.activeTabId,
+        tabCount: orderedTabs.length,
+        terminalCount: countTerminalTabs(orderedTabs),
+      });
     } catch (error) {
       console.error('Failed to save workspace:', error);
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'persist_save_failed',
+        message: error instanceof Error ? error.message : 'Unknown save error',
+      });
     }
   }
 
@@ -351,9 +416,32 @@ export class TabPersistenceService {
         ? parsed.activeTabId
         : tabs[0]?.id ?? null;
 
+      const validation = validateWorkspaceGraph(tabs, activeTabId);
+      if (!validation.valid) {
+        throw new Error(`Invalid workspace graph: ${validation.errors.join('; ')}`);
+      }
+
+      logWorkspaceEvent({
+        category: 'persist_load',
+        action: 'load_workspace',
+        workspaceHash: hashWorkspaceState(parsed),
+        activeWorkspaceId: activeTabId,
+        tabCount: tabs.length,
+        terminalCount: countTerminalTabs(tabs),
+      });
+
       return { tabs, activeTabId };
     } catch (error) {
       console.error('Failed to load workspace:', error);
+      const raw = localStorage.getItem(STORAGE_KEY);
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'persist_load_failed',
+        message: error instanceof Error ? error.message : 'Unknown load error',
+        payload: {
+          rawSize: raw?.length ?? 0,
+        },
+      });
       this.clearWorkspace();
       return { tabs: [], activeTabId: null };
     }
@@ -397,9 +485,76 @@ export class TabPersistenceService {
       };
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(migratedWorkspace));
+      logWorkspaceEvent({
+        category: 'persist_migration',
+        action: 'migrate_v2_to_v3',
+        workspaceHash: hashWorkspaceState(migratedWorkspace),
+        activeWorkspaceId: activeTabId,
+        tabCount: migratedTabs.length,
+        terminalCount: countTerminalTabs(migratedTabs),
+      });
     } catch (error) {
       console.error('Failed to migrate workspace from v2:', error);
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'persist_migration_failed',
+        message: error instanceof Error ? error.message : 'Unknown migration error',
+      });
       localStorage.removeItem(STORAGE_KEY);
+    }
+  }
+
+  static inspectStoredWorkspace(): {
+    found: boolean;
+    rawSize: number;
+    activeTabId: string | null;
+    tabCount: number;
+    terminalCount: number;
+    validation: WorkspaceValidationResult;
+  } {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return {
+        found: false,
+        rawSize: 0,
+        activeTabId: null,
+        tabCount: 0,
+        terminalCount: 0,
+        validation: { valid: true, errors: [] },
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as SerializedWorkspace;
+      const tabs = parsed.tabs
+        .map(deserializeWorkspace)
+        .filter((tab) => tab.id && tab.type === 'project')
+        .sort((a, b) => a.order - b.order)
+        .map((tab, index) => ({ ...tab, order: index }));
+      const activeTabId = parsed.activeTabId && tabs.some((tab) => tab.id === parsed.activeTabId)
+        ? parsed.activeTabId
+        : tabs[0]?.id ?? null;
+      const validation = validateWorkspaceGraph(tabs, activeTabId);
+      return {
+        found: true,
+        rawSize: raw.length,
+        activeTabId,
+        tabCount: tabs.length,
+        terminalCount: countTerminalTabs(tabs),
+        validation,
+      };
+    } catch (error) {
+      return {
+        found: true,
+        rawSize: raw.length,
+        activeTabId: null,
+        tabCount: 0,
+        terminalCount: 0,
+        validation: {
+          valid: false,
+          errors: [error instanceof Error ? error.message : 'Failed to parse stored workspace'],
+        },
+      };
     }
   }
 }

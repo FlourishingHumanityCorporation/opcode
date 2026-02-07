@@ -82,6 +82,7 @@ import type { ClaudeStreamMessage } from "./AgentExecution";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTrackEvent, useComponentMetrics, useWorkflowTracking } from "@/hooks";
 import { SessionPersistenceService } from "@/services/sessionPersistence";
+import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
 import {
   getDefaultModelForProvider,
   getModelDisplayName,
@@ -220,6 +221,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
   const isMountedRef = useRef(true);
   const isListeningRef = useRef(false);
+  const firstStreamTimeoutRef = useRef<number | null>(null);
+  const hardTimeoutRef = useRef<number | null>(null);
+  const firstStreamSeenRef = useRef(false);
   const sessionStartTime = useRef<number>(Date.now());
   const isIMEComposingRef = useRef(false);
   
@@ -598,12 +602,17 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       console.error("Claude error:", event.payload);
       if (isMountedRef.current) {
         setError(event.payload);
+        clearStreamWatchdogs();
+        setIsLoading(false);
+        hasActiveSessionRef.current = false;
+        isListeningRef.current = false;
       }
     });
 
     const completeUnlisten = await listen(`claude-complete:${sessionId}`, async (event: any) => {
       console.log('[ClaudeCodeSession] Received claude-complete on reconnect:', event.payload);
       if (isMountedRef.current) {
+        clearStreamWatchdogs();
         setIsLoading(false);
         hasActiveSessionRef.current = false;
       }
@@ -615,6 +624,107 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     if (isMountedRef.current) {
       setIsLoading(true);
       hasActiveSessionRef.current = true;
+    }
+  };
+
+  const clearStreamWatchdogs = () => {
+    if (firstStreamTimeoutRef.current !== null) {
+      window.clearTimeout(firstStreamTimeoutRef.current);
+      firstStreamTimeoutRef.current = null;
+    }
+    if (hardTimeoutRef.current !== null) {
+      window.clearTimeout(hardTimeoutRef.current);
+      hardTimeoutRef.current = null;
+    }
+  };
+
+  const markFirstStreamSeen = (providerId: string) => {
+    if (firstStreamSeenRef.current) return;
+    firstStreamSeenRef.current = true;
+    if (firstStreamTimeoutRef.current !== null) {
+      window.clearTimeout(firstStreamTimeoutRef.current);
+      firstStreamTimeoutRef.current = null;
+    }
+    logWorkspaceEvent({
+      category: 'stream_watchdog',
+      action: 'first_stream_message',
+      payload: { providerId },
+    });
+  };
+
+  const startStreamWatchdogs = (providerId: string, path: string) => {
+    clearStreamWatchdogs();
+    firstStreamSeenRef.current = false;
+
+    firstStreamTimeoutRef.current = window.setTimeout(() => {
+      if (!isMountedRef.current || firstStreamSeenRef.current) return;
+      setIsLoading(false);
+      hasActiveSessionRef.current = false;
+      isListeningRef.current = false;
+      setError('No response stream started within 8s. Check provider runtime or project path.');
+      logWorkspaceEvent({
+        category: 'stream_watchdog',
+        action: 'first_stream_timeout',
+        message: 'No stream event received in first 8s',
+        payload: { providerId, projectPath: path },
+      });
+    }, 8000);
+
+    hardTimeoutRef.current = window.setTimeout(() => {
+      if (!isMountedRef.current || !hasActiveSessionRef.current) return;
+      setIsLoading(false);
+      hasActiveSessionRef.current = false;
+      isListeningRef.current = false;
+      setError('Session did not complete within 120s. Try stopping and re-running.');
+      logWorkspaceEvent({
+        category: 'stream_watchdog',
+        action: 'hard_timeout',
+        message: 'No completion within 120s',
+        payload: { providerId, projectPath: path },
+      });
+    }, 120000);
+  };
+
+  const validateProjectPath = async (path: string): Promise<boolean> => {
+    try {
+      await api.listDirectoryContents(path);
+      return true;
+    } catch (error) {
+      logWorkspaceEvent({
+        category: 'preflight',
+        action: 'project_path_invalid',
+        message: error instanceof Error ? error.message : 'Failed to validate project path',
+        payload: { projectPath: path },
+      });
+      return false;
+    }
+  };
+
+  const preflightProviderRuntime = async (providerId: string): Promise<boolean> => {
+    try {
+      const runtime = await api.checkProviderRuntime(providerId);
+      if (!runtime.ready) {
+        const details = runtime.issues.length > 0 ? runtime.issues.join('; ') : 'Provider runtime not ready';
+        setError(details);
+        logWorkspaceEvent({
+          category: 'preflight',
+          action: 'provider_runtime_not_ready',
+          message: details,
+          payload: { providerId, runtime },
+        });
+        return false;
+      }
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to check provider runtime';
+      setError(message);
+      logWorkspaceEvent({
+        category: 'preflight',
+        action: 'provider_runtime_check_failed',
+        message,
+        payload: { providerId },
+      });
+      return false;
     }
   };
 
@@ -687,6 +797,17 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       onProjectPathChange?.(selectedProjectPath);
     }
 
+    const validPath = await validateProjectPath(runProjectPath);
+    if (!validPath) {
+      setError(`Project path is invalid or inaccessible: ${runProjectPath}`);
+      return;
+    }
+
+    const runtimeReady = await preflightProviderRuntime(providerToUse);
+    if (!runtimeReady) {
+      return;
+    }
+
     // If already loading, queue the prompt
     if (isLoading) {
       const newPrompt = {
@@ -703,6 +824,16 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       setIsLoading(true);
       setError(null);
       hasActiveSessionRef.current = true;
+      startStreamWatchdogs(providerToUse, runProjectPath);
+      logWorkspaceEvent({
+        category: 'stream_watchdog',
+        action: 'prompt_started',
+        payload: {
+          providerId: providerToUse,
+          model: modelForTracking,
+          projectPath: runProjectPath,
+        },
+      });
       
       // For resuming sessions, ensure we have the session ID
       if (effectiveSession && !claudeSessionId) {
@@ -746,6 +877,19 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           const specificErrorUnlisten = await listen(`claude-error:${sid}`, (evt: any) => {
             console.error('Claude error (scoped):', evt.payload);
             setError(evt.payload);
+            clearStreamWatchdogs();
+            setIsLoading(false);
+            hasActiveSessionRef.current = false;
+            isListeningRef.current = false;
+            logWorkspaceEvent({
+              category: 'error',
+              action: 'claude_error_scoped',
+              message: String(evt.payload ?? ''),
+              payload: {
+                providerId: providerToUse,
+                sessionId: sid,
+              },
+            });
           });
 
           const specificCompleteUnlisten = await listen(`claude-complete:${sid}`, (evt: any) => {
@@ -799,6 +943,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           try {
             // Don't process if component unmounted
             if (!isMountedRef.current) return;
+            markFirstStreamSeen(providerToUse);
             
             let message: ClaudeStreamMessage;
             let rawPayload: string;
@@ -893,9 +1038,18 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
         // Helper to handle completion events (both generic and scoped)
         const processComplete = async (success: boolean) => {
+          clearStreamWatchdogs();
           setIsLoading(false);
           hasActiveSessionRef.current = false;
           isListeningRef.current = false; // Reset listening state
+          logWorkspaceEvent({
+            category: 'stream_watchdog',
+            action: 'stream_complete',
+            payload: {
+              success,
+              providerId: providerToUse,
+            },
+          });
           
           // Track enhanced session stopped metrics when session completes
           if (effectiveSession && claudeSessionId) {
@@ -993,6 +1147,18 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         const genericErrorUnlisten = await listen('claude-error', (evt: any) => {
           console.error('Claude error:', evt.payload);
           setError(evt.payload);
+          clearStreamWatchdogs();
+          setIsLoading(false);
+          hasActiveSessionRef.current = false;
+          isListeningRef.current = false;
+          logWorkspaceEvent({
+            category: 'error',
+            action: 'claude_error_generic',
+            message: String(evt.payload ?? ''),
+            payload: {
+              providerId: providerToUse,
+            },
+          });
         });
 
         const genericCompleteUnlisten = await listen('claude-complete', (evt: any) => {
@@ -1089,6 +1255,16 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       setError("Failed to send prompt");
       setIsLoading(false);
       hasActiveSessionRef.current = false;
+      clearStreamWatchdogs();
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'send_prompt_failed',
+        message: err instanceof Error ? err.message : 'Failed to send prompt',
+        payload: {
+          providerId: providerToUse,
+          projectPath: runProjectPath,
+        },
+      });
     }
   };
 
@@ -1255,6 +1431,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       hasActiveSessionRef.current = false;
       isListeningRef.current = false;
       setError(null);
+      clearStreamWatchdogs();
       
       // Clear queued prompts
       setQueuedPrompts([]);
@@ -1289,6 +1466,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       hasActiveSessionRef.current = false;
       isListeningRef.current = false;
       setError(null);
+      clearStreamWatchdogs();
     }
   };
 
@@ -1410,6 +1588,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       // Clean up listeners
       unlistenRefs.current.forEach(unlisten => unlisten());
       unlistenRefs.current = [];
+      clearStreamWatchdogs();
       
       // Clear checkpoint manager when session ends
       if (effectiveSession) {
