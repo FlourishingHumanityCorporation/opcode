@@ -772,9 +772,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           transcript: snapshot.transcript,
           model: AUTO_TITLE_MODEL,
         });
-        const sanitizedTitle = sanitizeTerminalTitleCandidate(generatedTitle);
+        const sanitizedTitle = sanitizeTerminalTitleCandidate(generatedTitle, undefined, projectPath);
 
-        if (!shouldApplyAutoRenameTitle(terminalTitleRef.current, sanitizedTitle, titleLockedRef.current)) {
+        if (!shouldApplyAutoRenameTitle(
+          terminalTitleRef.current,
+          sanitizedTitle,
+          titleLockedRef.current,
+          projectPath
+        )) {
           return;
         }
 

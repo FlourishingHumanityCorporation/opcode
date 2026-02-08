@@ -5,7 +5,7 @@ use std::time::Duration;
 const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434";
 const DEFAULT_TITLE_MODEL: &str = "glm-4.7-flash";
 const MAX_TITLE_CHARS: usize = 72;
-const SYSTEM_PROMPT: &str = "Generate a concise, functional terminal tab title from a coding conversation transcript. Return exactly one short line with no quotes.";
+const SYSTEM_PROMPT: &str = "Generate a concise, functional terminal tab title from a coding conversation transcript. Do not include app or project names. Return exactly one short line with no quotes.";
 
 #[derive(Debug, Deserialize)]
 struct OllamaChatResponse {

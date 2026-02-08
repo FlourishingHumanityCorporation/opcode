@@ -54,6 +54,20 @@ describe("terminalAutoTitle extraction and sanitization", () => {
       "Refactor Parser Pipeline"
     );
     expect(sanitizeTerminalTitleCandidate("")).toBe("");
+    expect(
+      sanitizeTerminalTitleCandidate(
+        "MeetingMind: Calendar Selection Fix",
+        undefined,
+        "/Users/paulrohde/CodeProjects/apps/MeetingMind"
+      )
+    ).toBe("Calendar Selection Fix");
+    expect(
+      sanitizeTerminalTitleCandidate(
+        "MeetingMind",
+        undefined,
+        "/Users/paulrohde/CodeProjects/apps/MeetingMind"
+      )
+    ).toBe("");
   });
 
   it("skips rename when locked or unchanged", () => {

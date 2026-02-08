@@ -1,5 +1,5 @@
 import { api } from "@/lib/api";
-import { canonicalizeProjectPath } from "@/lib/terminalPaneState";
+import { canonicalizeProjectPath, projectNameFromPath } from "@/lib/terminalPaneState";
 
 const INITIAL_CHECKPOINTS_MINUTES = [2, 10, 15] as const;
 const FOLLOW_UP_INTERVAL_MINUTES = 5;
@@ -16,6 +16,38 @@ export interface LatestSessionSnapshot {
 
 function normalizeInlineWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripLeadingProjectName(title: string, projectPath?: string): string {
+  const projectName = projectNameFromPath(projectPath);
+  if (!projectName) {
+    return title;
+  }
+
+  const escapedProjectName = escapeRegExp(projectName);
+  let next = title;
+
+  const exactProjectNamePattern = new RegExp(`^${escapedProjectName}$`, "i");
+  if (exactProjectNamePattern.test(next)) {
+    return "";
+  }
+
+  const prefixPatterns = [
+    new RegExp(`^${escapedProjectName}\\s*[:\\-|]\\s*`, "i"),
+    new RegExp(`^\\[\\s*${escapedProjectName}\\s*\\]\\s*`, "i"),
+    new RegExp(`^\\(\\s*${escapedProjectName}\\s*\\)\\s*`, "i"),
+    new RegExp(`^${escapedProjectName}\\s+`, "i"),
+  ];
+
+  for (const pattern of prefixPatterns) {
+    next = next.replace(pattern, "");
+  }
+
+  return next;
 }
 
 function toText(value: unknown): string {
@@ -159,14 +191,19 @@ export function getNextAutoTitleCheckpointAtMs(sessionStartedAtMs: number, nowMs
   return sessionStartedAtMs + nextMinute * 60_000;
 }
 
-export function sanitizeTerminalTitleCandidate(raw: string, maxChars = DEFAULT_MAX_TITLE_CHARS): string {
+export function sanitizeTerminalTitleCandidate(
+  raw: string,
+  maxChars = DEFAULT_MAX_TITLE_CHARS,
+  projectPath?: string
+): string {
   const firstLine = raw
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line.length > 0) || "";
 
   const withoutEdgePunctuation = firstLine.replace(/^[`"'*#\-\s>]+|[`"'*#\-\s>]+$/g, "");
-  const normalized = normalizeInlineWhitespace(withoutEdgePunctuation);
+  const withoutProjectPrefix = stripLeadingProjectName(withoutEdgePunctuation, projectPath);
+  const normalized = normalizeInlineWhitespace(withoutProjectPrefix);
   if (!normalized) {
     return "";
   }
@@ -181,13 +218,14 @@ export function sanitizeTerminalTitleCandidate(raw: string, maxChars = DEFAULT_M
 export function shouldApplyAutoRenameTitle(
   currentTitle: string | undefined,
   candidateTitle: string,
-  isLocked: boolean
+  isLocked: boolean,
+  projectPath?: string
 ): boolean {
   if (isLocked) {
     return false;
   }
 
-  const nextTitle = sanitizeTerminalTitleCandidate(candidateTitle);
+  const nextTitle = sanitizeTerminalTitleCandidate(candidateTitle, DEFAULT_MAX_TITLE_CHARS, projectPath);
   if (!nextTitle) {
     return false;
   }
