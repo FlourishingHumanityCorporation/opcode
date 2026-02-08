@@ -238,8 +238,8 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'save_clipboard_image_attachment': '/api/attachments/clipboard-image',
     
     // Session management
-    'open_new_session': '/api/sessions/new',
-    'load_session_history': '/api/sessions/{sessionId}/history/{projectId}',
+    'open_provider_session': '/api/provider-sessions/new',
+    'load_provider_session_history': '/api/provider-sessions/{sessionId}/history/{projectId}',
     'list_running_provider_sessions': '/api/provider-sessions/running',
     'execute_provider_session': '/api/provider-sessions/execute',
     'continue_provider_session': '/api/provider-sessions/continue',

@@ -93,7 +93,10 @@ async function setupNativeAutoRenameApiMock(
       return;
     }
 
-    if (path === `/api/sessions/${encodeURIComponent(sessionId)}/history/${encodeURIComponent(projectId)}`) {
+    if (
+      path ===
+      `/api/provider-sessions/${encodeURIComponent(sessionId)}/history/${encodeURIComponent(projectId)}`
+    ) {
       await fulfillSuccess(route, sessionHistory);
       return;
     }

@@ -172,11 +172,9 @@ nix-shell --run 'just web'
 ## Remaining Gaps
 
 ### 1. Runtime Endpoint Parity (LOW)
-**Current boundary is intentional**:
-- Streaming runtime routes use `/api/provider-sessions/*` and `/ws/provider-session`.
-- Non-stream routes stay on `/api/sessions/*`:
-  - `/api/sessions/new`
-  - `/api/sessions/{sessionId}/history/{projectId}`
+Runtime routes are now provider-session canonical for both streaming and non-stream flows:
+- `/api/provider-sessions/*`
+- `/ws/provider-session`
 
 ### 2. Stability Follow-up (OUT OF SCOPE HERE)
 The remaining work is smoke reliability and unrelated workspace-persistence flakes, which are tracked separately from this contract hardening pass.
@@ -295,7 +293,6 @@ The web server implementation now provides stable provider-session contract beha
 The web server now has session alias tracking, scoped event parity, stderr forwarding, and real cancellation lifecycle for provider-session runtime paths.
 
 ### 🔧 Next Steps
-1. Keep non-stream `/api/sessions/*` endpoints unchanged while monitoring provider-session runtime behavior.
-2. Run smoke stabilization as a separate track (workspace-persistence and unrelated flakes).
+1. Run smoke stabilization as a separate track (workspace-persistence and unrelated flakes).
 
 This implementation successfully bridges the gap between Tauri desktop and web deployment, but requires the above fixes to achieve full feature parity while adapting to browser constraints.

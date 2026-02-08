@@ -490,7 +490,7 @@ pub async fn get_claude_settings() -> Result<ClaudeSettings, String> {
 
 /// Opens a new Claude Code session by executing the claude command
 #[tauri::command]
-pub async fn open_new_session(app: AppHandle, path: Option<String>) -> Result<String, String> {
+pub async fn open_provider_session(app: AppHandle, path: Option<String>) -> Result<String, String> {
     log::info!("Opening new Claude Code session at path: {:?}", path);
 
     #[cfg(not(debug_assertions))]
@@ -869,7 +869,7 @@ pub async fn save_clipboard_image_attachment(
 
 /// Loads the JSONL history for a specific session
 #[tauri::command]
-pub async fn load_session_history(
+pub async fn load_provider_session_history(
     session_id: String,
     project_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {

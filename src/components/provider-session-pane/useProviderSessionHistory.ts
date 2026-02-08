@@ -6,7 +6,7 @@ import type { ProviderSessionMessage } from "@/lib/providerSessionProtocol";
 
 export function useProviderSessionHistory() {
   const loadProviderSessionHistory = useCallback(async (session: Session) => {
-    const history = await api.loadSessionHistory(session.id, session.project_id);
+    const history = await api.loadProviderSessionHistory(session.id, session.project_id);
 
     if (history && history.length > 0) {
       SessionPersistenceService.saveSession(

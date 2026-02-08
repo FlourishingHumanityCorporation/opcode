@@ -60,7 +60,7 @@ describe("terminalAutoTitle snapshot selection", () => {
       makeSession("session-latest"),
     ]);
     const loadSessionHistorySpy = vi
-      .spyOn(api, "loadSessionHistory")
+      .spyOn(api, "loadProviderSessionHistory")
       .mockImplementation(async (sessionId: string) => {
         if (sessionId === "session-active") {
           return [{ type: "user", message: { content: "Fix batch embedding tests" } }];
@@ -89,7 +89,7 @@ describe("terminalAutoTitle snapshot selection", () => {
       makeSession("session-older"),
     ]);
     const loadSessionHistorySpy = vi
-      .spyOn(api, "loadSessionHistory")
+      .spyOn(api, "loadProviderSessionHistory")
       .mockImplementation(async (sessionId: string) => {
         if (sessionId === "session-active") {
           throw new Error("session not found");

@@ -453,7 +453,7 @@ export async function resolveLatestSessionSnapshot(
 
     if (preferredSessionId) {
       try {
-        const preferredHistory = await api.loadSessionHistory(preferredSessionId, project.id);
+        const preferredHistory = await api.loadProviderSessionHistory(preferredSessionId, project.id);
         if (Array.isArray(preferredHistory)) {
           selectedSessionId = preferredSessionId;
           safeHistory = preferredHistory;
@@ -473,7 +473,7 @@ export async function resolveLatestSessionSnapshot(
         return null;
       }
 
-      const history = await api.loadSessionHistory(latestSessionId, project.id);
+      const history = await api.loadProviderSessionHistory(latestSessionId, project.id);
       selectedSessionId = latestSessionId;
       safeHistory = Array.isArray(history) ? history : [];
     }

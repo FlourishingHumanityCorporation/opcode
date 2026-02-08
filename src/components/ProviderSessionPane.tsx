@@ -1097,7 +1097,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
       setIsLoading(true);
       setError(null);
       
-      const history = await api.loadSessionHistory(session.id, session.project_id);
+      const history = await api.loadProviderSessionHistory(session.id, session.project_id);
       
       // Save session data for restoration
       if (history && history.length > 0) {

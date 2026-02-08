@@ -106,6 +106,41 @@ describe("apiAdapter provider-session mappings", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain("/api/providers/capabilities");
   });
 
+  it("maps open_provider_session to /api/provider-sessions/new", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, data: "session-1" }),
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { apiCall } = await loadApiAdapter();
+    const result = await apiCall<string>("open_provider_session", { path: "/tmp/project" });
+
+    expect(result).toBe("session-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/provider-sessions/new");
+  });
+
+  it("maps load_provider_session_history to /api/provider-sessions/{sessionId}/history/{projectId}", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, data: [{ type: "assistant" }] }),
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { apiCall } = await loadApiAdapter();
+    const result = await apiCall<Array<{ type: string }>>("load_provider_session_history", {
+      sessionId: "session/abc",
+      projectId: "project xyz",
+    });
+
+    expect(result).toEqual([{ type: "assistant" }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "/api/provider-sessions/session%2Fabc/history/project%20xyz"
+    );
+  });
+
   it("uses /ws/provider-session and dispatches generic + scoped output/complete events", async () => {
     const { apiCall } = await loadApiAdapter();
     const outputEvents: unknown[] = [];

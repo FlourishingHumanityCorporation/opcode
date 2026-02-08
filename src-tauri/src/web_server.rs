@@ -333,8 +333,8 @@ async fn get_system_prompt() -> Json<ApiResponse<String>> {
     Json(ApiResponse::success(default_prompt))
 }
 
-/// Open new session - mock for web mode
-async fn open_new_session() -> Json<ApiResponse<String>> {
+/// Open new provider session - mock for web mode
+async fn open_provider_session() -> Json<ApiResponse<String>> {
     let session_id = format!("web-session-{}", chrono::Utc::now().timestamp());
     Json(ApiResponse::success(session_id))
 }
@@ -349,11 +349,11 @@ async fn mcp_list() -> Json<ApiResponse<Vec<serde_json::Value>>> {
     Json(ApiResponse::success(vec![]))
 }
 
-/// Load session history from JSONL file
-async fn load_session_history(
+/// Load provider session history from JSONL file
+async fn load_provider_session_history(
     Path((session_id, project_id)): Path<(String, String)>,
 ) -> Json<ApiResponse<Vec<serde_json::Value>>> {
-    match commands::claude::load_session_history(session_id, project_id).await {
+    match commands::claude::load_provider_session_history(session_id, project_id).await {
         Ok(history) => Json(ApiResponse::success(history)),
         Err(e) => Json(ApiResponse::error(e.to_string())),
     }
@@ -1119,15 +1119,15 @@ pub async fn create_web_server(port: u16) -> Result<(), Box<dyn std::error::Erro
         )
         .route("/api/settings/system-prompt", get(get_system_prompt))
         // Session management
-        .route("/api/sessions/new", get(open_new_session))
+        .route("/api/provider-sessions/new", get(open_provider_session))
         // Slash commands
         .route("/api/slash-commands", get(list_slash_commands))
         // MCP
         .route("/api/mcp/servers", get(mcp_list))
         // Session history
         .route(
-            "/api/sessions/{session_id}/history/{project_id}",
-            get(load_session_history),
+            "/api/provider-sessions/{session_id}/history/{project_id}",
+            get(load_provider_session_history),
         )
         .route("/api/provider-sessions/running", get(list_running_provider_sessions))
         // Claude execution endpoints (read-only in web mode)

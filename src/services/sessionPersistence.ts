@@ -151,7 +151,7 @@ export class SessionPersistenceService {
       if (!sessionData) return false;
 
       // Try to verify the session exists on disk by loading its history
-      const history = await api.loadSessionHistory(sessionId, projectId);
+      const history = await api.loadProviderSessionHistory(sessionId, projectId);
       return history && history.length > 0;
     } catch (error) {
       console.error('Failed to check session restorability:', error);

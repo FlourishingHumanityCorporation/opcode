@@ -656,13 +656,13 @@ export const api = {
   },
 
   /**
-   * Opens a new Claude Code session
+   * Opens a new provider session
    * @param path - Optional path to open the session in
    * @returns Promise resolving when the session is opened
    */
-  async openNewSession(path?: string): Promise<string> {
+  async openProviderSession(path?: string): Promise<string> {
     try {
-      return await apiCall<string>("open_new_session", { path });
+      return await apiCall<string>("open_provider_session", { path });
     } catch (error) {
       console.error("Failed to open new session:", error);
       throw error;
@@ -1123,13 +1123,13 @@ export const api = {
   /**
    * Loads the JSONL history for a specific session
    */
-  async loadSessionHistory(sessionId: string, projectId: string): Promise<any[]> {
-    return apiCall("load_session_history", { sessionId, projectId });
+  async loadProviderSessionHistory(sessionId: string, projectId: string): Promise<any[]> {
+    return apiCall("load_provider_session_history", { sessionId, projectId });
   },
 
   /**
    * Loads the JSONL history for a specific agent session
-   * Similar to loadSessionHistory but searches across all project directories
+   * Similar to loadProviderSessionHistory but searches across all project directories
    * @param sessionId - The session ID (UUID)
    * @returns Promise resolving to array of session messages
    */

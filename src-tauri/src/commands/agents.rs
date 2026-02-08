@@ -2454,7 +2454,7 @@ pub async fn import_agent_from_github(
 }
 
 /// Load agent session history from JSONL file
-/// Similar to Claude Code's load_session_history, but searches across all project directories
+/// Similar to provider-session history loading, but searches across all project directories
 #[tauri::command]
 pub async fn load_agent_session_history(
     session_id: String,
