@@ -81,10 +81,6 @@ export function isTerminalHangDebugEnabled(): boolean {
 }
 
 export function recordTerminalEvent(event: Omit<TerminalHangEvent, "ts">): void {
-  if (!isTerminalHangDebugEnabled()) {
-    return;
-  }
-
   terminalEvents.push({
     ts: Date.now(),
     ...event,
@@ -172,11 +168,27 @@ export function classifyIncidentBundle(
   if (events.some((event) => event.event === "listener_attach_failed")) {
     return "detached_listener_path";
   }
-  if (events.some((event) => event.event === "stdin_disabled")) {
+  if (
+    events.some(
+      (event) =>
+        event.event === "stdin_disabled" ||
+        event.event === "focus_handoff_blocked" ||
+        event.event === "focus_retry_cancelled"
+    )
+  ) {
     return "interactive_focus_gating";
+  }
+  if (events.some((event) => event.event === "stale_recovery_escalated")) {
+    return "stale_recovery_escalated";
+  }
+  if (events.some((event) => event.event === "soft_reattach_trigger")) {
+    return "terminal_soft_reattach";
   }
   if (events.some((event) => event.payload?.errorCode === "ERR_WRITE_FAILED")) {
     return "backend_write_stall";
+  }
+  if (events.some((event) => event.event === "wheel_observed")) {
+    return "wheel_input_observed";
   }
   return "unclassified_terminal_hang";
 }

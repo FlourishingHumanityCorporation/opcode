@@ -2880,13 +2880,13 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
             showTimeline && "sm:right-96"
           )}>
             {nativeTerminalMode ? (
-              <div className="border-t border-border bg-background/95 px-4 py-2">
+              <div className="pointer-events-none border-t border-border bg-background/95 px-4 py-2">
                 <div className={cn("mx-auto flex w-full items-center justify-between", embedded ? "" : "max-w-6xl")}>
                   <div className="text-xs text-muted-foreground">
                     {nativeRestoreNotice || 'In-app terminal mode is active'}
                   </div>
                   {!projectPath && (
-                    <Button size="sm" onClick={handleSelectTerminalProject}>
+                    <Button size="sm" onClick={handleSelectTerminalProject} className="pointer-events-auto">
                       Select Project
                     </Button>
                   )}

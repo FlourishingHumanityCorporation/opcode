@@ -27,8 +27,8 @@
     "debug:assistant-benchmark:json": "node scripts/measure-session-startup.mjs --benchmark-kind assistant --json",
     "debug:assistant-benchmark:gate": "node scripts/measure-session-startup.mjs --runs 3 --benchmark-kind assistant --fail-on-assistant-slow-ms 50000",
     "smoke:attention": "playwright test tests/smoke/agent-attention.spec.ts",
-    "smoke:ui": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts tests/smoke/agent-attention.spec.ts tests/smoke/native-auto-rename.spec.ts",
-    "smoke:ui:headed": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts tests/smoke/agent-attention.spec.ts tests/smoke/native-auto-rename.spec.ts --headed"
+    "smoke:ui": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts tests/smoke/agent-attention.spec.ts tests/smoke/native-auto-rename.spec.ts tests/smoke/explorer-interaction.spec.ts",
+    "smoke:ui:headed": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts tests/smoke/agent-attention.spec.ts tests/smoke/native-auto-rename.spec.ts tests/smoke/explorer-interaction.spec.ts --headed"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

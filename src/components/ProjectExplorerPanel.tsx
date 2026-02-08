@@ -370,7 +370,7 @@ export const ProjectExplorerPanel: React.FC<ProjectExplorerPanelProps> = ({
   if (!projectPath) {
     return (
       <div
-        className="flex h-full min-h-0 flex-col border-r border-[var(--color-chrome-border)] bg-[var(--color-chrome-bg)]"
+        className="flex h-full min-h-0 flex-col bg-[var(--color-chrome-bg)]"
         data-testid={`project-explorer-panel-${workspaceId}`}
       >
         <div className="flex h-9 items-center border-b border-[var(--color-chrome-border)] px-2 text-xs text-muted-foreground">
@@ -387,7 +387,7 @@ export const ProjectExplorerPanel: React.FC<ProjectExplorerPanelProps> = ({
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col border-r border-[var(--color-chrome-border)] bg-[var(--color-chrome-bg)]"
+      className="flex h-full min-h-0 flex-col bg-[var(--color-chrome-bg)]"
       data-testid={`project-explorer-panel-${workspaceId}`}
     >
       <div className="flex h-9 items-center justify-between border-b border-[var(--color-chrome-border)] px-1.5">
@@ -429,7 +429,10 @@ export const ProjectExplorerPanel: React.FC<ProjectExplorerPanelProps> = ({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-1.5">
+      <div
+        className="min-h-0 flex-1 overflow-auto p-1.5"
+        data-testid="project-explorer-scroll"
+      >
         <button
           type="button"
           onClick={handleToggleRoot}

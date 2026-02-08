@@ -9,10 +9,11 @@ import {
 } from "@/components/embedded-terminal";
 import {
   applyTerminalInteractivity,
+  classifyEditableTargetOutsideContainer,
   encodeTerminalKeyInput,
   focusTerminalIfInteractive,
   isEditableTargetOutsideContainer,
-  normalizeWheelDeltaToScrollLines,
+  isXtermHelperTextareaTarget,
   shouldRouteKeyboardFallbackInput,
 } from "@/components/embedded-terminal/input";
 import {
@@ -49,6 +50,7 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = (props) => {
     containerRef,
     statusText,
     error,
+    recoveryNotice,
     ready,
     quickRunCommandRef,
     runInTerminal,
@@ -99,19 +101,25 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = (props) => {
           {error}
         </div>
       )}
+      {!error && recoveryNotice && (
+        <div className="border-t border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs text-amber-300">
+          {recoveryNotice}
+        </div>
+      )}
     </div>
   );
 };
 
 export {
   applyTerminalInteractivity,
+  classifyEditableTargetOutsideContainer,
   classifyTerminalErrorCode,
   closeEmbeddedTerminalForLifecycle,
   encodeTerminalKeyInput,
   focusTerminalIfInteractive,
+  isXtermHelperTextareaTarget,
   isMissingEmbeddedTerminalError,
   isEditableTargetOutsideContainer,
-  normalizeWheelDeltaToScrollLines,
   shouldAttemptStaleInputRecovery,
   shouldRouteKeyboardFallbackInput,
   shouldTerminatePersistentSessionForClose,

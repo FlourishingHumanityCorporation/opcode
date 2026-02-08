@@ -318,7 +318,7 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
               />
             }
             right={
-              <div className="relative h-full">
+              <div className="relative h-full min-w-0 overflow-hidden">
                 {workspace.terminalTabs.map((terminal) => {
                   const isActive = terminal.id === activeTerminal.id;
                   const isTerminalVisible = isVisible && isActive;

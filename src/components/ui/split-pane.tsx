@@ -61,49 +61,110 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
   leftCollapsed = false,
   className,
 }) => {
+  const GUTTER_WIDTH = 12;
   const [splitPosition, setSplitPosition] = useState(initialSplit);
   const [isDragging, setIsDragging] = useState(false);
+  const [containerWidth, setContainerWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragStartX = useRef(0);
-  const dragStartSplit = useRef(0);
+  const dragStartLeftPx = useRef(0);
   const animationFrameRef = useRef<number | null>(null);
 
-  // Handle mouse down on divider
+  const getLeftBounds = useCallback(
+    (effectiveWidth: number) => {
+      if (effectiveWidth <= 0) {
+        return { min: 0, max: 0 };
+      }
+
+      const min = Math.min(minLeftWidth, effectiveWidth);
+      const max = Math.max(0, effectiveWidth - Math.min(minRightWidth, effectiveWidth));
+
+      if (max < min) {
+        return { min: max, max };
+      }
+
+      return { min, max };
+    },
+    [minLeftWidth, minRightWidth]
+  );
+
+  const clampLeftPixels = useCallback(
+    (candidate: number, effectiveWidth: number) => {
+      const { min, max } = getLeftBounds(effectiveWidth);
+      return Math.min(Math.max(candidate, min), max);
+    },
+    [getLeftBounds]
+  );
+
+  const toSplitPercent = useCallback((leftPixels: number, effectiveWidth: number): number => {
+    if (effectiveWidth <= 0) {
+      return 0;
+    }
+    return (leftPixels / effectiveWidth) * 100;
+  }, []);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    const measure = () => {
+      setContainerWidth(node.clientWidth);
+    };
+
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
+  useEffect(() => {
+    setSplitPosition(initialSplit);
+  }, [initialSplit]);
+
+  const effectiveWidth = Math.max(0, containerWidth - (leftCollapsed ? 0 : GUTTER_WIDTH));
+  const unclampedLeftPx = (splitPosition / 100) * effectiveWidth;
+  const leftPx = leftCollapsed
+    ? 0
+    : clampLeftPixels(Number.isFinite(unclampedLeftPx) ? unclampedLeftPx : 0, effectiveWidth);
+  const gutterPx = leftCollapsed ? 0 : GUTTER_WIDTH;
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (leftCollapsed) return;
     e.preventDefault();
     setIsDragging(true);
     dragStartX.current = e.clientX;
-    dragStartSplit.current = splitPosition;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
+    dragStartLeftPx.current = leftPx;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
   };
 
-  // Handle mouse move
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (leftCollapsed || !isDragging || !containerRef.current) return;
+  const handleMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (leftCollapsed || !isDragging || !containerRef.current) return;
 
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
 
-    animationFrameRef.current = requestAnimationFrame(() => {
-      const containerWidth = containerRef.current!.offsetWidth;
-      const deltaX = e.clientX - dragStartX.current;
-      const deltaPercent = (deltaX / containerWidth) * 100;
-      const newSplit = dragStartSplit.current + deltaPercent;
+      animationFrameRef.current = requestAnimationFrame(() => {
+        const fullWidth = containerRef.current?.clientWidth ?? 0;
+        const currentEffectiveWidth = Math.max(0, fullWidth - GUTTER_WIDTH);
+        const deltaX = e.clientX - dragStartX.current;
+        const proposedLeftPx = dragStartLeftPx.current + deltaX;
+        const clampedLeftPx = clampLeftPixels(proposedLeftPx, currentEffectiveWidth);
+        const nextSplit = toSplitPercent(clampedLeftPx, currentEffectiveWidth);
+        setSplitPosition(nextSplit);
+        onSplitChange?.(nextSplit);
+      });
+    },
+    [isDragging, leftCollapsed, clampLeftPixels, onSplitChange, toSplitPercent]
+  );
 
-      // Calculate min/max based on pixel constraints
-      const minSplit = (minLeftWidth / containerWidth) * 100;
-      const maxSplit = 100 - (minRightWidth / containerWidth) * 100;
-
-      const clampedSplit = Math.min(Math.max(newSplit, minSplit), maxSplit);
-      setSplitPosition(clampedSplit);
-      onSplitChange?.(clampedSplit);
-    });
-  }, [isDragging, leftCollapsed, minLeftWidth, minRightWidth, onSplitChange]);
-
-  // Handle mouse up
   const handleMouseUp = useCallback(() => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -113,7 +174,6 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
     document.body.style.userSelect = '';
   }, []);
 
-  // Add global mouse event listeners
   useEffect(() => {
     if (leftCollapsed && isDragging) {
       handleMouseUp();
@@ -130,99 +190,97 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
     }
   }, [isDragging, handleMouseMove, handleMouseUp, leftCollapsed]);
 
-  // Handle keyboard navigation
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (leftCollapsed) return;
-    if (!containerRef.current) return;
-
-    const step = e.shiftKey ? 10 : 2; // Larger steps with shift
-    const containerWidth = containerRef.current.offsetWidth;
-    const minSplit = (minLeftWidth / containerWidth) * 100;
-    const maxSplit = 100 - (minRightWidth / containerWidth) * 100;
-
-    let newSplit = splitPosition;
+    const currentEffectiveWidth = Math.max(0, containerWidth - GUTTER_WIDTH);
+    const step = e.shiftKey ? 10 : 2;
+    const { min, max } = getLeftBounds(currentEffectiveWidth);
+    let nextLeftPx = leftPx;
 
     switch (e.key) {
-      case 'ArrowLeft':
+      case "ArrowLeft":
         e.preventDefault();
-        newSplit = Math.max(splitPosition - step, minSplit);
+        nextLeftPx = leftPx - step;
         break;
-      case 'ArrowRight':
+      case "ArrowRight":
         e.preventDefault();
-        newSplit = Math.min(splitPosition + step, maxSplit);
+        nextLeftPx = leftPx + step;
         break;
-      case 'Home':
+      case "Home":
         e.preventDefault();
-        newSplit = minSplit;
+        nextLeftPx = min;
         break;
-      case 'End':
+      case "End":
         e.preventDefault();
-        newSplit = maxSplit;
+        nextLeftPx = max;
         break;
       default:
         return;
     }
 
-    setSplitPosition(newSplit);
-    onSplitChange?.(newSplit);
+    const clampedLeftPx = clampLeftPixels(nextLeftPx, currentEffectiveWidth);
+    const nextSplit = toSplitPercent(clampedLeftPx, currentEffectiveWidth);
+    setSplitPosition(nextSplit);
+    onSplitChange?.(nextSplit);
   };
 
   return (
     <div 
       ref={containerRef}
-      className={cn("flex h-full w-full relative", className)}
+      className={cn("grid h-full w-full", className)}
+      style={{
+        gridTemplateRows: "minmax(0, 1fr)",
+        gridTemplateColumns: `${Math.round(leftPx)}px ${gutterPx}px minmax(0, 1fr)`,
+      }}
     >
-      {/* Left pane */}
       <div 
-        className={cn("h-full overflow-hidden", leftCollapsed && "pointer-events-none")}
-        style={{ width: `${leftCollapsed ? 0 : splitPosition}%` }}
+        className={cn(
+          "relative min-w-0 overflow-hidden",
+          leftCollapsed && "pointer-events-none"
+        )}
+        data-testid="split-pane-left"
       >
         {left}
       </div>
 
-      {/* Divider */}
-      {!leftCollapsed && (
-        <div
-          className={cn(
-            "relative flex-shrink-0 group",
-            "w-1 hover:w-2 transition-all duration-150",
-            "bg-border hover:bg-primary/50",
-            "cursor-col-resize",
-            isDragging && "bg-primary w-2"
-          )}
-          onMouseDown={handleMouseDown}
-          onKeyDown={handleKeyDown}
-          tabIndex={0}
-          role="separator"
-          aria-label="Resize panes"
-          aria-valuenow={Math.round(splitPosition)}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
-          {/* Expand hit area for easier dragging */}
-          <div className="absolute inset-y-0 -left-2 -right-2 z-10" />
-          
-          {/* Visual indicator dots */}
-          <div className={cn(
-            "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
-            "flex flex-col items-center justify-center gap-1",
-            "opacity-0 group-hover:opacity-100 transition-opacity",
-            isDragging && "opacity-100"
-          )}>
-            <div className="w-1 h-1 bg-primary rounded-full" />
-            <div className="w-1 h-1 bg-primary rounded-full" />
-            <div className="w-1 h-1 bg-primary rounded-full" />
-          </div>
-        </div>
-      )}
+      <div
+        className={cn(
+          "relative h-full min-w-0",
+          leftCollapsed ? "pointer-events-none" : "pointer-events-auto"
+        )}
+        data-testid="split-pane-gutter"
+      >
+        {!leftCollapsed && (
+          <button
+            type="button"
+            className={cn(
+              "group absolute inset-0 flex cursor-col-resize items-center justify-center bg-transparent p-0",
+              "hover:bg-primary/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+            )}
+            onMouseDown={handleMouseDown}
+            onKeyDown={handleKeyDown}
+            role="separator"
+            aria-label="Resize panes"
+            aria-valuenow={Math.round(splitPosition)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <span
+              className={cn(
+                "h-full w-px bg-border transition-colors",
+                isDragging ? "bg-primary" : "group-hover:bg-primary/50"
+              )}
+            />
+          </button>
+        )}
+      </div>
 
-      {/* Right pane */}
       <div 
-        className="h-full overflow-hidden flex-1"
-        style={{ width: `${leftCollapsed ? 100 : 100 - splitPosition}%` }}
+        className="relative min-w-0 overflow-hidden [contain:layout_paint]"
+        data-testid="split-pane-right"
       >
         {right}
       </div>
     </div>
   );
-}; 
+};

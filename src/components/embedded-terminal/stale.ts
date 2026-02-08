@@ -4,6 +4,17 @@ import {
 } from "@/components/embedded-terminal/constants";
 import type { StaleInputRecoveryCandidate } from "@/components/embedded-terminal/types";
 
+export function isInputStillStale(
+  lastInputAttemptAt: number | null,
+  lastOutputAt: number | null
+): boolean {
+  if (!lastInputAttemptAt) {
+    return false;
+  }
+  const outputAt = lastOutputAt ?? 0;
+  return lastInputAttemptAt > outputAt;
+}
+
 export function shouldAttemptStaleInputRecovery({
   isInteractive,
   isRunning,
@@ -20,8 +31,7 @@ export function shouldAttemptStaleInputRecovery({
   if (now - lastRecoveryAt < cooldownMs) {
     return false;
   }
-  const outputAt = lastOutputAt ?? 0;
-  if (lastInputAttemptAt <= outputAt) {
+  if (!isInputStillStale(lastInputAttemptAt, lastOutputAt)) {
     return false;
   }
   return now - lastInputAttemptAt >= thresholdMs;

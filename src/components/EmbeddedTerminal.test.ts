@@ -13,13 +13,14 @@ vi.mock("@xterm/addon-fit", () => ({
 
 import {
   applyTerminalInteractivity,
+  classifyEditableTargetOutsideContainer,
   classifyTerminalErrorCode,
   closeEmbeddedTerminalForLifecycle,
   encodeTerminalKeyInput,
   focusTerminalIfInteractive,
   isMissingEmbeddedTerminalError,
   isEditableTargetOutsideContainer,
-  normalizeWheelDeltaToScrollLines,
+  isXtermHelperTextareaTarget,
   shouldRouteKeyboardFallbackInput,
   shouldAttemptStaleInputRecovery,
   shouldTerminatePersistentSessionForClose,
@@ -173,44 +174,6 @@ describe("EmbeddedTerminal lifecycle close behavior", () => {
     expect(encodeTerminalKeyInput({ key: "Shift", ctrlKey: false, metaKey: false, altKey: false })).toBeNull();
   });
 
-  it("normalizes wheel deltas into integer scroll lines with remainder carry", () => {
-    const lineMode = normalizeWheelDeltaToScrollLines({
-      deltaMode: 1,
-      deltaY: 3,
-      rows: 40,
-      remainder: 0,
-    });
-    expect(lineMode.lines).toBe(3);
-    expect(lineMode.remainder).toBe(0);
-
-    const firstPixel = normalizeWheelDeltaToScrollLines({
-      deltaMode: 0,
-      deltaY: 8,
-      rows: 40,
-      remainder: 0,
-    });
-    expect(firstPixel.lines).toBe(0);
-    expect(firstPixel.remainder).toBe(0.5);
-
-    const secondPixel = normalizeWheelDeltaToScrollLines({
-      deltaMode: 0,
-      deltaY: 8,
-      rows: 40,
-      remainder: firstPixel.remainder,
-    });
-    expect(secondPixel.lines).toBe(1);
-    expect(secondPixel.remainder).toBe(0);
-
-    const pageMode = normalizeWheelDeltaToScrollLines({
-      deltaMode: 2,
-      deltaY: -1,
-      rows: 50,
-      remainder: 0,
-    });
-    expect(pageMode.lines).toBe(-49);
-    expect(pageMode.remainder).toBe(0);
-  });
-
   it("blocks navigation keys from global keyboard fallback forwarding", () => {
     expect(
       shouldRouteKeyboardFallbackInput({
@@ -251,17 +214,27 @@ describe("EmbeddedTerminal lifecycle close behavior", () => {
     const insideInput = document.createElement("input");
     const outsideInput = document.createElement("input");
     const outsideButton = document.createElement("button");
+    const outsideXtermHelper = document.createElement("textarea");
+    outsideXtermHelper.className = "xterm-helper-textarea";
     container.appendChild(insideInput);
     document.body.appendChild(container);
     document.body.appendChild(outsideInput);
     document.body.appendChild(outsideButton);
+    document.body.appendChild(outsideXtermHelper);
 
     expect(isEditableTargetOutsideContainer(insideInput, container)).toBe(false);
     expect(isEditableTargetOutsideContainer(outsideInput, container)).toBe(true);
     expect(isEditableTargetOutsideContainer(outsideButton, container)).toBe(false);
+    expect(isEditableTargetOutsideContainer(outsideXtermHelper, container)).toBe(false);
+    expect(isXtermHelperTextareaTarget(outsideXtermHelper)).toBe(true);
+    expect(classifyEditableTargetOutsideContainer(outsideXtermHelper, container)).toBe(
+      "outside-xterm-helper"
+    );
+    expect(classifyEditableTargetOutsideContainer(outsideInput, container)).toBe("outside-editable");
 
     container.remove();
     outsideInput.remove();
     outsideButton.remove();
+    outsideXtermHelper.remove();
   });
 });

@@ -16,11 +16,11 @@ describe("terminalHangDiagnostics", () => {
     delete (globalThis as any).__OPCODE_DEBUG_LOGS__;
   });
 
-  it("gates event recording when debug mode is disabled", () => {
+  it("records terminal events even when debug mode is disabled", () => {
     recordTerminalEvent({
       event: "start_attempt",
     });
-    expect(getTerminalEventSnapshot()).toHaveLength(0);
+    expect(getTerminalEventSnapshot()).toHaveLength(1);
   });
 
   it("records and truncates terminal events in debug mode", () => {
@@ -38,7 +38,6 @@ describe("terminalHangDiagnostics", () => {
   });
 
   it("builds incident bundle schema with workspace summary from provider", () => {
-    localStorage.setItem("opcode.terminal.debug", "1");
     setTerminalWorkspaceSnapshotProvider(() => ({
       activeTabId: "workspace-1",
       tabs: [
@@ -120,5 +119,50 @@ describe("terminalHangDiagnostics", () => {
     expect(shouldCaptureDeadInputIncident("ws:term:pane", now)).toBe(true);
     expect(shouldCaptureDeadInputIncident("ws:term:pane", now + 500)).toBe(false);
     expect(shouldCaptureDeadInputIncident("ws:term:pane", now + 60_100)).toBe(true);
+  });
+
+  it("classifies focus handoff blockers as interactive focus gating", () => {
+    recordTerminalEvent({
+      event: "focus_handoff_blocked",
+      payload: { reason: "editable-target-outside-terminal" },
+    });
+
+    const bundle = buildTerminalIncidentBundle({
+      workspaceId: "workspace-1",
+      terminalId: "terminal-1",
+      paneId: "pane-1",
+    });
+
+    expect(bundle.classification).toBe("interactive_focus_gating");
+  });
+
+  it("classifies stale escalation events when staged recovery escalates", () => {
+    recordTerminalEvent({
+      event: "stale_recovery_escalated",
+      payload: { stage: 3 },
+    });
+
+    const bundle = buildTerminalIncidentBundle({
+      workspaceId: "workspace-1",
+      terminalId: "terminal-1",
+      paneId: "pane-1",
+    });
+
+    expect(bundle.classification).toBe("stale_recovery_escalated");
+  });
+
+  it("classifies wheel observation events for scroll-path diagnostics", () => {
+    recordTerminalEvent({
+      event: "wheel_observed",
+      payload: { deltaY: -120, deltaMode: 0, eventTarget: "xterm-screen" },
+    });
+
+    const bundle = buildTerminalIncidentBundle({
+      workspaceId: "workspace-1",
+      terminalId: "terminal-1",
+      paneId: "pane-1",
+    });
+
+    expect(bundle.classification).toBe("wheel_input_observed");
   });
 });

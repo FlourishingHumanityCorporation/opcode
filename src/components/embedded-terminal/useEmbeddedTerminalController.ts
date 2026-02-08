@@ -20,11 +20,10 @@ import {
 } from "@/components/embedded-terminal/constants";
 import {
   applyTerminalInteractivity,
+  classifyEditableTargetOutsideContainer,
   encodeTerminalKeyInput,
   focusTerminalIfInteractive,
   getTerminalTextarea,
-  isEditableTargetOutsideContainer,
-  normalizeWheelDeltaToScrollLines,
   shouldRouteKeyboardFallbackInput,
 } from "@/components/embedded-terminal/input";
 import {
@@ -32,7 +31,10 @@ import {
   closeEmbeddedTerminalForLifecycle,
   isMissingEmbeddedTerminalError,
 } from "@/components/embedded-terminal/errors";
-import { shouldAttemptStaleInputRecovery } from "@/components/embedded-terminal/stale";
+import {
+  isInputStillStale,
+  shouldAttemptStaleInputRecovery,
+} from "@/components/embedded-terminal/stale";
 import { debugLog, getTauriListen } from "@/components/embedded-terminal/tauri";
 import type { InteractiveTerminal, UnlistenFn } from "@/components/embedded-terminal/types";
 
@@ -54,11 +56,40 @@ interface UseEmbeddedTerminalControllerResult {
   containerRef: MutableRefObject<HTMLDivElement | null>;
   statusText: string;
   error: string | null;
+  recoveryNotice: string | null;
   ready: boolean;
   quickRunCommandRef: MutableRefObject<string>;
   runInTerminal: (command: string) => Promise<void>;
   handleRestart: () => Promise<void>;
   recoverPointerFocus: () => void;
+}
+
+const WRITE_FAILURE_SIGNAL_WINDOW_MS = 12_000;
+const STALE_RECOVERY_STAGE2_GRACE_MS = 900;
+const RECOVERY_NOTICE_AUTO_CLEAR_MS = 2_400;
+const WHEEL_OBSERVATION_THROTTLE_MS = 1_000;
+
+export interface StaleRecoveryFailureSignals {
+  windowStartedAt: number;
+  total: number;
+  sessionNotFound: number;
+}
+
+export function shouldEscalateStaleRecoveryFromSignals(
+  signals: StaleRecoveryFailureSignals,
+  now = Date.now(),
+  windowMs = WRITE_FAILURE_SIGNAL_WINDOW_MS
+): boolean {
+  if (signals.windowStartedAt === 0) {
+    return false;
+  }
+  if (now - signals.windowStartedAt > windowMs) {
+    return false;
+  }
+  if (signals.sessionNotFound >= 1) {
+    return true;
+  }
+  return signals.total >= 2;
 }
 
 export function shouldReattachUsingExistingTerminalId(
@@ -77,6 +108,32 @@ export type TerminalAutoFocusRetryDecision =
   | "stop-not-running"
   | "stop-focused"
   | "stop-editable-outside";
+
+export type WheelEventTargetClassification =
+  | "xterm-screen"
+  | "xterm-viewport"
+  | "xterm-scrollable"
+  | "xterm-helper-textarea"
+  | "other";
+
+export function classifyWheelEventTarget(target: EventTarget | null): WheelEventTargetClassification {
+  if (!(target instanceof Element)) {
+    return "other";
+  }
+  if (target.closest(".xterm-screen")) {
+    return "xterm-screen";
+  }
+  if (target.closest(".xterm-viewport")) {
+    return "xterm-viewport";
+  }
+  if (target.closest(".xterm-scrollable-element")) {
+    return "xterm-scrollable";
+  }
+  if (target.classList.contains("xterm-helper-textarea")) {
+    return "xterm-helper-textarea";
+  }
+  return "other";
+}
 
 interface TerminalAutoFocusRetryDecisionInput {
   terminal: Pick<InteractiveTerminal, "focus"> | null | undefined;
@@ -107,7 +164,9 @@ export function getTerminalAutoFocusRetryDecision({
   if (terminalTextarea && activeElement === terminalTextarea) {
     return "stop-focused";
   }
-  if (isEditableTargetOutsideContainer(activeElement, container)) {
+  if (
+    classifyEditableTargetOutsideContainer(activeElement, container) === "outside-editable"
+  ) {
     return "stop-editable-outside";
   }
   return "continue";
@@ -147,13 +206,84 @@ export function useEmbeddedTerminalController({
   const lastStaleRecoveryAtRef = useRef(0);
   const lastOutputEventEmitAtRef = useRef(0);
   const focusRetryTimeoutIdsRef = useRef<number[]>([]);
+  const recoveryNoticeClearTimeoutRef = useRef<number | null>(null);
+  const writeFailureSignalRef = useRef<{
+    windowStartedAt: number;
+    total: number;
+    sessionNotFound: number;
+  }>({
+    windowStartedAt: 0,
+    total: 0,
+    sessionNotFound: 0,
+  });
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [restartToken, setRestartToken] = useState(0);
   const [isStarting, setIsStarting] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
 
   const ready = Boolean(terminalId) && isRunning;
+
+  const clearRecoveryNoticeTimer = useCallback(() => {
+    if (recoveryNoticeClearTimeoutRef.current !== null) {
+      window.clearTimeout(recoveryNoticeClearTimeoutRef.current);
+      recoveryNoticeClearTimeoutRef.current = null;
+    }
+  }, []);
+
+  const setRecoveryNoticeWithTimeout = useCallback(
+    (message: string | null, autoClear = false) => {
+      clearRecoveryNoticeTimer();
+      setRecoveryNotice(message);
+      if (message && autoClear) {
+        recoveryNoticeClearTimeoutRef.current = window.setTimeout(() => {
+          recoveryNoticeClearTimeoutRef.current = null;
+          setRecoveryNotice(null);
+        }, RECOVERY_NOTICE_AUTO_CLEAR_MS);
+      }
+    },
+    [clearRecoveryNoticeTimer]
+  );
+
+  const clearWriteFailureSignals = useCallback(() => {
+    writeFailureSignalRef.current = {
+      windowStartedAt: 0,
+      total: 0,
+      sessionNotFound: 0,
+    };
+  }, []);
+
+  const recordWriteFailureSignal = useCallback((errorCode: string) => {
+    const now = Date.now();
+    const current = writeFailureSignalRef.current;
+    if (now - current.windowStartedAt > WRITE_FAILURE_SIGNAL_WINDOW_MS) {
+      writeFailureSignalRef.current = {
+        windowStartedAt: now,
+        total: 0,
+        sessionNotFound: 0,
+      };
+    } else if (current.windowStartedAt === 0) {
+      current.windowStartedAt = now;
+    }
+
+    writeFailureSignalRef.current.total += 1;
+    if (errorCode === "ERR_SESSION_NOT_FOUND") {
+      writeFailureSignalRef.current.sessionNotFound += 1;
+    }
+  }, []);
+
+  const shouldEscalateStaleRecovery = useCallback((now = Date.now()): boolean => {
+    const signals = writeFailureSignalRef.current;
+    if (
+      signals.windowStartedAt !== 0 &&
+      now - signals.windowStartedAt > WRITE_FAILURE_SIGNAL_WINDOW_MS
+    ) {
+      clearWriteFailureSignals();
+      return false;
+    }
+    return shouldEscalateStaleRecoveryFromSignals(signals, now, WRITE_FAILURE_SIGNAL_WINDOW_MS);
+  }, [clearWriteFailureSignals]);
 
   const emitTerminalEvent = useCallback(
     (event: string, payload?: Record<string, unknown>) => {
@@ -205,6 +335,7 @@ export function useEmbeddedTerminalController({
         return;
       }
       softReattachPendingRef.current = true;
+      setRecoveryNoticeWithTimeout("Input stalled, reattaching...");
       emitTerminalEvent("soft_reattach_trigger", { reason });
       void captureIncident(reason, `Auto capture during soft reattach: ${reason}`);
 
@@ -213,7 +344,7 @@ export function useEmbeddedTerminalController({
         setRestartToken((prev) => prev + 1);
       }, 80);
     },
-    [captureIncident, emitTerminalEvent]
+    [captureIncident, emitTerminalEvent, setRecoveryNoticeWithTimeout]
   );
 
   const runInTerminal = useCallback(
@@ -222,12 +353,15 @@ export function useEmbeddedTerminalController({
       try {
         lastInputAttemptAtRef.current = Date.now();
         await api.writeEmbeddedTerminalInput(terminalIdRef.current, `${command}\n`);
+        clearWriteFailureSignals();
+        setRecoveryNoticeWithTimeout(null);
         emitTerminalEvent("write_input_success", {
           source: "run-command",
           command,
         });
       } catch (runError) {
         const errorCode = classifyTerminalErrorCode(runError, "ERR_WRITE_FAILED");
+        recordWriteFailureSignal(errorCode);
         emitTerminalEvent("write_input_failed", {
           source: "run-command",
           errorCode,
@@ -240,7 +374,13 @@ export function useEmbeddedTerminalController({
         setError(message);
       }
     },
-    [emitTerminalEvent, scheduleSoftReattach]
+    [
+      clearWriteFailureSignals,
+      emitTerminalEvent,
+      recordWriteFailureSignal,
+      scheduleSoftReattach,
+      setRecoveryNoticeWithTimeout,
+    ]
   );
 
   const recoverPointerFocus = useCallback(() => {
@@ -373,8 +513,8 @@ export function useEmbeddedTerminalController({
     let outputUnlisten: UnlistenFn | null = null;
     let exitUnlisten: UnlistenFn | null = null;
     let onDataDisposable: { dispose: () => void } | null = null;
-    let viewportWheelCleanup: UnlistenFn | null = null;
-    let wheelDeltaRemainder = 0;
+    let wheelObservationCleanup: UnlistenFn | null = null;
+    let lastWheelObservationAt = 0;
     let terminalInstance: XTerm | null = null;
 
     const isCurrentStartup = () => !disposed && startupGenerationRef.current === startupGeneration;
@@ -388,9 +528,8 @@ export function useEmbeddedTerminalController({
       outputUnlisten = null;
       exitUnlisten?.();
       exitUnlisten = null;
-      viewportWheelCleanup?.();
-      viewportWheelCleanup = null;
-      wheelDeltaRemainder = 0;
+      wheelObservationCleanup?.();
+      wheelObservationCleanup = null;
     };
 
     const wireTerminalSession = async (id: string, runAutoCommand: boolean): Promise<boolean> => {
@@ -413,6 +552,7 @@ export function useEmbeddedTerminalController({
         lastInputAttemptAtRef.current = Date.now();
         api.writeEmbeddedTerminalInput(terminalIdRef.current, data).catch((writeError) => {
           const errorCode = classifyTerminalErrorCode(writeError, "ERR_WRITE_FAILED");
+          recordWriteFailureSignal(errorCode);
           emitTerminalEvent("write_input_failed", {
             source: "interactive",
             errorCode,
@@ -443,6 +583,8 @@ export function useEmbeddedTerminalController({
       outputUnlisten = await tauriListen(`terminal-output:${id}`, (event: any) => {
         if (!terminalInstance) return;
         lastOutputAtRef.current = Date.now();
+        clearWriteFailureSignals();
+        setRecoveryNoticeWithTimeout(null);
         const chunk = String(event.payload ?? "");
         terminalInstance.write(chunk);
         const now = Date.now();
@@ -471,6 +613,7 @@ export function useEmbeddedTerminalController({
         isRunningRef.current = false;
         terminalIdRef.current = null;
         setTerminalId(null);
+        setRecoveryNoticeWithTimeout(null);
         onTerminalIdChangeRef.current?.(undefined);
 
         if (
@@ -515,6 +658,7 @@ export function useEmbeddedTerminalController({
       setError(null);
       setIsRunning(false);
       isRunningRef.current = false;
+      setRecoveryNoticeWithTimeout(null);
 
       const term = new XTerm({
         cursorBlink: true,
@@ -540,29 +684,27 @@ export function useEmbeddedTerminalController({
       }
 
       term.open(containerRef.current);
-      const viewport = containerRef.current.querySelector(".xterm-viewport");
-      if (viewport instanceof HTMLElement) {
-        const handleWheel = (event: WheelEvent) => {
-          event.stopImmediatePropagation();
-          event.stopPropagation();
-          const { lines, remainder } = normalizeWheelDeltaToScrollLines({
-            deltaMode: event.deltaMode,
-            deltaY: event.deltaY,
-            rows: term.rows,
-            remainder: wheelDeltaRemainder,
-          });
-          wheelDeltaRemainder = remainder;
-          event.preventDefault();
-          if (lines !== 0) {
-            term.scrollLines(lines);
-          }
-        };
-
-        viewport.addEventListener("wheel", handleWheel, { passive: false, capture: true });
-        viewportWheelCleanup = () => {
-          viewport.removeEventListener("wheel", handleWheel, true);
-        };
-      }
+      const wheelObservationContainer = containerRef.current;
+      const observeWheel = (event: WheelEvent) => {
+        const now = Date.now();
+        if (now - lastWheelObservationAt < WHEEL_OBSERVATION_THROTTLE_MS) {
+          return;
+        }
+        lastWheelObservationAt = now;
+        emitTerminalEvent("wheel_observed", {
+          deltaY: event.deltaY,
+          deltaMode: event.deltaMode,
+          isInteractive: isInteractiveRef.current,
+          eventTarget: classifyWheelEventTarget(event.target),
+        });
+      };
+      wheelObservationContainer.addEventListener("wheel", observeWheel, {
+        passive: true,
+        capture: true,
+      });
+      wheelObservationCleanup = () => {
+        wheelObservationContainer.removeEventListener("wheel", observeWheel, true);
+      };
 
       fitAddon.fit();
       applyTerminalInteractivity(term as unknown as InteractiveTerminal, isInteractiveRef.current);
@@ -665,6 +807,7 @@ export function useEmbeddedTerminalController({
       setTerminalId(null);
       setIsRunning(false);
       isRunningRef.current = false;
+      setRecoveryNoticeWithTimeout(null);
 
       if (terminalInstance) {
         terminalInstance.dispose();
@@ -679,17 +822,40 @@ export function useEmbeddedTerminalController({
     scheduleSoftReattach,
     scheduleTerminalAutoFocusRetry,
     clearAutoFocusRetryTimers,
+    clearWriteFailureSignals,
+    recordWriteFailureSignal,
     emitTerminalEvent,
     persistentSessionId,
+    setRecoveryNoticeWithTimeout,
   ]);
 
   useEffect(() => {
+    const activeClassification =
+      isInteractive
+        ? classifyEditableTargetOutsideContainer(document.activeElement, containerRef.current)
+        : "not-editable";
+    const shouldSuppressFocusSteal = activeClassification === "outside-editable";
     const applied = applyTerminalInteractivity(
       terminalRef.current as unknown as InteractiveTerminal,
-      isInteractive
+      isInteractive,
+      shouldSuppressFocusSteal ? () => undefined : undefined
     );
     if (isInteractive) {
       if (applied) {
+        emitTerminalEvent("focus_handoff_start", { trigger: "interactive" });
+        if (activeClassification === "outside-editable") {
+          emitTerminalEvent("focus_handoff_blocked", {
+            trigger: "interactive",
+            reason: "editable-target-outside-terminal",
+          });
+        } else if (focusTerminalIfInteractive(terminalRef.current, isInteractiveRef.current)) {
+          emitTerminalEvent("focus_handoff_success", { trigger: "interactive" });
+        } else {
+          emitTerminalEvent("focus_handoff_blocked", {
+            trigger: "interactive",
+            reason: "focus-call-failed",
+          });
+        }
         emitTerminalEvent("became_interactive");
         scheduleTerminalAutoFocusRetry("interactive");
       }
@@ -722,10 +888,19 @@ export function useEmbeddedTerminalController({
       }
 
       const target = event.target;
+      const targetClassification = classifyEditableTargetOutsideContainer(target, container);
+      const activeClassification = classifyEditableTargetOutsideContainer(
+        document.activeElement,
+        container
+      );
       if (
-        isEditableTargetOutsideContainer(target, container) ||
-        isEditableTargetOutsideContainer(document.activeElement, container)
+        targetClassification === "outside-editable" ||
+        activeClassification === "outside-editable"
       ) {
+        emitTerminalEvent("focus_handoff_blocked", {
+          trigger: "keyboard-fallback",
+          reason: "editable-target-outside-terminal",
+        });
         return;
       }
 
@@ -747,9 +922,11 @@ export function useEmbeddedTerminalController({
       emitTerminalEvent("focus_recovered", { source: "keyboard-fallback" });
       lastInputAttemptAtRef.current = Date.now();
       api.writeEmbeddedTerminalInput(id, input).catch((writeError) => {
+        const errorCode = classifyTerminalErrorCode(writeError, "ERR_WRITE_FAILED");
+        recordWriteFailureSignal(errorCode);
         emitTerminalEvent("write_input_failed", {
           source: "keyboard-fallback",
-          errorCode: classifyTerminalErrorCode(writeError, "ERR_WRITE_FAILED"),
+          errorCode,
         });
         if (isMissingEmbeddedTerminalError(writeError)) {
           scheduleSoftReattach("keyboard-fallback-write-miss");
@@ -761,7 +938,14 @@ export function useEmbeddedTerminalController({
     return () => {
       window.removeEventListener("keydown", handleWindowKeydown, true);
     };
-  }, [isInteractive, isRunning, terminalId, scheduleSoftReattach, emitTerminalEvent]);
+  }, [
+    isInteractive,
+    isRunning,
+    terminalId,
+    scheduleSoftReattach,
+    emitTerminalEvent,
+    recordWriteFailureSignal,
+  ]);
 
   useEffect(() => {
     if (runCommandRequestId === lastHandledRunRequestIdRef.current) {
@@ -788,9 +972,11 @@ export function useEmbeddedTerminalController({
         return;
       }
       api.writeEmbeddedTerminalInput(id, "").catch((writeError) => {
+        const errorCode = classifyTerminalErrorCode(writeError, "ERR_WRITE_FAILED");
+        recordWriteFailureSignal(errorCode);
         emitTerminalEvent("write_input_failed", {
           source: "healthcheck",
-          errorCode: classifyTerminalErrorCode(writeError, "ERR_WRITE_FAILED"),
+          errorCode,
         });
         if (isMissingEmbeddedTerminalError(writeError)) {
           scheduleSoftReattach("interactive-healthcheck-miss");
@@ -801,7 +987,14 @@ export function useEmbeddedTerminalController({
     return () => {
       window.clearTimeout(healthTimer);
     };
-  }, [isInteractive, isRunning, terminalId, scheduleSoftReattach, emitTerminalEvent]);
+  }, [
+    isInteractive,
+    isRunning,
+    terminalId,
+    scheduleSoftReattach,
+    emitTerminalEvent,
+    recordWriteFailureSignal,
+  ]);
 
   useEffect(() => {
     if (!isRunning || !isInteractive) {
@@ -828,8 +1021,10 @@ export function useEmbeddedTerminalController({
       staleRecoveryPendingRef.current = true;
       lastStaleRecoveryAtRef.current = now;
       const recoveryInputAt = lastInputAttemptAtRef.current;
+      setRecoveryNoticeWithTimeout("Input stalled, reattaching...");
 
       emitTerminalEvent("stale_recovery_start", {
+        stage: 1,
         terminalId: terminalIdRef.current,
         recoveryInputAt,
       });
@@ -850,40 +1045,157 @@ export function useEmbeddedTerminalController({
           .catch(() => undefined);
       }
 
-      window.setTimeout(() => {
+      const id = terminalIdRef.current;
+      if (!id) {
         staleRecoveryPendingRef.current = false;
-        if (!isInteractiveRef.current || !isRunningRef.current) {
-          return;
-        }
-        const inputStillStale = Boolean(
-          recoveryInputAt && recoveryInputAt > (lastOutputAtRef.current ?? 0)
-        );
-        if (!inputStillStale) {
-          emitTerminalEvent("stale_recovery_done", { strategy: "focus-only" });
-          return;
-        }
+        setRecoveryNoticeWithTimeout(null);
+        return;
+      }
 
-        emitTerminalEvent("stale_recovery_done", { strategy: "soft-reattach" });
-        void captureIncident(
-          "stale-input-soft-reattach",
-          "Auto capture after stale-input soft reattach"
-        );
-        setRestartToken((prev) => prev + 1);
-      }, STALE_RECOVERY_GRACE_MS);
+      api
+        .writeEmbeddedTerminalInput(id, "")
+        .then(() => {
+          clearWriteFailureSignals();
+          emitTerminalEvent("write_input_success", {
+            source: "stale-stage1-healthcheck",
+          });
+        })
+        .catch((writeError) => {
+          const errorCode = classifyTerminalErrorCode(writeError, "ERR_WRITE_FAILED");
+          recordWriteFailureSignal(errorCode);
+          emitTerminalEvent("write_input_failed", {
+            source: "stale-stage1-healthcheck",
+            errorCode,
+          });
+        })
+        .finally(() => {
+          if (!staleRecoveryPendingRef.current) {
+            return;
+          }
+
+          window.setTimeout(() => {
+            if (!staleRecoveryPendingRef.current) {
+              return;
+            }
+            if (!isInteractiveRef.current || !isRunningRef.current) {
+              staleRecoveryPendingRef.current = false;
+              setRecoveryNoticeWithTimeout(null);
+              return;
+            }
+            if (!isInputStillStale(recoveryInputAt, lastOutputAtRef.current)) {
+              staleRecoveryPendingRef.current = false;
+              clearWriteFailureSignals();
+              setRecoveryNoticeWithTimeout("Input recovered.", true);
+              emitTerminalEvent("stale_recovery_done", {
+                strategy: "stage1-focus-healthcheck",
+              });
+              return;
+            }
+
+            const hasAnyFailureSignal =
+              writeFailureSignalRef.current.total > 0 ||
+              writeFailureSignalRef.current.sessionNotFound > 0;
+            if (!hasAnyFailureSignal) {
+              staleRecoveryPendingRef.current = false;
+              // Disarm stale probing for this input attempt when healthchecks are healthy.
+              lastInputAttemptAtRef.current = null;
+              setRecoveryNoticeWithTimeout("Waiting for terminal output...", true);
+              emitTerminalEvent("stale_recovery_done", {
+                strategy: "no-failure-signal-stage1-stop",
+              });
+              return;
+            }
+
+            emitTerminalEvent("stale_recovery_stage2_start", {
+              stage: 2,
+              terminalId: terminalIdRef.current,
+            });
+
+            const stage2Terminal = terminalRef.current;
+            const stage2FitAddon = fitAddonRef.current;
+            if (stage2Terminal) {
+              focusTerminalIfInteractive(stage2Terminal, isInteractiveRef.current);
+              stage2FitAddon?.fit();
+            }
+
+            if (terminalIdRef.current && stage2Terminal) {
+              api
+                .resizeEmbeddedTerminal(terminalIdRef.current, stage2Terminal.cols, stage2Terminal.rows)
+                .catch((resizeError) => {
+                  emitTerminalEvent("resize_failed", {
+                    source: "stale-stage2",
+                    errorCode: classifyTerminalErrorCode(resizeError, "ERR_RESIZE_FAILED"),
+                  });
+                });
+            }
+            scheduleTerminalAutoFocusRetry("interactive");
+
+            window.setTimeout(() => {
+              staleRecoveryPendingRef.current = false;
+              if (!isInteractiveRef.current || !isRunningRef.current) {
+                setRecoveryNoticeWithTimeout(null);
+                return;
+              }
+              if (!isInputStillStale(recoveryInputAt, lastOutputAtRef.current)) {
+                clearWriteFailureSignals();
+                setRecoveryNoticeWithTimeout("Input recovered.", true);
+                emitTerminalEvent("stale_recovery_done", {
+                  strategy: "stage2-focus-resize",
+                });
+                return;
+              }
+
+              if (!shouldEscalateStaleRecovery(Date.now())) {
+                // Avoid repeated recovery loops on weak/non-escalating signals.
+                lastInputAttemptAtRef.current = null;
+                setRecoveryNoticeWithTimeout("Waiting for terminal output...", true);
+                emitTerminalEvent("stale_recovery_done", {
+                  strategy: "no-escalation-without-failure-signal",
+                });
+                return;
+              }
+
+              setRecoveryNoticeWithTimeout("Input stalled, reattaching...");
+              emitTerminalEvent("stale_recovery_escalated", {
+                stage: 3,
+                terminalId: terminalIdRef.current,
+                failureSignals: { ...writeFailureSignalRef.current },
+              });
+              void captureIncident(
+                "stale-input-stage3-soft-reattach",
+                "Auto capture after staged stale-input escalation"
+              );
+              scheduleSoftReattach("stale-stage3-soft-reattach");
+            }, STALE_RECOVERY_STAGE2_GRACE_MS);
+          }, STALE_RECOVERY_GRACE_MS);
+        });
     }, 1_000);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [isInteractive, isRunning, emitTerminalEvent, captureIncident]);
+  }, [
+    isInteractive,
+    isRunning,
+    emitTerminalEvent,
+    captureIncident,
+    clearWriteFailureSignals,
+    recordWriteFailureSignal,
+    scheduleSoftReattach,
+    scheduleTerminalAutoFocusRetry,
+    setRecoveryNoticeWithTimeout,
+    shouldEscalateStaleRecovery,
+  ]);
 
   useEffect(() => {
     return () => {
       staleRecoveryPendingRef.current = false;
       softReattachPendingRef.current = false;
       clearAutoFocusRetryTimers();
+      clearRecoveryNoticeTimer();
+      clearWriteFailureSignals();
     };
-  }, [clearAutoFocusRetryTimers]);
+  }, [clearAutoFocusRetryTimers, clearRecoveryNoticeTimer, clearWriteFailureSignals]);
 
   const statusText = useMemo(() => {
     if (isStarting) return "Starting terminal...";
@@ -895,6 +1207,7 @@ export function useEmbeddedTerminalController({
     containerRef,
     statusText,
     error,
+    recoveryNotice,
     ready,
     quickRunCommandRef,
     runInTerminal,

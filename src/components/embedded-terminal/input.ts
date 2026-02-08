@@ -12,6 +12,8 @@ import type {
   WheelScrollDeltaResult,
 } from "@/components/embedded-terminal/types";
 
+const XTERM_HELPER_TEXTAREA_CLASS = "xterm-helper-textarea";
+
 function scheduleFocusTask(focus: () => void): void {
   if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
     window.requestAnimationFrame(() => {
@@ -66,20 +68,43 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   return target.getAttribute("contenteditable") === "true";
 }
 
+export function isXtermHelperTextareaTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLTextAreaElement)) {
+    return false;
+  }
+  return target.classList.contains(XTERM_HELPER_TEXTAREA_CLASS);
+}
+
+export type EditableOutsideContainerClassification =
+  | "not-editable"
+  | "inside-container"
+  | "outside-editable"
+  | "outside-xterm-helper";
+
+export function classifyEditableTargetOutsideContainer(
+  target: EventTarget | null,
+  container: Element | null | undefined
+): EditableOutsideContainerClassification {
+  if (!isEditableTarget(target)) {
+    return "not-editable";
+  }
+  if (!(target instanceof Node)) {
+    return isXtermHelperTextareaTarget(target) ? "outside-xterm-helper" : "outside-editable";
+  }
+  if (!container) {
+    return isXtermHelperTextareaTarget(target) ? "outside-xterm-helper" : "outside-editable";
+  }
+  if (container.contains(target)) {
+    return "inside-container";
+  }
+  return isXtermHelperTextareaTarget(target) ? "outside-xterm-helper" : "outside-editable";
+}
+
 export function isEditableTargetOutsideContainer(
   target: EventTarget | null,
   container: Element | null | undefined
 ): boolean {
-  if (!isEditableTarget(target)) {
-    return false;
-  }
-  if (!(target instanceof Node)) {
-    return true;
-  }
-  if (!container) {
-    return true;
-  }
-  return !container.contains(target);
+  return classifyEditableTargetOutsideContainer(target, container) === "outside-editable";
 }
 
 export function getTerminalTextarea(terminal: unknown): HTMLTextAreaElement | null {
