@@ -79,6 +79,14 @@ remote-access-macos PORT='8090':
 remote-access-status PORT='8090':
     bash scripts/remote-access-status-macos.sh {{PORT}}
 
+# Run remote-access script contract tests
+test-remote-access-contracts:
+    npm run test:remote-access:contracts
+
+# Run real opcode-web smoke tests
+smoke-remote-web:
+    npm run smoke:remote-web
+
 # Get local IP for phone access
 ip:
     @echo "🌐 Your PC's IP addresses:"

@@ -19,6 +19,8 @@
     "check": "tsc --noEmit && cd src-tauri && cargo check",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
+    "test:remote-access:contracts": "vitest run -c vitest.remote.config.ts",
+    "smoke:remote-web": "playwright test -c playwright.remote.config.ts tests/smoke/remote-access-webmode.spec.ts",
     "debug:session-start": "node scripts/measure-session-startup.mjs",
     "debug:session-start:json": "node scripts/measure-session-startup.mjs --json",
     "debug:session-start:gate": "node scripts/measure-session-startup.mjs --runs 3 --fail-on-slow-ms 5000",

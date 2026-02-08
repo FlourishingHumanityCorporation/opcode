@@ -1,0 +1,64 @@
+name: Remote Access PR Smoke
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "scripts/setup-remote-access-macos.sh"
+      - "scripts/remote-access-status-macos.sh"
+      - "docs/remote-access-macos.md"
+      - "justfile"
+      - "package.json"
+      - "playwright.remote.config.ts"
+      - "vitest.remote.config.ts"
+      - "tests/remote-access/**"
+      - "tests/smoke/remote-access-webmode.spec.ts"
+      - ".github/workflows/remote-access-pr-smoke.yml"
+      - ".github/workflows/remote-access-nightly.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remote-access-pr-smoke-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Set up Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+
+      - name: Run remote-access contract tests
+        run: npm run test:remote-access:contracts
+
+      - name: Run remote web smoke
+        run: npm run smoke:remote-web
+
+      - name: Upload playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote-access-pr-smoke-artifacts
+          path: |
+            test-results/**
+            playwright-report/**
+          retention-days: 7

@@ -39,6 +39,15 @@ tailscale --socket="$HOME/Library/Caches/Tailscale/tailscaled.sock" up --accept-
 
 That command prints an auth URL. Open it in your browser, then rerun `just remote-access-status`.
 
+## Automated tests
+
+```bash
+npm run test:remote-access:contracts
+npm run smoke:remote-web
+```
+
+The contract suite uses simulated system binaries and does not touch real launchd/tailnet state.
+
 ## Launch agent files created
 
 1. `~/Library/LaunchAgents/com.opcode.web.plist`

@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$(uname -s)" != "Darwin" ]]; then
+UNAME_BIN="${UNAME_BIN:-uname}"
+NPM_BIN="${NPM_BIN:-npm}"
+CARGO_BIN="${CARGO_BIN:-cargo}"
+LAUNCHCTL_BIN="${LAUNCHCTL_BIN:-launchctl}"
+BREW_BIN="${BREW_BIN:-brew}"
+IPCONFIG_BIN="${IPCONFIG_BIN:-ipconfig}"
+TAILSCALE_BIN="${TAILSCALE_BIN:-}"
+TAILSCALED_BIN="${TAILSCALED_BIN:-}"
+
+if [[ "$("${UNAME_BIN}" -s)" != "Darwin" ]]; then
   echo "This setup script is macOS-only."
   exit 1
 fi
@@ -30,17 +39,17 @@ GUI_DOMAIN="gui/$(id -u)"
 load_agent() {
   local label="$1"
   local plist="$2"
-  launchctl bootout "${GUI_DOMAIN}" "${plist}" >/dev/null 2>&1 || true
-  launchctl bootstrap "${GUI_DOMAIN}" "${plist}"
-  launchctl enable "${GUI_DOMAIN}/${label}" || true
-  launchctl kickstart -k "${GUI_DOMAIN}/${label}"
+  "${LAUNCHCTL_BIN}" bootout "${GUI_DOMAIN}" "${plist}" >/dev/null 2>&1 || true
+  "${LAUNCHCTL_BIN}" bootstrap "${GUI_DOMAIN}" "${plist}"
+  "${LAUNCHCTL_BIN}" enable "${GUI_DOMAIN}/${label}" || true
+  "${LAUNCHCTL_BIN}" kickstart -k "${GUI_DOMAIN}/${label}"
 }
 
 echo "Building frontend assets..."
-(cd "${REPO_ROOT}" && npm run build)
+(cd "${REPO_ROOT}" && "${NPM_BIN}" run build)
 
 echo "Building opcode-web binary..."
-(cd "${SRC_TAURI_DIR}" && cargo build --bin opcode-web)
+(cd "${SRC_TAURI_DIR}" && "${CARGO_BIN}" build --bin opcode-web)
 
 mkdir -p "${HOME}/Library/LaunchAgents" "${OPCODE_LOG_DIR}"
 
@@ -74,19 +83,21 @@ PLIST
 echo "Loading launch agent: ${OPCODE_LABEL}"
 load_agent "${OPCODE_LABEL}" "${OPCODE_PLIST}"
 
-if ! command -v brew >/dev/null 2>&1; then
+if ! command -v "${BREW_BIN}" >/dev/null 2>&1; then
   echo "Homebrew is required to install Tailscale. Install Homebrew and rerun."
   exit 1
 fi
 
-if ! brew list tailscale >/dev/null 2>&1; then
+if ! "${BREW_BIN}" list tailscale >/dev/null 2>&1; then
   echo "Installing tailscale formula..."
-  brew install tailscale
+  "${BREW_BIN}" install tailscale
 fi
 
-TAILSCALE_PREFIX="$(brew --prefix tailscale)"
-TAILSCALE_BIN="${TAILSCALE_PREFIX}/bin/tailscale"
-TAILSCALED_BIN="${TAILSCALE_PREFIX}/bin/tailscaled"
+if [[ -z "${TAILSCALE_BIN}" || -z "${TAILSCALED_BIN}" ]]; then
+  TAILSCALE_PREFIX="$("${BREW_BIN}" --prefix tailscale)"
+fi
+TAILSCALE_BIN="${TAILSCALE_BIN:-${TAILSCALE_PREFIX}/bin/tailscale}"
+TAILSCALED_BIN="${TAILSCALED_BIN:-${TAILSCALE_PREFIX}/bin/tailscaled}"
 
 mkdir -p "${TAILSCALE_STATE_DIR}" "${TAILSCALE_CACHE_DIR}" "${TAILSCALE_LOG_DIR}"
 
@@ -120,7 +131,7 @@ echo "Loading launch agent: ${TAILSCALE_LABEL}"
 load_agent "${TAILSCALE_LABEL}" "${TAILSCALE_PLIST}"
 
 sleep 1
-LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
+LAN_IP="$("${IPCONFIG_BIN}" getifaddr en0 2>/dev/null || "${IPCONFIG_BIN}" getifaddr en1 2>/dev/null || true)"
 
 echo
 echo "Setup complete."
