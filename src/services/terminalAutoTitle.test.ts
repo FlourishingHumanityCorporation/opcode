@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildSessionTranscript,
   extractUserPromptTexts,
+  getAutoTitleTranscriptCursor,
   getNextAutoTitleCheckpointAtMs,
   listAutoTitleCheckpointMinutes,
   sanitizeTerminalTitleCandidate,
+  shouldGenerateAutoTitleForTranscript,
   shouldApplyAutoRenameTitle,
 } from "@/services/terminalAutoTitle";
 
@@ -76,5 +78,38 @@ describe("terminalAutoTitle extraction and sanitization", () => {
     );
     expect(shouldApplyAutoRenameTitle("Terminal 1", "New Name", true)).toBe(false);
     expect(shouldApplyAutoRenameTitle("Terminal 1", "New Name", false)).toBe(true);
+  });
+
+  it("only generates new title when transcript has progressed", () => {
+    expect(shouldGenerateAutoTitleForTranscript("", undefined)).toBe(false);
+    expect(shouldGenerateAutoTitleForTranscript("User asked to fix parser", undefined)).toBe(true);
+    expect(
+      shouldGenerateAutoTitleForTranscript(
+        "User asked to fix parser",
+        "User asked to fix parser"
+      )
+    ).toBe(false);
+    expect(
+      shouldGenerateAutoTitleForTranscript(
+        "User asked to fix parser",
+        "  User asked   to   fix parser  "
+      )
+    ).toBe(false);
+    expect(
+      shouldGenerateAutoTitleForTranscript(
+        "User asked to fix parser and add tests",
+        "User asked to fix parser"
+      )
+    ).toBe(true);
+  });
+
+  it("keeps transcript cursor stable for no-op updates", () => {
+    expect(getAutoTitleTranscriptCursor("", "USER: prompt")).toBe("USER: prompt");
+    expect(
+      getAutoTitleTranscriptCursor("  USER: prompt  ", "USER: prompt")
+    ).toBe("USER: prompt");
+    expect(
+      getAutoTitleTranscriptCursor("USER: prompt\nASSISTANT: reply", "USER: prompt")
+    ).toBe("USER: prompt ASSISTANT: reply");
   });
 });

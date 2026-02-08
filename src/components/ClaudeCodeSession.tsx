@@ -123,9 +123,11 @@ import {
   sanitizeClaudeSessionId,
 } from "@/services/nativeTerminalRestore";
 import {
+  getAutoTitleTranscriptCursor,
   getNextAutoTitleCheckpointAtMs,
   resolveLatestSessionSnapshot,
   sanitizeTerminalTitleCandidate,
+  shouldGenerateAutoTitleForTranscript,
   shouldApplyAutoRenameTitle,
 } from "@/services/terminalAutoTitle";
 
@@ -434,6 +436,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const titleLockedRef = useRef<boolean>(Boolean(isTerminalTitleLocked));
   const autoTitleSessionStartedAtRef = useRef<number | null>(null);
   const didApplyEarlyAutoTitleRef = useRef(false);
+  const lastAutoTitleTranscriptRef = useRef<string>("");
 
   const AUTO_TITLE_MODEL = "glm-4.7-flash";
   const AUTO_TITLE_EARLY_PROMPT_THRESHOLD = 2;
@@ -528,6 +531,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   useEffect(() => {
     didApplyEarlyAutoTitleRef.current = false;
     autoTitleSessionStartedAtRef.current = null;
+    lastAutoTitleTranscriptRef.current = "";
   }, [workspaceId, terminalTabId, paneId, projectPath]);
 
   useEffect(() => {
@@ -766,6 +770,22 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       if (reason === "early" && snapshot.userPrompts.length < AUTO_TITLE_EARLY_PROMPT_THRESHOLD) {
         return;
       }
+
+      if (
+        !shouldGenerateAutoTitleForTranscript(
+          snapshot.transcript,
+          lastAutoTitleTranscriptRef.current
+        )
+      ) {
+        return;
+      }
+
+      // Record transcript cursor before generation so unchanged history does
+      // not re-trigger model calls after transient failures.
+      lastAutoTitleTranscriptRef.current = getAutoTitleTranscriptCursor(
+        snapshot.transcript,
+        lastAutoTitleTranscriptRef.current
+      );
 
       try {
         const generatedTitle = await api.generateLocalTerminalTitle({

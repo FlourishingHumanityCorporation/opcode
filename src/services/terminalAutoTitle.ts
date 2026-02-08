@@ -215,6 +215,30 @@ export function sanitizeTerminalTitleCandidate(
   return normalized.slice(0, maxChars).trimEnd();
 }
 
+export function shouldGenerateAutoTitleForTranscript(
+  transcript: string,
+  previousTranscript?: string | null
+): boolean {
+  const next = normalizeInlineWhitespace(transcript || "");
+  if (!next) {
+    return false;
+  }
+
+  const previous = normalizeInlineWhitespace(previousTranscript || "");
+  return next !== previous;
+}
+
+export function getAutoTitleTranscriptCursor(
+  transcript: string,
+  previousTranscript?: string | null
+): string {
+  const next = normalizeInlineWhitespace(transcript || "");
+  if (!next) {
+    return normalizeInlineWhitespace(previousTranscript || "");
+  }
+  return next;
+}
+
 export function shouldApplyAutoRenameTitle(
   currentTitle: string | undefined,
   candidateTitle: string,
