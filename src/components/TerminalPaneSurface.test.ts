@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Tab, TerminalTab } from "@/contexts/TabContext";
 import { TerminalPaneSurface } from "@/components/TerminalPaneSurface";
 
-const capturedClaudeProps = vi.hoisted(() => ({
+const capturedProviderSessionProps = vi.hoisted(() => ({
   value: null as any,
 }));
 
@@ -14,10 +14,10 @@ vi.mock("@/hooks/useTabState", () => ({
   useTabState: () => useTabStateMock(),
 }));
 
-vi.mock("@/components/ClaudeCodeSession", () => ({
-  ClaudeCodeSession: (props: any) => {
-    capturedClaudeProps.value = props;
-    return React.createElement("div", { "data-testid": "mock-claude-session" });
+vi.mock("@/components/ProviderSessionPane", () => ({
+  ProviderSessionPane: (props: any) => {
+    capturedProviderSessionProps.value = props;
+    return React.createElement("div", { "data-testid": "mock-provider-session-pane" });
   },
 }));
 
@@ -76,7 +76,7 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
   let updatePaneStateSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    capturedClaudeProps.value = null;
+    capturedProviderSessionProps.value = null;
     splitPaneSpy = vi.fn();
     closePaneSpy = vi.fn();
     activatePaneSpy = vi.fn();
@@ -91,7 +91,7 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
     });
   });
 
-  it("passes active pane state to ClaudeCodeSession", () => {
+  it("passes active pane state to ProviderSessionPane", () => {
     const { workspace, terminal } = makeWorkspaceAndTerminal();
 
     renderToStaticMarkup(
@@ -104,15 +104,15 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
       })
     );
 
-    expect(capturedClaudeProps.value).toBeTruthy();
-    expect(capturedClaudeProps.value.isPaneActive).toBe(true);
-    expect(capturedClaudeProps.value.isPaneVisible).toBe(true);
-    expect(capturedClaudeProps.value.workspaceId).toBe("workspace-1");
-    expect(capturedClaudeProps.value.terminalTabId).toBe("terminal-1");
-    expect(capturedClaudeProps.value.currentTerminalTitle).toBe("Terminal 1");
-    expect(capturedClaudeProps.value.isTerminalTitleLocked).toBe(false);
+    expect(capturedProviderSessionProps.value).toBeTruthy();
+    expect(capturedProviderSessionProps.value.isPaneActive).toBe(true);
+    expect(capturedProviderSessionProps.value.isPaneVisible).toBe(true);
+    expect(capturedProviderSessionProps.value.workspaceId).toBe("workspace-1");
+    expect(capturedProviderSessionProps.value.terminalTabId).toBe("terminal-1");
+    expect(capturedProviderSessionProps.value.currentTerminalTitle).toBe("Terminal 1");
+    expect(capturedProviderSessionProps.value.isTerminalTitleLocked).toBe(false);
 
-    capturedClaudeProps.value.onAutoRenameTerminalTitle("Renamed from test");
+    capturedProviderSessionProps.value.onAutoRenameTerminalTitle("Renamed from test");
     expect(updateTabSpy).toHaveBeenCalledWith("terminal-1", { title: "Renamed from test" });
   });
 
@@ -129,12 +129,12 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
       })
     );
 
-    expect(capturedClaudeProps.value).toBeTruthy();
-    expect(capturedClaudeProps.value.isPaneActive).toBe(false);
-    expect(capturedClaudeProps.value.isPaneVisible).toBe(true);
+    expect(capturedProviderSessionProps.value).toBeTruthy();
+    expect(capturedProviderSessionProps.value.isPaneActive).toBe(false);
+    expect(capturedProviderSessionProps.value.isPaneVisible).toBe(true);
   });
 
-  it("passes title lock state to ClaudeCodeSession", () => {
+  it("passes title lock state to ProviderSessionPane", () => {
     const { workspace, terminal } = makeWorkspaceAndTerminal();
     const lockedTerminal: TerminalTab = {
       ...terminal,
@@ -151,8 +151,8 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
       })
     );
 
-    expect(capturedClaudeProps.value).toBeTruthy();
-    expect(capturedClaudeProps.value.isTerminalTitleLocked).toBe(true);
+    expect(capturedProviderSessionProps.value).toBeTruthy();
+    expect(capturedProviderSessionProps.value.isTerminalTitleLocked).toBe(true);
   });
 
   it("auto-renames default workspace title on first project path registration", () => {
@@ -186,7 +186,7 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
       })
     );
 
-    capturedClaudeProps.value.onProjectPathChange("/Users/paulrohde/CodeProjects/apps/VideoProcessor");
+    capturedProviderSessionProps.value.onProjectPathChange("/Users/paulrohde/CodeProjects/apps/VideoProcessor");
 
     expect(updateTabSpy).toHaveBeenCalledWith("workspace-1", {
       projectPath: "/Users/paulrohde/CodeProjects/apps/VideoProcessor",

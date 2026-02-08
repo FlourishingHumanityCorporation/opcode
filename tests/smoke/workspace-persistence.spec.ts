@@ -67,7 +67,7 @@ async function setupWorkspaceApiMock(
       return;
     }
 
-    if (path === '/api/sessions/execute') {
+    if (path === '/api/provider-sessions/execute') {
       if (options?.counters) {
         options.counters.executeCalls += 1;
       }
@@ -75,7 +75,7 @@ async function setupWorkspaceApiMock(
       return;
     }
 
-    if (path === '/api/sessions/resume') {
+    if (path === '/api/provider-sessions/resume') {
       if (options?.counters) {
         options.counters.resumeCalls += 1;
       }

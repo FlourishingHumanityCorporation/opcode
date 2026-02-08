@@ -13,13 +13,13 @@ interface QueuedPrompt {
   providerId?: string;
 }
 
-interface PromptQueueProps {
+interface ProviderPromptQueueProps {
   queuedPrompts: QueuedPrompt[];
   onRemove: (id: string) => void;
   className?: string;
 }
 
-export const PromptQueue: React.FC<PromptQueueProps> = React.memo(({
+export const ProviderPromptQueue: React.FC<ProviderPromptQueueProps> = React.memo(({
   queuedPrompts,
   onRemove,
   className

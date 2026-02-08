@@ -3,6 +3,7 @@ import type { Tab, TerminalTab } from "@/contexts/TabContext";
 import {
   applyAgentAttentionStatusUpdate,
   mapAgentAttentionKindToStatus,
+  normalizeAgentAttentionSource,
 } from "@/components/TabContent";
 import type { AgentAttentionEventDetail } from "@/services/agentAttention";
 
@@ -65,7 +66,8 @@ describe("TabContent agent attention event handling", () => {
       terminalTabId: "terminal-1",
       title: "Agent done",
       body: "Finished.",
-      source: "claude_session",
+      source: "provider_session",
+      sourceV2: "provider_session",
       timestamp: Date.now(),
     };
 
@@ -88,6 +90,7 @@ describe("TabContent agent attention event handling", () => {
       title: "Agent needs input",
       body: "Please approve.",
       source: "agent_execution",
+      sourceV2: "agent_execution",
       timestamp: Date.now(),
     };
 
@@ -109,6 +112,7 @@ describe("TabContent agent attention event handling", () => {
       title: "Agent done",
       body: "Finished.",
       source: "agent_execution",
+      sourceV2: "agent_execution",
       timestamp: Date.now(),
     };
 
@@ -121,5 +125,19 @@ describe("TabContent agent attention event handling", () => {
     expect(applied).toBe(false);
     expect(updateTab).not.toHaveBeenCalled();
   });
-});
 
+  it("normalizes legacy claude_session source to provider_session", () => {
+    const detail: AgentAttentionEventDetail = {
+      kind: "done",
+      workspaceId: "workspace-1",
+      terminalTabId: "terminal-1",
+      title: "Agent done",
+      body: "Finished.",
+      source: "claude_session",
+      sourceV2: "provider_session",
+      timestamp: Date.now(),
+    };
+
+    expect(normalizeAgentAttentionSource(detail)).toBe("provider_session");
+  });
+});

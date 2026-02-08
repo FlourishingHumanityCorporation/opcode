@@ -8,6 +8,7 @@ import { UtilityOverlayHost } from '@/components/UtilityOverlayHost';
 import { logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 import {
   OPCODE_AGENT_ATTENTION_EVENT,
+  canonicalizeAgentAttentionSource,
   type AgentAttentionEventDetail,
 } from '@/services/agentAttention';
 import type { Tab, TerminalTab } from '@/contexts/TabContext';
@@ -16,6 +17,12 @@ export function mapAgentAttentionKindToStatus(
   kind: AgentAttentionEventDetail["kind"]
 ): TerminalTab["status"] {
   return kind === "needs_input" ? "attention" : "complete";
+}
+
+export function normalizeAgentAttentionSource(
+  detail: AgentAttentionEventDetail
+): AgentAttentionEventDetail["sourceV2"] {
+  return detail.sourceV2 || canonicalizeAgentAttentionSource(detail.source);
 }
 
 export function applyAgentAttentionStatusUpdate(
@@ -122,7 +129,7 @@ export const TabContent: React.FC = () => {
       closeTab(detail.tabId);
     };
 
-    const handleClaudeSessionSelected = (event: Event) => {
+    const handleProviderSessionSelected = (event: Event) => {
       const detail = (event as CustomEvent<{ session: any }>).detail;
       if (!detail?.session) return;
       window.dispatchEvent(new CustomEvent('open-session-in-tab', { detail }));
@@ -146,7 +153,11 @@ export const TabContent: React.FC = () => {
     const handleAgentAttention = (event: Event) => {
       const detail = (event as CustomEvent<AgentAttentionEventDetail>).detail;
       if (!detail) return;
-      applyAgentAttentionStatusUpdate(tabs, updateTab, detail);
+      const normalizedDetail: AgentAttentionEventDetail = {
+        ...detail,
+        sourceV2: normalizeAgentAttentionSource(detail),
+      };
+      applyAgentAttentionStatusUpdate(tabs, updateTab, normalizedDetail);
     };
 
     window.addEventListener('open-session-in-tab', handleOpenSessionInTab as EventListener);
@@ -155,7 +166,7 @@ export const TabContent: React.FC = () => {
     window.addEventListener('open-create-agent-tab', handleOpenCreateAgent);
     window.addEventListener('open-import-agent-tab', handleOpenImportAgent);
     window.addEventListener('close-tab', handleCloseTab as EventListener);
-    window.addEventListener('claude-session-selected', handleClaudeSessionSelected as EventListener);
+    window.addEventListener('provider-session-selected', handleProviderSessionSelected as EventListener);
     window.addEventListener('open-utility-overlay', handleOpenUtilityOverlay as EventListener);
     window.addEventListener('close-utility-overlay', handleCloseUtilityOverlay);
     window.addEventListener(OPCODE_AGENT_ATTENTION_EVENT, handleAgentAttention as EventListener);
@@ -167,7 +178,7 @@ export const TabContent: React.FC = () => {
       window.removeEventListener('open-create-agent-tab', handleOpenCreateAgent);
       window.removeEventListener('open-import-agent-tab', handleOpenImportAgent);
       window.removeEventListener('close-tab', handleCloseTab as EventListener);
-      window.removeEventListener('claude-session-selected', handleClaudeSessionSelected as EventListener);
+      window.removeEventListener('provider-session-selected', handleProviderSessionSelected as EventListener);
       window.removeEventListener('open-utility-overlay', handleOpenUtilityOverlay as EventListener);
       window.removeEventListener('close-utility-overlay', handleCloseUtilityOverlay);
       window.removeEventListener(OPCODE_AGENT_ATTENTION_EVENT, handleAgentAttention as EventListener);

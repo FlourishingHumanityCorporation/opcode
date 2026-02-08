@@ -106,8 +106,8 @@ export const SessionList: React.FC<SessionListProps> = ({
                   session.todo_data && "bg-primary/5"
                 )}
                 onClick={() => {
-                  // Emit a special event for Claude Code session navigation
-                  const event = new CustomEvent('claude-session-selected', { 
+                  // Emit a special event for provider session navigation
+                  const event = new CustomEvent('provider-session-selected', { 
                     detail: { session, projectPath } 
                   });
                   window.dispatchEvent(event);

@@ -11,7 +11,7 @@ type CacheEntry = {
 
 const latestSessionCache = new Map<string, CacheEntry>();
 
-export function sanitizeClaudeSessionId(sessionId?: string | null): string | undefined {
+export function sanitizeProviderSessionId(sessionId?: string | null): string | undefined {
   if (!sessionId) {
     return undefined;
   }
@@ -56,7 +56,7 @@ export async function resolveLatestSessionIdForProject(
   }
 
   const sessions = await api.getProjectSessions(matchingProject.id);
-  const sessionId = sanitizeClaudeSessionId(sessions[0]?.id);
+  const sessionId = sanitizeProviderSessionId(sessions[0]?.id);
 
   latestSessionCache.set(canonicalPath, {
     expiresAt: now + CACHE_TTL_MS,

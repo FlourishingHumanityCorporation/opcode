@@ -3,7 +3,7 @@ import { api, type Project, type Session } from '@/lib/api';
 import {
   clearNativeTerminalRestoreCache,
   resolveLatestSessionIdForProject,
-  sanitizeClaudeSessionId,
+  sanitizeProviderSessionId,
 } from '@/services/nativeTerminalRestore';
 
 function makeProject(id: string, path: string): Project {
@@ -83,11 +83,11 @@ describe('nativeTerminalRestore', () => {
   });
 
   it('sanitizes session ids before use', () => {
-    expect(sanitizeClaudeSessionId('abc-123')).toBe('abc-123');
-    expect(sanitizeClaudeSessionId(' abc-123 ')).toBe('abc-123');
-    expect(sanitizeClaudeSessionId('bad value')).toBeUndefined();
-    expect(sanitizeClaudeSessionId('../../etc/passwd')).toBeUndefined();
-    expect(sanitizeClaudeSessionId('')).toBeUndefined();
+    expect(sanitizeProviderSessionId('abc-123')).toBe('abc-123');
+    expect(sanitizeProviderSessionId(' abc-123 ')).toBe('abc-123');
+    expect(sanitizeProviderSessionId('bad value')).toBeUndefined();
+    expect(sanitizeProviderSessionId('../../etc/passwd')).toBeUndefined();
+    expect(sanitizeProviderSessionId('')).toBeUndefined();
   });
 });
 

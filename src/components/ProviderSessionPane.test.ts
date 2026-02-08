@@ -6,9 +6,9 @@ vi.mock("@/components/EmbeddedTerminal", () => ({
 import {
   shouldShowProjectPathHeader,
   shouldShowProviderSelectorInHeader,
-} from "@/components/ClaudeCodeSession";
+} from "@/components/ProviderSessionPane";
 
-describe("ClaudeCodeSession header behavior", () => {
+describe("ProviderSessionPane header behavior", () => {
   it("shows header in native mode even without detected providers", () => {
     expect(shouldShowProjectPathHeader(false, true, 0, "")).toBe(true);
   });

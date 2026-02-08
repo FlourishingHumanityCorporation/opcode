@@ -34,7 +34,7 @@ The web server provides a REST API and WebSocket interface that mirrors the Taur
 - **Process Spawning**: Launches Claude subprocesses with proper arguments
 - **Comprehensive Logging**: Detailed trace output for debugging
 
-### 2. Frontend Event Handling (`src/components/ClaudeCodeSession.tsx`)
+### 2. Frontend Event Handling (`src/components/ProviderSessionPane.tsx`)
 
 **Dual Mode Support:**
 ```typescript
@@ -90,10 +90,10 @@ Claude Process → Rust Backend → WebSocket → Browser DOM Events → UI Upda
 
 ### 3. Event Chain
 1. **User Input**: Prompt submitted via FloatingPromptInput
-2. **WebSocket Send**: JSON request sent to `/ws/claude`
+2. **WebSocket Send**: JSON request sent to `/ws/provider-session`
 3. **Process Spawn**: Rust spawns `claude` subprocess
 4. **Stream Parse**: Stdout lines parsed and wrapped in JSON
-5. **Event Dispatch**: DOM events fired for `claude-output`
+5. **Event Dispatch**: DOM events fired for `provider-session-output`
 6. **UI Update**: React components receive and display messages
 
 ## File Structure
@@ -106,8 +106,8 @@ opcode/
 │   ├── lib/
 │   │   └── apiAdapter.ts       # WebSocket client & environment detection
 │   └── components/
-│       ├── ClaudeCodeSession.tsx           # Main session component
-│       └── claude-code-session/
+│       ├── ProviderSessionPane.tsx           # Main session component
+│       └── provider-session-pane/
 │           └── useClaudeMessages.ts        # Alternative hook implementation
 └── justfile                    # Build configuration (just web)
 ```
@@ -139,7 +139,7 @@ nix-shell --run 'just web'
 [TRACE] Successfully parsed request: {...}
 [TRACE] Claude process spawned successfully
 [TRACE] Forwarding message to WebSocket: {...}
-[TRACE] DOM event received: claude-output {...}
+[TRACE] DOM event received: provider-session-output {...}
 [TRACE] handleStreamMessage - message type: assistant
 ```
 
@@ -163,41 +163,20 @@ nix-shell --run 'just web'
 
 ### 5. Missing REST Endpoints
 **Problem**: Frontend expected cancel and output endpoints that didn't exist
-**Solution**: Added `/api/sessions/{sessionId}/cancel` and `/api/sessions/{sessionId}/output` endpoints
+**Solution**: Added `/api/provider-sessions/{sessionId}/cancel` and `/api/provider-sessions/{sessionId}/output` endpoints
 
 ### 6. Error Event Handling
 **Problem**: WebSocket errors and unexpected closures didn't dispatch UI events
-**Solution**: Added `claude-error` and `claude-complete` event dispatching for all error scenarios
+**Solution**: Added `provider-session-error` and `provider-session-complete` event dispatching for all error scenarios
 
-## Critical Issues Still Remaining
+## Remaining Gaps
 
-### 1. Session-Scoped Event Dispatching (CRITICAL)
-**Problem**: The UI expects session-specific events like `claude-output:${sessionId}` but the backend only dispatches generic events like `claude-output`.
-
-**Current Backend Behavior**:
-```typescript
-// Only dispatches generic events
-window.dispatchEvent(new CustomEvent('claude-output', { detail: claudeMessage }));
-window.dispatchEvent(new CustomEvent('claude-complete', { detail: success }));
-window.dispatchEvent(new CustomEvent('claude-error', { detail: error }));
-```
-
-**Frontend Expectations**:
-```typescript
-// Expects session-scoped events
-await listen(`claude-output:${sessionId}`, handleOutput);
-await listen(`claude-error:${sessionId}`, handleError);
-await listen(`claude-complete:${sessionId}`, handleComplete);
-```
-
-**Impact**: Session isolation doesn't work - all sessions receive all events.
-
-### 2. Process Management and Cancellation (CRITICAL)
+### 1. Process Management and Cancellation (CRITICAL)
 **Problem**: The cancel endpoint is just a stub that doesn't actually terminate running Claude processes.
 
 **Current Implementation**:
 ```rust
-async fn cancel_claude_execution(Path(sessionId): Path<String>) -> Json<ApiResponse<()>> {
+async fn cancel_provider_session(Path(sessionId): Path<String>) -> Json<ApiResponse<()>> {
     // Just logs - doesn't actually cancel anything
     println!("[TRACE] Cancel request for session: {}", sessionId);
     Json(ApiResponse::success(()))
@@ -210,24 +189,7 @@ async fn cancel_claude_execution(Path(sessionId): Path<String>) -> Json<ApiRespo
 - Proper cleanup of WebSocket sessions on cancellation
 - Session-specific process management
 
-### 3. Missing stderr Handling (MEDIUM)
-**Problem**: Claude processes can write errors to stderr, but the web server only captures stdout.
-
-**Current**: Only `child.stdout` is captured and streamed
-**Missing**: `child.stderr` capture and `claude-error` event emission
-
-### 4. Missing claude-cancelled Events (MEDIUM)
-**Problem**: The Tauri implementation emits `claude-cancelled` events but the web server doesn't.
-
-**Tauri Implementation**:
-```rust
-let _ = app.emit(&format!("claude-cancelled:{}", sid), true);
-let _ = app.emit("claude-cancelled", true);
-```
-
-**Web Server**: No `claude-cancelled` events are dispatched.
-
-### 5. WebSocket Session ID Mapping (MEDIUM)
+### 2. WebSocket Session ID Mapping (MEDIUM)
 **Problem**: The web server generates its own session IDs but doesn't map them to the frontend's session IDs.
 
 **Current**: WebSocket handler creates `uuid::Uuid::new_v4().to_string()` but frontend passes `sessionId` in request.
@@ -237,43 +199,22 @@ let _ = app.emit("claude-cancelled", true);
 
 ### Priority 1 (Critical - Breaks Core Functionality)
 
-1. **Session-Scoped Event Dispatching**
-   - Modify `apiAdapter.ts` to dispatch both generic and session-specific events
-   - Update WebSocket handler to use the frontend's sessionId instead of generating new ones
-   - Ensure events like `claude-output:${sessionId}` are dispatched correctly
-
-2. **Process Management and Cancellation**
+1. **Process Management and Cancellation**
    - Add process handle storage to AppState
-   - Implement actual process termination in `cancel_claude_execution`
+   - Implement actual process termination in `cancel_provider_session`
    - Add proper cleanup on WebSocket disconnection
 
 ### Priority 2 (High - Improves Reliability)
 
-3. **stderr Handling**
-   - Capture both stdout and stderr in Claude process execution
-   - Emit `claude-error` events for stderr content
-   - Properly handle process error states
-
-4. **claude-cancelled Events**
-   - Add `claude-cancelled` event dispatching for consistency with Tauri
-   - Implement proper cancellation flow matching desktop behavior
-
-### Priority 3 (Medium - Nice to Have)
-
-5. **Session ID Mapping**
+2. **Session ID Mapping**
    - Use frontend-provided sessionId consistently
    - Remove UUID generation in WebSocket handler
    - Ensure session tracking works correctly
 
 ## Implementation Notes
 
-### Session-Scoped Events Fix
-The web server should dispatch both generic and session-specific events to match Tauri:
-```typescript
-// Both events should be dispatched
-window.dispatchEvent(new CustomEvent('claude-output', { detail: claudeMessage }));
-window.dispatchEvent(new CustomEvent(`claude-output:${sessionId}`, { detail: claudeMessage }));
-```
+### Session-Scoped Events
+`apiAdapter.ts` now dispatches both generic and session-scoped `provider-session-*` events once `session_id` is known.
 
 ### Process Management Fix
 The AppState should track process handles:
@@ -345,7 +286,7 @@ which claude
 # Test WebSocket endpoint
 curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" \
   -H "Sec-WebSocket-Key: test" -H "Sec-WebSocket-Version: 13" \
-  http://localhost:8080/ws/claude
+  http://localhost:8080/ws/provider-session
 
 # Monitor server logs
 tail -f server.log  # if logging to file
@@ -367,7 +308,7 @@ The web server implementation provides **basic functionality** but has **critica
 - **Session-scoped event dispatching**: Sessions interfere with each other
 - **Process cancellation**: Cancel button doesn't actually terminate processes
 - **stderr handling**: Error messages from Claude not displayed
-- **claude-cancelled events**: Missing cancellation event support
+- **provider-session-cancelled events**: Missing cancellation event support
 
 ### ⚠️ Current State
 The web server is **functional for single-session use** but **not suitable for production** due to the session isolation issues. Multiple concurrent sessions will interfere with each other, and users cannot cancel running processes.

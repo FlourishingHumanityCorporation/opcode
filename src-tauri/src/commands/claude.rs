@@ -604,7 +604,7 @@ pub async fn open_new_session(app: AppHandle, path: Option<String>) -> Result<St
     let claude_path = find_claude_binary(&app)?;
 
     // In production, we can't use std::process::Command directly
-    // The user should launch Claude Code through other means or use the execute_claude_code command
+    // The user should launch Claude Code through other means or use the execute_provider_session command
     #[cfg(not(debug_assertions))]
     {
         log::error!("Cannot spawn processes directly in production builds");
@@ -1012,7 +1012,7 @@ pub async fn load_session_history(
 
 /// Execute a new interactive Claude Code session with streaming output
 #[tauri::command]
-pub async fn execute_claude_code(
+pub async fn execute_provider_session(
     app: AppHandle,
     project_path: String,
     prompt: String,
@@ -1044,7 +1044,7 @@ pub async fn execute_claude_code(
 
 /// Continue an existing Claude Code conversation with streaming output
 #[tauri::command]
-pub async fn continue_claude_code(
+pub async fn continue_provider_session(
     app: AppHandle,
     project_path: String,
     prompt: String,
@@ -1077,7 +1077,7 @@ pub async fn continue_claude_code(
 
 /// Resume an existing Claude Code session by ID with streaming output
 #[tauri::command]
-pub async fn resume_claude_code(
+pub async fn resume_provider_session(
     app: AppHandle,
     project_path: String,
     session_id: String,
@@ -1113,7 +1113,7 @@ pub async fn resume_claude_code(
 
 /// Cancel the currently running Claude Code execution
 #[tauri::command]
-pub async fn cancel_claude_execution(
+pub async fn cancel_provider_session(
     app: AppHandle,
     session_id: Option<String>,
 ) -> Result<(), String> {
@@ -1128,7 +1128,7 @@ pub async fn cancel_claude_execution(
     // Method 1: Try to find and kill via ProcessRegistry using session ID
     if let Some(sid) = &session_id {
         let registry = app.state::<crate::process::ProcessRegistryState>();
-        match registry.0.get_claude_session_by_id(sid) {
+        match registry.0.get_provider_session_by_id(sid) {
             Ok(Some(process_info)) => {
                 log::info!(
                     "Found process in registry for session {}: run_id={}, PID={}",
@@ -1226,15 +1226,15 @@ pub async fn cancel_claude_execution(
 
     // Always emit cancellation events for UI consistency
     if let Some(sid) = session_id {
-        let _ = app.emit(&format!("claude-cancelled:{}", sid), true);
+        let _ = app.emit(&format!("provider-session-cancelled:{}", sid), true);
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        let _ = app.emit(&format!("claude-complete:{}", sid), false);
+        let _ = app.emit(&format!("provider-session-complete:{}", sid), false);
     }
 
     // Also emit generic events for backward compatibility
-    let _ = app.emit("claude-cancelled", true);
+    let _ = app.emit("provider-session-cancelled", true);
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    let _ = app.emit("claude-complete", false);
+    let _ = app.emit("provider-session-complete", false);
 
     if killed {
         log::info!("Claude process cancellation completed successfully");
@@ -1247,20 +1247,20 @@ pub async fn cancel_claude_execution(
 
 /// Get all running Claude sessions
 #[tauri::command]
-pub async fn list_running_claude_sessions(
+pub async fn list_running_provider_sessions(
     registry: tauri::State<'_, crate::process::ProcessRegistryState>,
 ) -> Result<Vec<crate::process::ProcessInfo>, String> {
-    registry.0.get_running_claude_sessions()
+    registry.0.get_running_provider_sessions()
 }
 
 /// Get live output from a Claude session
 #[tauri::command]
-pub async fn get_claude_session_output(
+pub async fn get_provider_session_output(
     registry: tauri::State<'_, crate::process::ProcessRegistryState>,
     session_id: String,
 ) -> Result<String, String> {
     // Find the process by session ID
-    if let Some(process_info) = registry.0.get_claude_session_by_id(&session_id)? {
+    if let Some(process_info) = registry.0.get_provider_session_by_id(&session_id)? {
         registry.0.get_live_output(process_info.run_id)
     } else {
         Ok(String::new())
@@ -1328,27 +1328,27 @@ async fn spawn_claude_process(
             // Parse the line to check for init message with session ID
             if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
                 if msg["type"] == "system" && msg["subtype"] == "init" {
-                    if let Some(claude_session_id) = msg["session_id"].as_str() {
+                    if let Some(provider_session_id) = msg["session_id"].as_str() {
                         let mut session_id_guard = session_id_holder_clone.lock().unwrap();
                         if session_id_guard.is_none() {
-                            *session_id_guard = Some(claude_session_id.to_string());
-                            log::info!("Extracted Claude session ID: {}", claude_session_id);
+                            *session_id_guard = Some(provider_session_id.to_string());
+                            log::info!("Extracted provider session ID: {}", provider_session_id);
 
-                            // Now register with ProcessRegistry using Claude's session ID
-                            match registry_clone.register_claude_session(
-                                claude_session_id.to_string(),
+                            // Now register with ProcessRegistry using provider session ID.
+                            match registry_clone.register_provider_session(
+                                provider_session_id.to_string(),
                                 pid,
                                 project_path_clone.clone(),
                                 prompt_clone.clone(),
                                 model_clone.clone(),
                             ) {
                                 Ok(run_id) => {
-                                    log::info!("Registered Claude session with run_id: {}", run_id);
+                                    log::info!("Registered provider session with run_id: {}", run_id);
                                     let mut run_id_guard = run_id_holder_clone.lock().unwrap();
                                     *run_id_guard = Some(run_id);
                                 }
                                 Err(e) => {
-                                    log::error!("Failed to register Claude session: {}", e);
+                                    log::error!("Failed to register provider session: {}", e);
                                 }
                             }
                         }
@@ -1363,10 +1363,10 @@ async fn spawn_claude_process(
 
             // Emit the line to the frontend with session isolation if we have session ID
             if let Some(ref session_id) = *session_id_holder_clone.lock().unwrap() {
-                let _ = app_handle.emit(&format!("claude-output:{}", session_id), &line);
+                let _ = app_handle.emit(&format!("provider-session-output:{}", session_id), &line);
             }
             // Also emit to the generic event for backward compatibility
-            let _ = app_handle.emit("claude-output", &line);
+            let _ = app_handle.emit("provider-session-output", &line);
         }
     });
 
@@ -1378,10 +1378,10 @@ async fn spawn_claude_process(
             log::error!("Claude stderr: {}", line);
             // Emit error lines to the frontend with session isolation if we have session ID
             if let Some(ref session_id) = *session_id_holder_clone2.lock().unwrap() {
-                let _ = app_handle_stderr.emit(&format!("claude-error:{}", session_id), &line);
+                let _ = app_handle_stderr.emit(&format!("provider-session-error:{}", session_id), &line);
             }
             // Also emit to the generic event for backward compatibility
-            let _ = app_handle_stderr.emit("claude-error", &line);
+            let _ = app_handle_stderr.emit("provider-session-error", &line);
         }
     });
 
@@ -1405,10 +1405,10 @@ async fn spawn_claude_process(
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     if let Some(ref session_id) = *session_id_holder_clone3.lock().unwrap() {
                         let _ = app_handle_wait
-                            .emit(&format!("claude-complete:{}", session_id), status.success());
+                            .emit(&format!("provider-session-complete:{}", session_id), status.success());
                     }
                     // Also emit to the generic event for backward compatibility
-                    let _ = app_handle_wait.emit("claude-complete", status.success());
+                    let _ = app_handle_wait.emit("provider-session-complete", status.success());
                 }
                 Err(e) => {
                     log::error!("Failed to wait for Claude process: {}", e);
@@ -1416,10 +1416,10 @@ async fn spawn_claude_process(
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     if let Some(ref session_id) = *session_id_holder_clone3.lock().unwrap() {
                         let _ =
-                            app_handle_wait.emit(&format!("claude-complete:{}", session_id), false);
+                            app_handle_wait.emit(&format!("provider-session-complete:{}", session_id), false);
                     }
                     // Also emit to the generic event for backward compatibility
-                    let _ = app_handle_wait.emit("claude-complete", false);
+                    let _ = app_handle_wait.emit("provider-session-complete", false);
                 }
             }
         }
@@ -2319,7 +2319,7 @@ pub async fn execute_agent_session(
 
     if provider_id == "claude" {
         // Delegate to existing Claude execution (preserves all Claude-specific features)
-        return execute_claude_code(app, project_path, prompt, model).await;
+        return execute_provider_session(app, project_path, prompt, model).await;
     }
 
     // For non-Claude providers: find binary and spawn with generic streaming
@@ -2349,7 +2349,7 @@ pub async fn continue_agent_session(
     reasoning_effort: Option<String>,
 ) -> Result<(), String> {
     if provider_id == "claude" {
-        return continue_claude_code(app, project_path, prompt, model).await;
+        return continue_provider_session(app, project_path, prompt, model).await;
     }
 
     // Non-Claude providers: just execute again (most don't have "continue" concept)
@@ -2376,7 +2376,7 @@ pub async fn resume_agent_session(
     reasoning_effort: Option<String>,
 ) -> Result<(), String> {
     if provider_id == "claude" {
-        return resume_claude_code(app, project_path, session_id, prompt, model).await;
+        return resume_provider_session(app, project_path, session_id, prompt, model).await;
     }
 
     // Non-Claude providers: resume not supported, start new session
@@ -2557,7 +2557,7 @@ async fn spawn_agent_process(
     // Register with process registry
     let registry = app.state::<crate::process::ProcessRegistryState>();
     let registry_clone = registry.0.clone();
-    let reg_id: Option<i64> = match registry.0.register_claude_session(
+    let reg_id: Option<i64> = match registry.0.register_provider_session(
         run_id.clone(),
         pid,
         project_path.clone(),
@@ -2581,8 +2581,8 @@ async fn spawn_agent_process(
         "session_id": run_id,
         "provider_id": provider_id,
     });
-    let _ = app.emit("claude-output", &init_msg.to_string());
-    let _ = app.emit(&format!("claude-output:{}", run_id), &init_msg.to_string());
+    let _ = app.emit("provider-session-output", &init_msg.to_string());
+    let _ = app.emit(&format!("provider-session-output:{}", run_id), &init_msg.to_string());
 
     // Stream stdout — provider-aware transformation to Claude-compatible JSON
     let app_stdout = app.clone();
@@ -2640,14 +2640,14 @@ async fn spawn_agent_process(
             };
 
             if let Some(ref w) = wrapped {
-                log::info!("{} emitting claude-output: {}", run_id_stdout, &w[..w.len().min(200)]);
-                let _ = app_stdout.emit(&format!("claude-output:{}", run_id_stdout), w);
-                let _ = app_stdout.emit("claude-output", w);
+                log::info!("{} emitting provider-session-output: {}", run_id_stdout, &w[..w.len().min(200)]);
+                let _ = app_stdout.emit(&format!("provider-session-output:{}", run_id_stdout), w);
+                let _ = app_stdout.emit("provider-session-output", w);
             }
         }
     });
 
-    // Stream stderr — wrap as text and route to claude-output.
+    // Stream stderr — wrap as text and route to provider-session-output.
     // With --json, codex stderr is empty. For other providers, stderr may contain
     // useful output so we always forward it as assistant text messages.
     let app_stderr = app.clone();
@@ -2672,8 +2672,8 @@ async fn spawn_agent_process(
                 }
             }).to_string();
 
-            let _ = app_stderr.emit(&format!("claude-output:{}", run_id_stderr), &wrapped);
-            let _ = app_stderr.emit("claude-output", &wrapped);
+            let _ = app_stderr.emit(&format!("provider-session-output:{}", run_id_stderr), &wrapped);
+            let _ = app_stderr.emit("provider-session-output", &wrapped);
         }
     });
 
@@ -2690,14 +2690,14 @@ async fn spawn_agent_process(
             Ok(status) => {
                 log::info!("{} process exited with status: {}", run_id_wait, status);
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                let _ = app_wait.emit(&format!("claude-complete:{}", run_id_wait), status.success());
-                let _ = app_wait.emit("claude-complete", status.success());
+                let _ = app_wait.emit(&format!("provider-session-complete:{}", run_id_wait), status.success());
+                let _ = app_wait.emit("provider-session-complete", status.success());
             }
             Err(e) => {
                 log::error!("Failed to wait for {} process: {}", run_id_wait, e);
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                let _ = app_wait.emit(&format!("claude-complete:{}", run_id_wait), false);
-                let _ = app_wait.emit("claude-complete", false);
+                let _ = app_wait.emit(&format!("provider-session-complete:{}", run_id_wait), false);
+                let _ = app_wait.emit("provider-session-complete", false);
             }
         }
 

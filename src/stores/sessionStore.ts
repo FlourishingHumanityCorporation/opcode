@@ -105,7 +105,7 @@ const sessionStore: StateCreator<
     fetchSessionOutput: async (sessionId: string) => {
       set({ isLoadingOutputs: true, error: null });
       try {
-        const output = await api.getClaudeSessionOutput(sessionId);
+        const output = await api.getProviderSessionOutput(sessionId);
         set((state) => ({
           sessionOutputs: {
             ...state.sessionOutputs,

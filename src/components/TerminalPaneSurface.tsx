@@ -11,7 +11,7 @@ import {
 } from '@/lib/terminalPaneState';
 import { api } from '@/lib/api';
 import type { Tab, TerminalTab } from '@/contexts/TabContext';
-import { ClaudeCodeSession } from '@/components/ClaudeCodeSession';
+import { ProviderSessionPane } from '@/components/ProviderSessionPane';
 import { AgentExecution } from '@/components/AgentExecution';
 import { AgentRunOutputViewer } from '@/components/AgentRunOutputViewer';
 import { useTabState } from '@/hooks/useTabState';
@@ -279,7 +279,7 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
             </div>
           )
         ) : (
-          <ClaudeCodeSession
+          <ProviderSessionPane
             key={`chat-pane-${terminal.id}-${paneId}`}
             embedded
             paneId={paneId}

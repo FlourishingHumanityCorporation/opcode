@@ -16,9 +16,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-interface SessionHeaderProps {
+interface ProviderSessionHeaderProps {
   projectPath: string;
-  claudeSessionId: string | null;
+  providerSessionId: string | null;
   totalTokens: number;
   isStreaming: boolean;
   hasMessages: boolean;
@@ -34,9 +34,9 @@ interface SessionHeaderProps {
   setCopyPopoverOpen: (open: boolean) => void;
 }
 
-export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(({
+export const ProviderSessionHeader: React.FC<ProviderSessionHeaderProps> = React.memo(({
   projectPath,
-  claudeSessionId,
+  providerSessionId,
   totalTokens,
   isStreaming,
   hasMessages,
@@ -70,7 +70,7 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(({
           
           <div className="flex items-center gap-2">
             <Terminal className="h-5 w-5 text-primary" />
-            <span className="font-semibold">Claude Code Session</span>
+            <span className="font-semibold">Provider Session</span>
           </div>
 
           
@@ -88,11 +88,11 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(({
         </div>
 
         <div className="flex items-center gap-2">
-          {claudeSessionId && (
+          {providerSessionId && (
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="text-xs">
                 <Hash className="h-3 w-3 mr-1" />
-                {claudeSessionId.slice(0, 8)}
+                {providerSessionId.slice(0, 8)}
               </Badge>
               {totalTokens > 0 && (
                 <Badge variant="secondary" className="text-xs">

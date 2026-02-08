@@ -158,7 +158,7 @@ export async function apiCall<T>(command: string, params?: any): Promise<T> {
   debugLog(`[Web] Calling: ${command}`, params);
   
   // Special handling for commands that use streaming/events
-  const streamingCommands = ['execute_claude_code', 'continue_claude_code', 'resume_claude_code'];
+  const streamingCommands = ['execute_provider_session', 'continue_provider_session', 'resume_provider_session'];
   if (streamingCommands.includes(command)) {
     return handleStreamingCommand<T>(command, params);
   }
@@ -194,7 +194,7 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'list_agent_runs_with_metrics': '/api/agents/runs/metrics',
     'get_agent_run': '/api/agents/runs/{id}',
     'get_agent_run_with_real_time_metrics': '/api/agents/runs/{id}/metrics',
-    'list_running_sessions': '/api/sessions/running',
+    'list_running_sessions': '/api/provider-sessions/running',
     'kill_agent_session': '/api/agents/sessions/{runId}/kill',
     'get_session_status': '/api/agents/sessions/{runId}/status',
     'cleanup_finished_processes': '/api/agents/sessions/cleanup',
@@ -235,12 +235,12 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     // Session management
     'open_new_session': '/api/sessions/new',
     'load_session_history': '/api/sessions/{sessionId}/history/{projectId}',
-    'list_running_claude_sessions': '/api/sessions/running',
-    'execute_claude_code': '/api/sessions/execute',
-    'continue_claude_code': '/api/sessions/continue',
-    'resume_claude_code': '/api/sessions/resume',
-    'cancel_claude_execution': '/api/sessions/{sessionId}/cancel',
-    'get_claude_session_output': '/api/sessions/{sessionId}/output',
+    'list_running_provider_sessions': '/api/provider-sessions/running',
+    'execute_provider_session': '/api/provider-sessions/execute',
+    'continue_provider_session': '/api/provider-sessions/continue',
+    'resume_provider_session': '/api/provider-sessions/resume',
+    'cancel_provider_session': '/api/provider-sessions/{sessionId}/cancel',
+    'get_provider_session_output': '/api/provider-sessions/{sessionId}/output',
     
     // MCP commands
     'mcp_add': '/api/mcp/servers',
@@ -309,20 +309,55 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
   return new Promise((resolve, reject) => {
     // Use wss:// for HTTPS connections (e.g., ngrok), ws:// for HTTP (localhost)
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws/claude`;
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/provider-session`;
     debugLog(`[TRACE] handleStreamingCommand called:`);
     debugLog(`[TRACE]   command: ${command}`);
     debugLog(`[TRACE]   params:`, params);
     debugLog(`[TRACE]   WebSocket URL: ${wsUrl}`);
     
     const ws = new WebSocket(wsUrl);
+    let activeSessionId: string | undefined = params?.sessionId;
+    let settled = false;
+
+    const settleResolve = (value: T) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    const settleReject = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    const dispatchProviderSessionEvent = (
+      eventName: string,
+      detail: unknown,
+      sessionId?: string
+    ) => {
+      const genericEvent = new CustomEvent(eventName, { detail });
+      window.dispatchEvent(genericEvent);
+      if (sessionId) {
+        const scopedEvent = new CustomEvent(`${eventName}:${sessionId}`, { detail });
+        window.dispatchEvent(scopedEvent);
+      }
+    };
+
+    const maybeUpdateActiveSessionId = (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const sid = (payload as Record<string, unknown>).session_id;
+      if (typeof sid === 'string' && sid.trim().length > 0) {
+        activeSessionId = sid.trim();
+      }
+    };
     
     ws.onopen = () => {
       debugLog(`[TRACE] WebSocket opened successfully`);
       
       // Send execution request
       const request = {
-        command_type: command.replace('_claude_code', ''), // execute, continue, resume
+        command_type: command.replace('_provider_session', ''), // execute, continue, resume
         project_path: params?.projectPath || '',
         prompt: params?.prompt || '',
         model: params?.model ?? '',
@@ -348,54 +383,64 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
           debugLog(`[TRACE] Output message, content length: ${message.content?.length || 0}`);
           debugLog(`[TRACE] Raw content:`, message.content);
           
-          // The backend sends Claude output as a JSON string in the content field
-          // We need to parse this to get the actual Claude message
+          // The backend sends provider output as a JSON string in the content field.
+          // Parse it to recover the structured stream message.
           try {
-            const claudeMessage = typeof message.content === 'string' 
+            const providerSessionMessage = typeof message.content === 'string' 
               ? JSON.parse(message.content) 
               : message.content;
-            debugLog(`[TRACE] Parsed Claude message:`, claudeMessage);
+            maybeUpdateActiveSessionId(providerSessionMessage);
+            debugLog(`[TRACE] Parsed provider session message:`, providerSessionMessage);
             
-            // Simulate Tauri event for compatibility with existing UI
-            const customEvent = new CustomEvent('claude-output', {
-              detail: claudeMessage
-            });
-            debugLog(`[TRACE] Dispatching claude-output event:`, customEvent.detail);
-            debugLog(`[TRACE] Event type:`, customEvent.type);
-            window.dispatchEvent(customEvent);
+            // Simulate Tauri event for compatibility with existing UI.
+            dispatchProviderSessionEvent(
+              'provider-session-output',
+              providerSessionMessage,
+              activeSessionId
+            );
           } catch (e) {
-            console.error(`[TRACE] Failed to parse Claude output content:`, e);
+            console.error(`[TRACE] Failed to parse provider session output content:`, e);
             console.error(`[TRACE] Content that failed to parse:`, message.content);
           }
         } else if (message.type === 'completion') {
           debugLog(`[TRACE] Completion message:`, message);
+          maybeUpdateActiveSessionId(message);
+          const completionStatus = message.status === 'cancelled'
+            ? 'cancelled'
+            : message.status === 'success'
+              ? 'success'
+              : 'error';
           
-          // Dispatch claude-complete event for UI state management
-          const completeEvent = new CustomEvent('claude-complete', {
-            detail: message.status === 'success'
-          });
-          debugLog(`[TRACE] Dispatching claude-complete event:`, completeEvent.detail);
-          window.dispatchEvent(completeEvent);
+          if (completionStatus === 'cancelled') {
+            dispatchProviderSessionEvent('provider-session-cancelled', true, activeSessionId);
+          }
+          dispatchProviderSessionEvent(
+            'provider-session-complete',
+            completionStatus === 'success',
+            activeSessionId
+          );
           
           ws.close();
-          if (message.status === 'success') {
+          if (completionStatus === 'success') {
             debugLog(`[TRACE] Resolving promise with success`);
-            resolve({} as T); // Return empty object for now
+            settleResolve({} as T); // Return empty object for now
+          } else if (completionStatus === 'cancelled') {
+            settleReject(new Error(message.error || 'Execution cancelled'));
           } else {
             debugLog(`[TRACE] Rejecting promise with error: ${message.error}`);
-            reject(new Error(message.error || 'Execution failed'));
+            settleReject(new Error(message.error || 'Execution failed'));
           }
         } else if (message.type === 'error') {
           debugLog(`[TRACE] Error message:`, message);
+          maybeUpdateActiveSessionId(message);
           
-          // Dispatch claude-error event for UI error handling
-          const errorEvent = new CustomEvent('claude-error', {
-            detail: message.message || 'Unknown error'
-          });
-          debugLog(`[TRACE] Dispatching claude-error event:`, errorEvent.detail);
-          window.dispatchEvent(errorEvent);
+          dispatchProviderSessionEvent(
+            'provider-session-error',
+            message.message || 'Unknown error',
+            activeSessionId
+          );
           
-          reject(new Error(message.message || 'Unknown error'));
+          settleReject(new Error(message.message || 'Unknown error'));
         } else {
           debugLog(`[TRACE] Unknown message type: ${message.type}`);
         }
@@ -408,14 +453,13 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
     ws.onerror = (error) => {
       console.error('[TRACE] WebSocket error:', error);
       
-      // Dispatch claude-error event for connection errors
-      const errorEvent = new CustomEvent('claude-error', {
-        detail: 'WebSocket connection failed'
-      });
-      debugLog(`[TRACE] Dispatching claude-error event for WebSocket error`);
-      window.dispatchEvent(errorEvent);
+      dispatchProviderSessionEvent(
+        'provider-session-error',
+        'WebSocket connection failed',
+        activeSessionId
+      );
       
-      reject(new Error('WebSocket connection failed'));
+      settleReject(new Error('WebSocket connection failed'));
     };
     
     ws.onclose = (event) => {
@@ -423,11 +467,9 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
       
       // If connection closed unexpectedly (not a normal close), dispatch cancelled event
       if (event.code !== 1000 && event.code !== 1001) {
-        const cancelEvent = new CustomEvent('claude-complete', {
-          detail: false // false indicates cancellation/failure
-        });
-        debugLog(`[TRACE] Dispatching claude-complete event for unexpected close`);
-        window.dispatchEvent(cancelEvent);
+        dispatchProviderSessionEvent('provider-session-cancelled', true, activeSessionId);
+        dispatchProviderSessionEvent('provider-session-complete', false, activeSessionId);
+        settleReject(new Error('WebSocket connection closed unexpectedly'));
       }
     };
   });

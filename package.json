@@ -24,8 +24,9 @@
     "debug:session-start:gate": "node scripts/measure-session-startup.mjs --runs 3 --fail-on-slow-ms 5000",
     "debug:assistant-benchmark:json": "node scripts/measure-session-startup.mjs --benchmark-kind assistant --json",
     "debug:assistant-benchmark:gate": "node scripts/measure-session-startup.mjs --runs 3 --benchmark-kind assistant --fail-on-assistant-slow-ms 50000",
-    "smoke:ui": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts",
-    "smoke:ui:headed": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts --headed"
+    "smoke:attention": "playwright test tests/smoke/agent-attention.spec.ts",
+    "smoke:ui": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts tests/smoke/agent-attention.spec.ts tests/smoke/native-auto-rename.spec.ts",
+    "smoke:ui:headed": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts tests/smoke/agent-attention.spec.ts tests/smoke/native-auto-rename.spec.ts --headed"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -42,8 +43,8 @@
     "@tailwindcss/cli": "^4.1.8",
     "@tailwindcss/vite": "^4.1.8",
     "@tanstack/react-virtual": "^3.13.10",
-    "@tauri-apps/api": "^2.1.1",
-    "@tauri-apps/plugin-dialog": "^2.0.2",
+    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0",
     "@tauri-apps/plugin-global-shortcut": "^2.0.0",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2",

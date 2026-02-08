@@ -61,18 +61,52 @@ fn find_claude_binary_web() -> Result<String, String> {
 
 #[derive(Clone)]
 pub struct AppState {
-    // Track active WebSocket sessions for Claude execution
+    // Track active WebSocket sessions for provider-session execution.
     pub active_sessions:
         Arc<Mutex<std::collections::HashMap<String, tokio::sync::mpsc::Sender<String>>>>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ClaudeExecutionRequest {
+pub struct ProviderSessionExecutionRequest {
     pub project_path: String,
     pub prompt: String,
     pub model: Option<String>,
     pub session_id: Option<String>,
     pub command_type: String, // "execute", "continue", or "resume"
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ProviderSessionCompletionStatus {
+    Success,
+    Error,
+    Cancelled,
+}
+
+impl ProviderSessionCompletionStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Error => "error",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+fn completion_status_for_result(result: &Result<(), String>) -> ProviderSessionCompletionStatus {
+    match result {
+        Ok(_) => ProviderSessionCompletionStatus::Success,
+        Err(error) => {
+            let lowered = error.to_ascii_lowercase();
+            if lowered.contains("cancelled")
+                || lowered.contains("canceled")
+                || lowered.contains("interrupted")
+            {
+                ProviderSessionCompletionStatus::Cancelled
+            } else {
+                ProviderSessionCompletionStatus::Error
+            }
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -249,36 +283,36 @@ async fn load_session_history(
 }
 
 /// List running Claude sessions
-async fn list_running_claude_sessions() -> Json<ApiResponse<Vec<serde_json::Value>>> {
+async fn list_running_provider_sessions() -> Json<ApiResponse<Vec<serde_json::Value>>> {
     // Return empty for web mode - no actual Claude processes in web mode
     Json(ApiResponse::success(vec![]))
 }
 
-/// Execute Claude code - mock for web mode
-async fn execute_claude_code() -> Json<ApiResponse<serde_json::Value>> {
+/// Execute provider session - mock for web mode.
+async fn execute_provider_session() -> Json<ApiResponse<serde_json::Value>> {
     Json(ApiResponse::error("Claude execution is not available in web mode. Please use the desktop app for running Claude commands.".to_string()))
 }
 
-/// Continue Claude code - mock for web mode
-async fn continue_claude_code() -> Json<ApiResponse<serde_json::Value>> {
+/// Continue provider session - mock for web mode.
+async fn continue_provider_session() -> Json<ApiResponse<serde_json::Value>> {
     Json(ApiResponse::error("Claude execution is not available in web mode. Please use the desktop app for running Claude commands.".to_string()))
 }
 
-/// Resume Claude code - mock for web mode  
-async fn resume_claude_code() -> Json<ApiResponse<serde_json::Value>> {
+/// Resume provider session - mock for web mode.
+async fn resume_provider_session() -> Json<ApiResponse<serde_json::Value>> {
     Json(ApiResponse::error("Claude execution is not available in web mode. Please use the desktop app for running Claude commands.".to_string()))
 }
 
-/// Cancel Claude execution
-async fn cancel_claude_execution(Path(sessionId): Path<String>) -> Json<ApiResponse<()>> {
+/// Cancel provider session execution.
+async fn cancel_provider_session(Path(sessionId): Path<String>) -> Json<ApiResponse<()>> {
     // In web mode, we don't have a way to cancel the subprocess cleanly
     // The WebSocket closing should handle cleanup
     println!("[TRACE] Cancel request for session: {}", sessionId);
     Json(ApiResponse::success(()))
 }
 
-/// Get Claude session output
-async fn get_claude_session_output(Path(sessionId): Path<String>) -> Json<ApiResponse<String>> {
+/// Get provider session output.
+async fn get_provider_session_output(Path(sessionId): Path<String>) -> Json<ApiResponse<String>> {
     // In web mode, output is streamed via WebSocket, not stored
     println!("[TRACE] Output request for session: {}", sessionId);
     Json(ApiResponse::success(
@@ -286,12 +320,12 @@ async fn get_claude_session_output(Path(sessionId): Path<String>) -> Json<ApiRes
     ))
 }
 
-/// WebSocket handler for Claude execution with streaming output
-async fn claude_websocket(ws: WebSocketUpgrade, AxumState(state): AxumState<AppState>) -> Response {
-    ws.on_upgrade(move |socket| claude_websocket_handler(socket, state))
+/// WebSocket handler for provider-session execution with streaming output.
+async fn provider_session_websocket(ws: WebSocketUpgrade, AxumState(state): AxumState<AppState>) -> Response {
+    ws.on_upgrade(move |socket| provider_session_websocket_handler(socket, state))
 }
 
-async fn claude_websocket_handler(socket: WebSocket, state: AppState) {
+async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
     let session_id = uuid::Uuid::new_v4().to_string();
 
@@ -344,14 +378,14 @@ async fn claude_websocket_handler(socket: WebSocket, state: AppState) {
                     text.len()
                 );
                 println!("[TRACE] WebSocket message content: {}", text);
-                match serde_json::from_str::<ClaudeExecutionRequest>(&text) {
+                match serde_json::from_str::<ProviderSessionExecutionRequest>(&text) {
                     Ok(request) => {
                         println!("[TRACE] Successfully parsed request: {:?}", request);
                         println!("[TRACE] Command type: {}", request.command_type);
                         println!("[TRACE] Project path: {}", request.project_path);
                         println!("[TRACE] Prompt length: {} chars", request.prompt.len());
 
-                        // Execute Claude command based on request type
+                        // Execute provider session command based on request type.
                         let session_id_clone = session_id.clone();
                         let state_clone = state.clone();
 
@@ -363,8 +397,8 @@ async fn claude_websocket_handler(socket: WebSocket, state: AppState) {
                             println!("[TRACE] Task started for command execution");
                             let result = match request.command_type.as_str() {
                                 "execute" => {
-                                    println!("[TRACE] Calling execute_claude_command");
-                                    execute_claude_command(
+                                    println!("[TRACE] Calling execute_provider_session_command");
+                                    execute_provider_session_command(
                                         request.project_path,
                                         request.prompt,
                                         request.model.unwrap_or_default(),
@@ -374,8 +408,8 @@ async fn claude_websocket_handler(socket: WebSocket, state: AppState) {
                                     .await
                                 }
                                 "continue" => {
-                                    println!("[TRACE] Calling continue_claude_command");
-                                    continue_claude_command(
+                                    println!("[TRACE] Calling continue_provider_session_command");
+                                    continue_provider_session_command(
                                         request.project_path,
                                         request.prompt,
                                         request.model.unwrap_or_default(),
@@ -385,8 +419,8 @@ async fn claude_websocket_handler(socket: WebSocket, state: AppState) {
                                     .await
                                 }
                                 "resume" => {
-                                    println!("[TRACE] Calling resume_claude_command");
-                                    resume_claude_command(
+                                    println!("[TRACE] Calling resume_provider_session_command");
+                                    resume_provider_session_command(
                                         request.project_path,
                                         request.session_id.unwrap_or_default(),
                                         request.prompt,
@@ -417,14 +451,15 @@ async fn claude_websocket_handler(socket: WebSocket, state: AppState) {
                                 .await
                                 .get(&session_id_clone)
                             {
+                                let status = completion_status_for_result(&result).as_str();
                                 let completion_msg = match result {
                                     Ok(_) => json!({
                                         "type": "completion",
-                                        "status": "success"
+                                        "status": status
                                     }),
                                     Err(e) => json!({
                                         "type": "completion",
-                                        "status": "error",
+                                        "status": status,
                                         "error": e
                                     }),
                                 };
@@ -478,7 +513,7 @@ async fn claude_websocket_handler(socket: WebSocket, state: AppState) {
     println!("[TRACE] WebSocket handler ended for session {}", session_id);
 }
 
-// Claude command execution functions for WebSocket streaming
+// Provider-session command execution functions for WebSocket streaming
 fn append_optional_model_arg(args: &mut Vec<String>, model: &str) {
     let trimmed = model.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
@@ -488,17 +523,83 @@ fn append_optional_model_arg(args: &mut Vec<String>, model: &str) {
     args.extend_from_slice(&["--model".to_string(), trimmed.to_string()]);
 }
 
-async fn execute_claude_command(
+async fn stream_provider_process_output(
+    child: &mut tokio::process::Child,
+    session_id: &str,
+    state: &AppState,
+) -> Result<(), String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
+
+    let session_id_stdout = session_id.to_string();
+    let state_stdout = state.clone();
+    let stdout_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            send_to_session(
+                &state_stdout,
+                &session_id_stdout,
+                json!({
+                    "type": "output",
+                    "content": line
+                })
+                .to_string(),
+            )
+            .await;
+        }
+    });
+
+    let session_id_stderr = session_id.to_string();
+    let state_stderr = state.clone();
+    let stderr_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            send_to_session(
+                &state_stderr,
+                &session_id_stderr,
+                json!({
+                    "type": "error",
+                    "message": line
+                })
+                .to_string(),
+            )
+            .await;
+        }
+    });
+
+    let _ = stdout_task.await;
+    let _ = stderr_task.await;
+    Ok(())
+}
+
+fn map_exit_status_to_result(exit_status: std::process::ExitStatus) -> Result<(), String> {
+    if exit_status.success() {
+        return Ok(());
+    }
+
+    let code = exit_status.code();
+    if matches!(code, Some(130) | Some(143)) {
+        return Err(format!("Provider session cancelled (exit code: {:?})", code));
+    }
+
+    Err(format!(
+        "Provider session execution failed with exit code: {:?}",
+        code
+    ))
+}
+
+async fn execute_provider_session_command(
     project_path: String,
     prompt: String,
     model: String,
     session_id: String,
     state: AppState,
 ) -> Result<(), String> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::process::Command;
 
-    println!("[TRACE] execute_claude_command called:");
+    println!("[TRACE] execute_provider_session_command called:");
     println!("[TRACE]   project_path: {}", project_path);
     println!("[TRACE]   prompt length: {} chars", prompt.len());
     println!("[TRACE]   model: {}", model);
@@ -511,7 +612,7 @@ async fn execute_claude_command(
         &session_id,
         json!({
             "type": "start",
-            "message": "Starting Claude execution..."
+            "message": "Starting provider session..."
         })
         .to_string(),
     )
@@ -556,35 +657,8 @@ async fn execute_claude_command(
     })?;
     println!("[TRACE] Claude process spawned successfully");
 
-    // Get stdout for streaming
-    let stdout = child.stdout.take().ok_or_else(|| {
-        println!("[TRACE] Failed to get stdout from child process");
-        "Failed to get stdout".to_string()
-    })?;
-    let stdout_reader = BufReader::new(stdout);
-
-    println!("[TRACE] Starting to read Claude output...");
-    // Stream output line by line
-    let mut lines = stdout_reader.lines();
-    let mut line_count = 0;
-    while let Ok(Some(line)) = lines.next_line().await {
-        line_count += 1;
-        println!("[TRACE] Claude output line {}: {}", line_count, line);
-
-        // Send each line to WebSocket
-        let message = json!({
-            "type": "output",
-            "content": line
-        })
-        .to_string();
-        println!("[TRACE] Sending output message to session: {}", message);
-        send_to_session(&state, &session_id, message).await;
-    }
-
-    println!(
-        "[TRACE] Finished reading Claude output ({} lines total)",
-        line_count
-    );
+    println!("[TRACE] Starting to stream provider session output...");
+    stream_provider_process_output(&mut child, &session_id, &state).await?;
 
     // Wait for process to complete
     println!("[TRACE] Waiting for Claude process to complete...");
@@ -599,27 +673,21 @@ async fn execute_claude_command(
         exit_status
     );
 
-    if !exit_status.success() {
-        let error = format!(
-            "Claude execution failed with exit code: {:?}",
-            exit_status.code()
-        );
-        println!("[TRACE] Claude execution failed: {}", error);
-        return Err(error);
+    let result = map_exit_status_to_result(exit_status);
+    if let Err(error) = &result {
+        println!("[TRACE] Provider session execution failed: {}", error);
     }
-
-    println!("[TRACE] execute_claude_command completed successfully");
-    Ok(())
+    println!("[TRACE] execute_provider_session_command completed");
+    result
 }
 
-async fn continue_claude_command(
+async fn continue_provider_session_command(
     project_path: String,
     prompt: String,
     model: String,
     session_id: String,
     state: AppState,
 ) -> Result<(), String> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::process::Command;
 
     send_to_session(
@@ -627,7 +695,7 @@ async fn continue_claude_command(
         &session_id,
         json!({
             "type": "start",
-            "message": "Continuing Claude session..."
+            "message": "Continuing provider session..."
         })
         .to_string(),
     )
@@ -660,77 +728,54 @@ async fn continue_claude_command(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn Claude: {}", e))?;
-    let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
-    let stdout_reader = BufReader::new(stdout);
-
-    let mut lines = stdout_reader.lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        send_to_session(
-            &state,
-            &session_id,
-            json!({
-                "type": "output",
-                "content": line
-            })
-            .to_string(),
-        )
-        .await;
-    }
+    stream_provider_process_output(&mut child, &session_id, &state).await?;
 
     let exit_status = child
         .wait()
         .await
         .map_err(|e| format!("Failed to wait for Claude: {}", e))?;
-    if !exit_status.success() {
-        return Err(format!(
-            "Claude execution failed with exit code: {:?}",
-            exit_status.code()
-        ));
-    }
-
-    Ok(())
+    map_exit_status_to_result(exit_status)
 }
 
-async fn resume_claude_command(
+async fn resume_provider_session_command(
     project_path: String,
-    claude_session_id: String,
+    provider_session_id: String,
     prompt: String,
     model: String,
     session_id: String,
     state: AppState,
 ) -> Result<(), String> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::process::Command;
 
-    println!("[resume_claude_command] Starting with project_path: {}, claude_session_id: {}, prompt: {}, model: {}", 
-             project_path, claude_session_id, prompt, model);
+    println!("[resume_provider_session_command] Starting with project_path: {}, provider_session_id: {}, prompt: {}, model: {}",
+             project_path, provider_session_id, prompt, model);
 
     send_to_session(
         &state,
         &session_id,
         json!({
             "type": "start",
-            "message": "Resuming Claude session..."
+            "message": "Resuming provider session..."
         })
         .to_string(),
     )
     .await;
 
     // Find Claude binary
-    println!("[resume_claude_command] Finding Claude binary...");
+    println!("[resume_provider_session_command] Finding Claude binary...");
     let claude_path =
         find_claude_binary_web().map_err(|e| format!("Claude binary not found: {}", e))?;
     println!(
-        "[resume_claude_command] Found Claude binary: {}",
+        "[resume_provider_session_command] Found Claude binary: {}",
         claude_path
     );
 
     // Create resume command
-    println!("[resume_claude_command] Creating command...");
+    println!("[resume_provider_session_command] Creating command...");
     let mut cmd = Command::new(&claude_path);
     let mut args = vec![
         "--resume".to_string(),
-        claude_session_id.clone(),
+        provider_session_id.clone(),
         "-p".to_string(),
         prompt.clone(),
     ];
@@ -747,47 +792,25 @@ async fn resume_claude_command(
     cmd.stderr(std::process::Stdio::piped());
 
     println!(
-        "[resume_claude_command] Command: {} {:?} (in dir: {})",
+        "[resume_provider_session_command] Command: {} {:?} (in dir: {})",
         claude_path, args, project_path
     );
 
     // Spawn and stream output
-    println!("[resume_claude_command] Spawning process...");
+    println!("[resume_provider_session_command] Spawning process...");
     let mut child = cmd.spawn().map_err(|e| {
         let error = format!("Failed to spawn Claude: {}", e);
-        println!("[resume_claude_command] Spawn error: {}", error);
+        println!("[resume_provider_session_command] Spawn error: {}", error);
         error
     })?;
-    println!("[resume_claude_command] Process spawned successfully");
-    let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
-    let stdout_reader = BufReader::new(stdout);
-
-    let mut lines = stdout_reader.lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        send_to_session(
-            &state,
-            &session_id,
-            json!({
-                "type": "output",
-                "content": line
-            })
-            .to_string(),
-        )
-        .await;
-    }
+    println!("[resume_provider_session_command] Process spawned successfully");
+    stream_provider_process_output(&mut child, &session_id, &state).await?;
 
     let exit_status = child
         .wait()
         .await
         .map_err(|e| format!("Failed to wait for Claude: {}", e))?;
-    if !exit_status.success() {
-        return Err(format!(
-            "Claude execution failed with exit code: {:?}",
-            exit_status.code()
-        ));
-    }
-
-    Ok(())
+    map_exit_status_to_result(exit_status)
 }
 
 async fn send_to_session(state: &AppState, session_id: &str, message: String) {
@@ -860,21 +883,21 @@ pub async fn create_web_server(port: u16) -> Result<(), Box<dyn std::error::Erro
             "/api/sessions/{session_id}/history/{project_id}",
             get(load_session_history),
         )
-        .route("/api/sessions/running", get(list_running_claude_sessions))
+        .route("/api/provider-sessions/running", get(list_running_provider_sessions))
         // Claude execution endpoints (read-only in web mode)
-        .route("/api/sessions/execute", get(execute_claude_code))
-        .route("/api/sessions/continue", get(continue_claude_code))
-        .route("/api/sessions/resume", get(resume_claude_code))
+        .route("/api/provider-sessions/execute", get(execute_provider_session))
+        .route("/api/provider-sessions/continue", get(continue_provider_session))
+        .route("/api/provider-sessions/resume", get(resume_provider_session))
         .route(
-            "/api/sessions/{sessionId}/cancel",
-            get(cancel_claude_execution),
+            "/api/provider-sessions/{sessionId}/cancel",
+            get(cancel_provider_session),
         )
         .route(
-            "/api/sessions/{sessionId}/output",
-            get(get_claude_session_output),
+            "/api/provider-sessions/{sessionId}/output",
+            get(get_provider_session_output),
         )
         // WebSocket endpoint for real-time Claude execution
-        .route("/ws/claude", get(claude_websocket))
+        .route("/ws/provider-session", get(provider_session_websocket))
         // Serve static assets
         .nest_service("/assets", ServeDir::new("../dist/assets"))
         .nest_service("/vite.svg", ServeDir::new("../dist/vite.svg"))

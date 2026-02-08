@@ -10,16 +10,16 @@ try {
     tauriListen = require('@tauri-apps/api/event').listen;
   }
 } catch (e) {
-  console.log('[useClaudeMessages] Tauri event API not available, using web mode');
+  console.log('[useProviderSessionMessages] Tauri event API not available, using web mode');
 }
 
-interface UseClaudeMessagesOptions {
+interface UseProviderSessionMessagesOptions {
   onSessionInfo?: (info: { sessionId: string; projectId: string }) => void;
   onTokenUpdate?: (tokens: number) => void;
   onStreamingChange?: (isStreaming: boolean, sessionId: string | null) => void;
 }
 
-export function useClaudeMessages(options: UseClaudeMessagesOptions = {}) {
+export function useProviderSessionMessages(options: UseProviderSessionMessagesOptions = {}) {
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
   const [rawJsonlOutput, setRawJsonlOutput] = useState<string[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -29,7 +29,7 @@ export function useClaudeMessages(options: UseClaudeMessagesOptions = {}) {
   const accumulatedContentRef = useRef<{ [key: string]: string }>({});
 
   const handleMessage = useCallback((message: ClaudeStreamMessage) => {
-    console.log('[TRACE] useClaudeMessages.handleMessage called with:', message);
+    console.log('[TRACE] useProviderSessionMessages.handleMessage called with:', message);
     
     if ((message as any).type === "start") {
       console.log('[TRACE] Start message detected - clearing accumulated content and setting streaming=true');
@@ -126,7 +126,7 @@ export function useClaudeMessages(options: UseClaudeMessagesOptions = {}) {
   // Set up event listener
   useEffect(() => {
     const setupListener = async () => {
-      console.log('[TRACE] useClaudeMessages setupListener called');
+      console.log('[TRACE] useProviderSessionMessages setupListener called');
       if (eventListenerRef.current) {
         console.log('[TRACE] Cleaning up existing event listener');
         eventListenerRef.current();
@@ -145,13 +145,13 @@ export function useClaudeMessages(options: UseClaudeMessagesOptions = {}) {
             console.log('[TRACE] Parsed Tauri message:', message);
             handleMessage(message);
           } catch (error) {
-            console.error("[TRACE] Failed to parse Claude stream message:", error);
+            console.error("[TRACE] Failed to parse provider session stream message:", error);
           }
         });
         console.log('[TRACE] Tauri event listener setup complete');
       } else {
         // Web mode - use DOM events (these are dispatched by our WebSocket handler)
-        console.log('[TRACE] Setting up web event listener for claude-output');
+        console.log('[TRACE] Setting up web event listener for provider-session-output');
         const webEventHandler = (event: any) => {
           console.log('[TRACE] Web event received:', event);
           console.log('[TRACE] Event detail:', event.detail);
@@ -160,25 +160,25 @@ export function useClaudeMessages(options: UseClaudeMessagesOptions = {}) {
             console.log('[TRACE] Calling handleMessage with:', message);
             handleMessage(message);
           } catch (error) {
-            console.error("[TRACE] Failed to parse Claude stream message:", error);
+            console.error("[TRACE] Failed to parse provider session stream message:", error);
           }
         };
         
-        window.addEventListener('claude-output', webEventHandler);
-        console.log('[TRACE] Web event listener added for claude-output');
+        window.addEventListener('provider-session-output', webEventHandler);
+        console.log('[TRACE] Web event listener added for provider-session-output');
         console.log('[TRACE] Event listener function:', webEventHandler);
         
         // Test if event listener is working
         setTimeout(() => {
           console.log('[TRACE] Testing event dispatch...');
-          window.dispatchEvent(new CustomEvent('claude-output', {
+          window.dispatchEvent(new CustomEvent('provider-session-output', {
             detail: { type: 'test', message: 'test event' }
           }));
         }, 1000);
         
         eventListenerRef.current = () => {
           console.log('[TRACE] Removing web event listener');
-          window.removeEventListener('claude-output', webEventHandler);
+          window.removeEventListener('provider-session-output', webEventHandler);
         };
       }
     };
@@ -186,7 +186,7 @@ export function useClaudeMessages(options: UseClaudeMessagesOptions = {}) {
     setupListener();
 
     return () => {
-      console.log('[TRACE] useClaudeMessages cleanup');
+      console.log('[TRACE] useProviderSessionMessages cleanup');
       if (eventListenerRef.current) {
         eventListenerRef.current();
       }

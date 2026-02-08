@@ -5,6 +5,24 @@ const INITIAL_CHECKPOINTS_MINUTES = [2, 10, 15] as const;
 const FOLLOW_UP_INTERVAL_MINUTES = 5;
 const DEFAULT_MAX_TRANSCRIPT_CHARS = 6000;
 const DEFAULT_MAX_TITLE_CHARS = 72;
+const DEFAULT_FALLBACK_TITLE_WORD_LIMIT = 6;
+
+const GENERIC_TITLE_PATTERNS = [
+  /^general assistance$/i,
+  /^chat( with (assistant|ai))?$/i,
+  /^assistant( chat)?$/i,
+  /^help( request)?$/i,
+  /^terminal( session)?$/i,
+  /^session summary$/i,
+  /^coding task$/i,
+];
+
+const TITLE_STOPWORDS = new Set([
+  "a", "an", "the", "and", "or", "to", "for", "of", "in", "on", "with", "from", "by",
+  "can", "could", "would", "should", "please", "help", "me", "you", "my", "our", "we",
+  "i", "it", "is", "are", "be", "this", "that", "as", "at", "into", "about", "around",
+  "need", "needs", "want", "wants", "check", "review",
+]);
 
 export interface LatestSessionSnapshot {
   projectId: string;
@@ -12,6 +30,10 @@ export interface LatestSessionSnapshot {
   history: unknown[];
   userPrompts: string[];
   transcript: string;
+}
+
+export interface ResolveSessionSnapshotOptions {
+  preferredSessionId?: string;
 }
 
 function normalizeInlineWhitespace(value: string): string {
@@ -22,7 +44,7 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function stripLeadingProjectName(title: string, projectPath?: string): string {
+function stripProjectName(title: string, projectPath?: string): string {
   const projectName = projectNameFromPath(projectPath);
   if (!projectName) {
     return title;
@@ -47,7 +69,55 @@ function stripLeadingProjectName(title: string, projectPath?: string): string {
     next = next.replace(pattern, "");
   }
 
+  // Remove inline project name mentions to keep titles task-focused.
+  next = next
+    .replace(new RegExp(`\\b${escapedProjectName}\\b`, "ig"), "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  next = next.replace(/^[\s:|\-–—]+/, "").trim();
   return next;
+}
+
+function stripPromptPreamble(prompt: string): string {
+  const patterns = [
+    /^(please\s+)?(can|could|would)\s+you\s+/i,
+    /^help\s+me\s+/i,
+    /^i\s+need\s+to\s+/i,
+    /^let'?s\s+/i,
+    /^we\s+need\s+to\s+/i,
+  ];
+
+  let next = prompt.trim();
+  for (const pattern of patterns) {
+    next = next.replace(pattern, "");
+  }
+  return next.trim();
+}
+
+function normalizePromptForFallback(prompt: string): string {
+  const withoutMarkup = prompt
+    .replace(/`+/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\[[^\]]+\]\([^)]+\)/g, " ")
+    .replace(/https?:\/\/\S+/g, " ");
+  const firstClause = withoutMarkup.split(/[\n.!?]/)[0] || withoutMarkup;
+  return normalizeInlineWhitespace(stripPromptPreamble(firstClause));
+}
+
+function toTitleKeywords(prompt: string, projectPath?: string): string[] {
+  const projectName = projectNameFromPath(projectPath).toLowerCase();
+  const tokens = (prompt.match(/[A-Za-z0-9][A-Za-z0-9._-]*/g) || [])
+    .filter((token) => token.trim().length > 0)
+    .filter((token) => token.toLowerCase() !== projectName)
+    .filter((token) => !TITLE_STOPWORDS.has(token.toLowerCase()));
+
+  return tokens;
+}
+
+function capitalizeFirst(value: string): string {
+  if (!value) return value;
+  return `${value[0].toUpperCase()}${value.slice(1)}`;
 }
 
 function toText(value: unknown): string {
@@ -202,7 +272,7 @@ export function sanitizeTerminalTitleCandidate(
     .find((line) => line.length > 0) || "";
 
   const withoutEdgePunctuation = firstLine.replace(/^[`"'*#\-\s>]+|[`"'*#\-\s>]+$/g, "");
-  const withoutProjectPrefix = stripLeadingProjectName(withoutEdgePunctuation, projectPath);
+  const withoutProjectPrefix = stripProjectName(withoutEdgePunctuation, projectPath);
   const normalized = normalizeInlineWhitespace(withoutProjectPrefix);
   if (!normalized) {
     return "";
@@ -213,6 +283,47 @@ export function sanitizeTerminalTitleCandidate(
   }
 
   return normalized.slice(0, maxChars).trimEnd();
+}
+
+export function isGenericTerminalTitle(title: string): boolean {
+  const normalized = normalizeInlineWhitespace(title);
+  if (!normalized) {
+    return true;
+  }
+  return GENERIC_TITLE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export function deriveAutoTitleFromUserPrompts(
+  userPrompts: string[],
+  projectPath?: string,
+  maxChars = DEFAULT_MAX_TITLE_CHARS
+): string {
+  if (!Array.isArray(userPrompts) || userPrompts.length === 0) {
+    return "";
+  }
+
+  for (let index = userPrompts.length - 1; index >= 0; index -= 1) {
+    const normalizedPrompt = normalizePromptForFallback(userPrompts[index] || "");
+    if (!normalizedPrompt) continue;
+
+    const keywords = toTitleKeywords(normalizedPrompt, projectPath);
+    if (keywords.length >= 2) {
+      const compact = capitalizeFirst(
+        keywords.slice(0, DEFAULT_FALLBACK_TITLE_WORD_LIMIT).join(" ")
+      );
+      const sanitized = sanitizeTerminalTitleCandidate(compact, maxChars, projectPath);
+      if (sanitized && !isGenericTerminalTitle(sanitized)) {
+        return sanitized;
+      }
+    }
+
+    const sanitizedPrompt = sanitizeTerminalTitleCandidate(normalizedPrompt, maxChars, projectPath);
+    if (sanitizedPrompt && !isGenericTerminalTitle(sanitizedPrompt)) {
+      return sanitizedPrompt;
+    }
+  }
+
+  return "";
 }
 
 export function shouldGenerateAutoTitleForTranscript(
@@ -250,7 +361,7 @@ export function shouldApplyAutoRenameTitle(
   }
 
   const nextTitle = sanitizeTerminalTitleCandidate(candidateTitle, DEFAULT_MAX_TITLE_CHARS, projectPath);
-  if (!nextTitle) {
+  if (!nextTitle || isGenericTerminalTitle(nextTitle)) {
     return false;
   }
 
@@ -316,7 +427,10 @@ export function buildSessionTranscript(history: unknown[], maxChars = DEFAULT_MA
   return lines.join("\n").slice(0, maxChars);
 }
 
-export async function resolveLatestSessionSnapshot(projectPath: string): Promise<LatestSessionSnapshot | null> {
+export async function resolveLatestSessionSnapshot(
+  projectPath: string,
+  options: ResolveSessionSnapshotOptions = {}
+): Promise<LatestSessionSnapshot | null> {
   const canonicalPath = canonicalizeProjectPath(projectPath);
   if (!canonicalPath) {
     return null;
@@ -332,21 +446,51 @@ export async function resolveLatestSessionSnapshot(projectPath: string): Promise
       return null;
     }
 
-    const sessions = await api.getProjectSessions(project.id);
-    const latestSessionId = sessions[0]?.id?.trim();
-    if (!latestSessionId) {
+    const preferredSessionId = options.preferredSessionId?.trim();
+
+    let selectedSessionId: string | undefined;
+    let safeHistory: unknown[] | null = null;
+
+    if (preferredSessionId) {
+      try {
+        const preferredHistory = await api.loadSessionHistory(preferredSessionId, project.id);
+        if (Array.isArray(preferredHistory)) {
+          selectedSessionId = preferredSessionId;
+          safeHistory = preferredHistory;
+        } else {
+          return null;
+        }
+      } catch {
+        // Keep title unchanged when active session history is temporarily unavailable.
+        return null;
+      }
+    }
+
+    if (!selectedSessionId) {
+      const sessions = await api.getProjectSessions(project.id);
+      const latestSessionId = sessions[0]?.id?.trim();
+      if (!latestSessionId) {
+        return null;
+      }
+
+      const history = await api.loadSessionHistory(latestSessionId, project.id);
+      selectedSessionId = latestSessionId;
+      safeHistory = Array.isArray(history) ? history : [];
+    }
+
+    const resolvedSessionId = selectedSessionId?.trim();
+    if (!resolvedSessionId) {
       return null;
     }
 
-    const history = await api.loadSessionHistory(latestSessionId, project.id);
-    const safeHistory = Array.isArray(history) ? history : [];
-    const userPrompts = extractUserPromptTexts(safeHistory);
-    const transcript = buildSessionTranscript(safeHistory);
+    const history = Array.isArray(safeHistory) ? safeHistory : [];
+    const userPrompts = extractUserPromptTexts(history);
+    const transcript = buildSessionTranscript(history);
 
     return {
       projectId: project.id,
-      sessionId: latestSessionId,
-      history: safeHistory,
+      sessionId: resolvedSessionId,
+      history,
       userPrompts,
       transcript,
     };
