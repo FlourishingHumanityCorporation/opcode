@@ -109,6 +109,11 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
     expect(capturedClaudeProps.value.isPaneVisible).toBe(true);
     expect(capturedClaudeProps.value.workspaceId).toBe("workspace-1");
     expect(capturedClaudeProps.value.terminalTabId).toBe("terminal-1");
+    expect(capturedClaudeProps.value.currentTerminalTitle).toBe("Terminal 1");
+    expect(capturedClaudeProps.value.isTerminalTitleLocked).toBe(false);
+
+    capturedClaudeProps.value.onAutoRenameTerminalTitle("Renamed from test");
+    expect(updateTabSpy).toHaveBeenCalledWith("terminal-1", { title: "Renamed from test" });
   });
 
   it("marks inactive panes as non-interactive candidates", () => {
@@ -127,6 +132,27 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
     expect(capturedClaudeProps.value).toBeTruthy();
     expect(capturedClaudeProps.value.isPaneActive).toBe(false);
     expect(capturedClaudeProps.value.isPaneVisible).toBe(true);
+  });
+
+  it("passes title lock state to ClaudeCodeSession", () => {
+    const { workspace, terminal } = makeWorkspaceAndTerminal();
+    const lockedTerminal: TerminalTab = {
+      ...terminal,
+      titleLocked: true,
+    };
+
+    renderToStaticMarkup(
+      React.createElement(TerminalPaneSurface, {
+        workspace,
+        terminal: lockedTerminal,
+        paneId: "pane-1",
+        isActive: true,
+        isPaneVisible: true,
+      })
+    );
+
+    expect(capturedClaudeProps.value).toBeTruthy();
+    expect(capturedClaudeProps.value.isTerminalTitleLocked).toBe(true);
   });
 
   it("auto-renames default workspace title on first project path registration", () => {

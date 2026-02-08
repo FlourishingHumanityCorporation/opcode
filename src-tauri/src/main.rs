@@ -45,6 +45,7 @@ use commands::storage::{
     storage_delete_row, storage_execute_sql, storage_insert_row, storage_list_tables,
     storage_read_table, storage_reset_database, storage_update_row,
 };
+use commands::title::generate_local_terminal_title;
 use commands::terminal::{
     close_embedded_terminal, get_embedded_terminal_debug_snapshot, resize_embedded_terminal,
     start_embedded_terminal, write_embedded_terminal_input, write_terminal_incident_bundle,
@@ -318,6 +319,7 @@ fn main() {
             write_embedded_terminal_input,
             resize_embedded_terminal,
             close_embedded_terminal,
+            generate_local_terminal_title,
             get_embedded_terminal_debug_snapshot,
             write_terminal_incident_bundle,
         ])

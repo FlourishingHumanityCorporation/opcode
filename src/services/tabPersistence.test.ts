@@ -165,4 +165,29 @@ describe('TabPersistenceService', () => {
     expect(sanitized.paneStates[paneId]?.restorePreference).toBe('resume_latest');
     expect(sanitized.paneStates[paneId]?.projectPath).toBe('/tmp/project');
   });
+
+  it('persists terminal title lock state and defaults missing values to false', () => {
+    const workspace = makeWorkspace('workspace-a', 0, [
+      makeTerminal('terminal-locked', { titleLocked: true }),
+      makeTerminal('terminal-unlocked', { titleLocked: false }),
+    ]);
+
+    TabPersistenceService.saveWorkspace([workspace], workspace.id);
+    const restored = TabPersistenceService.loadWorkspace();
+    const restoredWorkspace = restored.tabs[0];
+
+    expect(restoredWorkspace.terminalTabs[0].titleLocked).toBe(true);
+    expect(restoredWorkspace.terminalTabs[1].titleLocked).toBe(false);
+
+    const raw = localStorage.getItem('opcode_workspace_v3');
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw as string) as {
+      tabs: Array<{ terminalTabs: Array<{ id: string; titleLocked?: boolean }> }>;
+    };
+    delete parsed.tabs[0].terminalTabs[0].titleLocked;
+    localStorage.setItem('opcode_workspace_v3', JSON.stringify(parsed));
+
+    const restoredWithMissingField = TabPersistenceService.loadWorkspace();
+    expect(restoredWithMissingField.tabs[0].terminalTabs[0].titleLocked).toBe(false);
+  });
 });

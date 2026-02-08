@@ -69,6 +69,7 @@ export interface TerminalTab {
   id: string;
   kind: 'chat' | 'agent';
   title: string;
+  titleLocked?: boolean;
   providerId?: string;
   sessionState?: TerminalSessionState;
   paneTree: PaneNode;
@@ -218,6 +219,7 @@ function createTerminalTab(projectPath: string, input?: CreateTerminalTabInput):
     id: createId('terminal'),
     kind,
     title: input?.title || (kind === 'agent' ? 'Agent Run' : 'Terminal'),
+    titleLocked: false,
     providerId,
     sessionState: {
       providerId,

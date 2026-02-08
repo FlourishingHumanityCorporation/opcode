@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 const OPCODE_TMUX_SOCKET: &str = "opcode_persistent";
+const TMUX_HISTORY_LIMIT: &str = "200000";
 
 #[cfg(target_os = "windows")]
 const TMUX_CONFIG_PATH: &str = "NUL";
@@ -196,6 +197,38 @@ fn start_tmux_attached(command: &mut CommandBuilder, session_id: &str, cwd: &Pat
     }
 }
 
+fn configure_tmux_defaults() {
+    let _ = ProcessCommand::new("tmux")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .args([
+            "-L",
+            OPCODE_TMUX_SOCKET,
+            "-f",
+            TMUX_CONFIG_PATH,
+            "set-option",
+            "-g",
+            "mouse",
+            "on",
+        ])
+        .status();
+
+    let _ = ProcessCommand::new("tmux")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .args([
+            "-L",
+            OPCODE_TMUX_SOCKET,
+            "-f",
+            TMUX_CONFIG_PATH,
+            "set-option",
+            "-g",
+            "history-limit",
+            TMUX_HISTORY_LIMIT,
+        ])
+        .status();
+}
+
 fn kill_tmux_session(session_id: &str) {
     let _ = ProcessCommand::new("tmux")
         .stdout(Stdio::null())
@@ -271,6 +304,8 @@ pub async fn start_embedded_terminal(
         .unwrap_or(false);
 
     let command = if let Some(session_id) = persistent_session_id.as_deref() {
+        configure_tmux_defaults();
+
         let mut cmd = CommandBuilder::new("tmux");
         cmd.cwd(cwd.clone());
         cmd.env("TERM", "xterm-256color");

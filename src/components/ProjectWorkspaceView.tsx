@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { FolderOpen, Plus, Terminal, X } from 'lucide-react';
+import { FolderOpen, Lock, LockOpen, Plus, Terminal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { Tab, TerminalTab } from '@/contexts/TabContext';
@@ -17,6 +17,15 @@ function getTerminalTitle(terminal: TerminalTab, index: number): string {
     return terminal.title;
   }
   return `Terminal ${index + 1}`;
+}
+
+export function toggleTerminalTitleLock(
+  updateTab: (id: string, updates: Partial<TerminalTab>) => void,
+  terminal: TerminalTab
+): void {
+  updateTab(terminal.id, {
+    titleLocked: !terminal.titleLocked,
+  });
 }
 
 export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
@@ -152,6 +161,22 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
                 >
                   <Terminal className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate text-left">{getTerminalTitle(terminal, index)}</span>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className={cn(
+                      "h-4 w-4 shrink-0 p-0",
+                      isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                    )}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleTerminalTitleLock(updateTab, terminal);
+                    }}
+                    title={terminal.titleLocked ? "Unlock title" : "Lock title"}
+                    aria-label={terminal.titleLocked ? "Unlock title" : "Lock title"}
+                  >
+                    {terminal.titleLocked ? <Lock className="h-3 w-3" /> : <LockOpen className="h-3 w-3" />}
+                  </Button>
                   <Button
                     size="icon"
                     variant="ghost"

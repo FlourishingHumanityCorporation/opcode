@@ -18,6 +18,8 @@ import {
   encodeTerminalKeyInput,
   focusTerminalIfInteractive,
   isMissingEmbeddedTerminalError,
+  normalizeWheelDeltaToScrollLines,
+  shouldRouteKeyboardFallbackInput,
   shouldAttemptStaleInputRecovery,
   shouldTerminatePersistentSessionForClose,
 } from "@/components/EmbeddedTerminal";
@@ -168,5 +170,78 @@ describe("EmbeddedTerminal lifecycle close behavior", () => {
     expect(encodeTerminalKeyInput({ key: "v", ctrlKey: false, metaKey: true, altKey: false })).toBeNull();
     expect(encodeTerminalKeyInput({ key: "ArrowUp", ctrlKey: false, metaKey: false, altKey: true })).toBeNull();
     expect(encodeTerminalKeyInput({ key: "Shift", ctrlKey: false, metaKey: false, altKey: false })).toBeNull();
+  });
+
+  it("normalizes wheel deltas into integer scroll lines with remainder carry", () => {
+    const lineMode = normalizeWheelDeltaToScrollLines({
+      deltaMode: 1,
+      deltaY: 3,
+      rows: 40,
+      remainder: 0,
+    });
+    expect(lineMode.lines).toBe(3);
+    expect(lineMode.remainder).toBe(0);
+
+    const firstPixel = normalizeWheelDeltaToScrollLines({
+      deltaMode: 0,
+      deltaY: 8,
+      rows: 40,
+      remainder: 0,
+    });
+    expect(firstPixel.lines).toBe(0);
+    expect(firstPixel.remainder).toBe(0.5);
+
+    const secondPixel = normalizeWheelDeltaToScrollLines({
+      deltaMode: 0,
+      deltaY: 8,
+      rows: 40,
+      remainder: firstPixel.remainder,
+    });
+    expect(secondPixel.lines).toBe(1);
+    expect(secondPixel.remainder).toBe(0);
+
+    const pageMode = normalizeWheelDeltaToScrollLines({
+      deltaMode: 2,
+      deltaY: -1,
+      rows: 50,
+      remainder: 0,
+    });
+    expect(pageMode.lines).toBe(-49);
+    expect(pageMode.remainder).toBe(0);
+  });
+
+  it("blocks navigation keys from global keyboard fallback forwarding", () => {
+    expect(
+      shouldRouteKeyboardFallbackInput({
+        key: "ArrowUp",
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+      })
+    ).toBe(false);
+    expect(
+      shouldRouteKeyboardFallbackInput({
+        key: "PageDown",
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+      })
+    ).toBe(false);
+    expect(
+      shouldRouteKeyboardFallbackInput({
+        key: "a",
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+      })
+    ).toBe(true);
+    expect(
+      shouldRouteKeyboardFallbackInput({
+        key: "c",
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+      })
+    ).toBe(false);
   });
 });

@@ -122,6 +122,12 @@ import {
   resolveLatestSessionIdForProject,
   sanitizeClaudeSessionId,
 } from "@/services/nativeTerminalRestore";
+import {
+  getNextAutoTitleCheckpointAtMs,
+  resolveLatestSessionSnapshot,
+  sanitizeTerminalTitleCandidate,
+  shouldApplyAutoRenameTitle,
+} from "@/services/terminalAutoTitle";
 
 interface ClaudeCodeSessionProps {
   /**
@@ -216,6 +222,18 @@ interface ClaudeCodeSessionProps {
    * Callback when pane resume session id is updated.
    */
   onResumeSessionIdChange?: (sessionId: string | undefined) => void;
+  /**
+   * Current terminal tab title for auto-rename comparisons.
+   */
+  currentTerminalTitle?: string;
+  /**
+   * Whether terminal title is currently locked.
+   */
+  isTerminalTitleLocked?: boolean;
+  /**
+   * Callback used by native terminal auto-title logic.
+   */
+  onAutoRenameTerminalTitle?: (title: string) => void;
   /**
    * Hide project/provider bar for embedded usage.
    */
@@ -337,6 +355,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   restorePreference,
   onRestorePreferenceChange,
   onResumeSessionIdChange,
+  currentTerminalTitle,
+  isTerminalTitleLocked = false,
+  onAutoRenameTerminalTitle,
 }) => {
   type QueuedPrompt = {
     id: string;
@@ -409,6 +430,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const sessionStartTime = useRef<number>(Date.now());
   const isIMEComposingRef = useRef(false);
   const lastResolvedSessionIdRef = useRef<string | null>(session?.id ?? null);
+  const terminalTitleRef = useRef<string>(currentTerminalTitle || "");
+  const titleLockedRef = useRef<boolean>(Boolean(isTerminalTitleLocked));
+  const autoTitleSessionStartedAtRef = useRef<number | null>(null);
+  const didApplyEarlyAutoTitleRef = useRef(false);
+
+  const AUTO_TITLE_MODEL = "glm-4.7-flash";
+  const AUTO_TITLE_EARLY_PROMPT_THRESHOLD = 2;
+  const AUTO_TITLE_EARLY_POLL_MS = 15_000;
   
   // Session metrics state for enhanced analytics
   const sessionMetrics = useRef({
@@ -487,6 +516,19 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   useEffect(() => {
     setActiveProviderId(initialProviderId || "claude");
   }, [initialProviderId]);
+
+  useEffect(() => {
+    terminalTitleRef.current = currentTerminalTitle || "";
+  }, [currentTerminalTitle]);
+
+  useEffect(() => {
+    titleLockedRef.current = Boolean(isTerminalTitleLocked);
+  }, [isTerminalTitleLocked]);
+
+  useEffect(() => {
+    didApplyEarlyAutoTitleRef.current = false;
+    autoTitleSessionStartedAtRef.current = null;
+  }, [workspaceId, terminalTabId, paneId, projectPath]);
 
   useEffect(() => {
     if (nativeTerminalMode) {
@@ -620,6 +662,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     if (resumeMatch?.[1]) {
       onResumeSessionIdChange?.(resumeMatch[1]);
     }
+    autoTitleSessionStartedAtRef.current = Date.now();
+    didApplyEarlyAutoTitleRef.current = false;
     setNativeTerminalCommand(command);
     setShowNativeRestorePrompt(false);
     setHasBootedNativeTerminal(true);
@@ -682,6 +726,111 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     resolveLatestNativeSessionAndBoot,
     restorePreference,
     resumeSessionId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !nativeTerminalMode ||
+      !isPaneVisible ||
+      !hasBootedNativeTerminal ||
+      !projectPath ||
+      !terminalTabId ||
+      !onAutoRenameTerminalTitle
+    ) {
+      return;
+    }
+
+    if (isTerminalTitleLocked) {
+      return;
+    }
+
+    if (autoTitleSessionStartedAtRef.current === null) {
+      autoTitleSessionStartedAtRef.current = Date.now();
+    }
+
+    let isCancelled = false;
+    let timedRenameTimeout: number | null = null;
+    const sessionStartedAtMs = autoTitleSessionStartedAtRef.current ?? Date.now();
+    autoTitleSessionStartedAtRef.current = sessionStartedAtMs;
+
+    const attemptAutoRename = async (reason: "early" | "timed"): Promise<void> => {
+      if (isCancelled || titleLockedRef.current) {
+        return;
+      }
+
+      const snapshot = await resolveLatestSessionSnapshot(projectPath);
+      if (!snapshot || !snapshot.transcript) {
+        return;
+      }
+
+      if (reason === "early" && snapshot.userPrompts.length < AUTO_TITLE_EARLY_PROMPT_THRESHOLD) {
+        return;
+      }
+
+      try {
+        const generatedTitle = await api.generateLocalTerminalTitle({
+          transcript: snapshot.transcript,
+          model: AUTO_TITLE_MODEL,
+        });
+        const sanitizedTitle = sanitizeTerminalTitleCandidate(generatedTitle);
+
+        if (!shouldApplyAutoRenameTitle(terminalTitleRef.current, sanitizedTitle, titleLockedRef.current)) {
+          return;
+        }
+
+        onAutoRenameTerminalTitle(sanitizedTitle);
+        terminalTitleRef.current = sanitizedTitle;
+        if (reason === "early") {
+          didApplyEarlyAutoTitleRef.current = true;
+        }
+      } catch (autoRenameError) {
+        console.warn("[ClaudeCodeSession] Native auto-rename failed", autoRenameError);
+      }
+    };
+
+    const scheduleNextTimedRename = () => {
+      if (isCancelled || titleLockedRef.current) {
+        return;
+      }
+
+      const now = Date.now();
+      const nextCheckpointAt = getNextAutoTitleCheckpointAtMs(sessionStartedAtMs, now);
+      const delayMs = Math.max(0, nextCheckpointAt - now);
+      timedRenameTimeout = window.setTimeout(() => {
+        void attemptAutoRename("timed").finally(() => {
+          scheduleNextTimedRename();
+        });
+      }, delayMs);
+    };
+
+    void attemptAutoRename("early");
+    const earlyPollInterval = window.setInterval(() => {
+      if (didApplyEarlyAutoTitleRef.current || titleLockedRef.current) {
+        return;
+      }
+      void attemptAutoRename("early");
+    }, AUTO_TITLE_EARLY_POLL_MS);
+
+    scheduleNextTimedRename();
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(earlyPollInterval);
+      if (timedRenameTimeout !== null) {
+        window.clearTimeout(timedRenameTimeout);
+      }
+    };
+  }, [
+    AUTO_TITLE_EARLY_POLL_MS,
+    AUTO_TITLE_EARLY_PROMPT_THRESHOLD,
+    AUTO_TITLE_MODEL,
+    hasBootedNativeTerminal,
+    isPaneVisible,
+    isTerminalTitleLocked,
+    nativeTerminalMode,
+    onAutoRenameTerminalTitle,
+    projectPath,
+    terminalTabId,
   ]);
 
   // Filter out messages that shouldn't be displayed

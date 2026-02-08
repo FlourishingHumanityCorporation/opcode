@@ -250,6 +250,11 @@ export interface EmbeddedTerminalDebugSnapshot {
   sessions: EmbeddedTerminalDebugSession[];
 }
 
+export interface GenerateLocalTerminalTitleInput {
+  transcript: string;
+  model?: string;
+}
+
 // Usage Dashboard types
 export interface UsageEntry {
   timestamp: string;
@@ -1260,6 +1265,13 @@ export const api = {
     return apiCall("close_embedded_terminal", {
       terminalId,
       terminatePersistentSession: options?.terminatePersistentSession,
+    });
+  },
+
+  async generateLocalTerminalTitle(input: GenerateLocalTerminalTitleInput): Promise<string> {
+    return apiCall("generate_local_terminal_title", {
+      transcript: input.transcript,
+      model: input.model,
     });
   },
 

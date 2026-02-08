@@ -43,6 +43,7 @@ interface SerializedTerminalTab {
   id: string;
   kind: TerminalTab['kind'];
   title: string;
+  titleLocked?: boolean;
   providerId?: string;
   sessionState?: TerminalTab['sessionState'];
   paneTree: PaneNode;
@@ -220,6 +221,7 @@ function deserializeTerminal(serialized: SerializedTerminalTab): TerminalTab {
     id: serialized.id,
     kind: serialized.kind,
     title: serialized.title,
+    titleLocked: Boolean(serialized.titleLocked),
     providerId: serialized.providerId,
     sessionState: serialized.sessionState,
     paneTree,
@@ -270,6 +272,7 @@ function serializeWorkspaceTab(tab: ProjectWorkspaceTab): SerializedWorkspaceTab
       id: terminal.id,
       kind: terminal.kind,
       title: terminal.title,
+      titleLocked: Boolean(terminal.titleLocked),
       providerId: terminal.providerId,
       sessionState: terminal.sessionState,
       paneTree: terminal.paneTree,
@@ -310,6 +313,7 @@ function makeLegacyWorkspaceFromTab(tab: LegacyTabV2, index: number): ProjectWor
     id: terminalId,
     kind: 'chat',
     title: tab.type === 'chat' ? (tab.title || 'Terminal') : 'Terminal 1',
+    titleLocked: false,
     providerId: tab.providerId,
     sessionState: {
       sessionId: tab.sessionId,

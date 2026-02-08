@@ -210,6 +210,7 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'write_embedded_terminal_input': '/api/terminal/input',
     'resize_embedded_terminal': '/api/terminal/resize',
     'close_embedded_terminal': '/api/terminal/close',
+    'generate_local_terminal_title': '/api/terminal/title',
     
     // Usage commands
     'get_usage_stats': '/api/usage',

@@ -19,6 +19,21 @@ type FocusScheduler = (focus: () => void) => void;
 const STALE_INPUT_THRESHOLD_MS = 8_000;
 const STALE_RECOVERY_GRACE_MS = 1_200;
 const STALE_RECOVERY_COOLDOWN_MS = 2_500;
+const TERMINAL_SCROLLBACK_LINES = 20_000;
+const WHEEL_PIXEL_DELTA_PER_LINE = 16;
+const WHEEL_DELTA_MODE_PIXEL = 0;
+const WHEEL_DELTA_MODE_LINE = 1;
+const WHEEL_DELTA_MODE_PAGE = 2;
+const FALLBACK_BLOCKED_NAVIGATION_KEYS = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+]);
 
 function shouldDebugLogs(): boolean {
   return Boolean(
@@ -61,6 +76,18 @@ type TerminalKeyboardEvent = Pick<
   KeyboardEvent,
   "key" | "ctrlKey" | "metaKey" | "altKey"
 >;
+
+interface WheelScrollDeltaInput {
+  deltaMode: number;
+  deltaY: number;
+  rows: number;
+  remainder: number;
+}
+
+interface WheelScrollDeltaResult {
+  lines: number;
+  remainder: number;
+}
 
 export function applyTerminalInteractivity(
   terminal: InteractiveTerminal | null | undefined,
@@ -147,6 +174,44 @@ export function encodeTerminalKeyInput(event: TerminalKeyboardEvent): string | n
     default:
       return event.key.length === 1 ? event.key : null;
   }
+}
+
+export function shouldRouteKeyboardFallbackInput(event: TerminalKeyboardEvent): boolean {
+  if (event.ctrlKey || event.metaKey || event.altKey) {
+    return false;
+  }
+  return !FALLBACK_BLOCKED_NAVIGATION_KEYS.has(event.key);
+}
+
+export function normalizeWheelDeltaToScrollLines({
+  deltaMode,
+  deltaY,
+  rows,
+  remainder,
+}: WheelScrollDeltaInput): WheelScrollDeltaResult {
+  const safeRows = Number.isFinite(rows) && rows > 0 ? rows : 24;
+  const safeRemainder = Number.isFinite(remainder) ? remainder : 0;
+
+  let lineDelta: number;
+  switch (deltaMode) {
+    case WHEEL_DELTA_MODE_LINE:
+      lineDelta = deltaY;
+      break;
+    case WHEEL_DELTA_MODE_PAGE:
+      lineDelta = deltaY * Math.max(1, safeRows - 1);
+      break;
+    case WHEEL_DELTA_MODE_PIXEL:
+    default:
+      lineDelta = deltaY / WHEEL_PIXEL_DELTA_PER_LINE;
+      break;
+  }
+
+  const totalDelta = lineDelta + safeRemainder;
+  const lines = totalDelta < 0 ? Math.ceil(totalDelta) : Math.floor(totalDelta);
+  return {
+    lines,
+    remainder: totalDelta - lines,
+  };
 }
 
 interface StaleInputRecoveryCandidate {
@@ -464,6 +529,8 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = ({
     let outputUnlisten: UnlistenFn | null = null;
     let exitUnlisten: UnlistenFn | null = null;
     let onDataDisposable: { dispose: () => void } | null = null;
+    let viewportWheelCleanup: UnlistenFn | null = null;
+    let wheelDeltaRemainder = 0;
     let terminalInstance: XTerm | null = null;
 
     const isCurrentStartup = () => !disposed && startupGenerationRef.current === startupGeneration;
@@ -477,17 +544,15 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = ({
       outputUnlisten = null;
       exitUnlisten?.();
       exitUnlisten = null;
+      viewportWheelCleanup?.();
+      viewportWheelCleanup = null;
+      wheelDeltaRemainder = 0;
     };
 
     const wireTerminalSession = async (id: string, runAutoCommand: boolean): Promise<boolean> => {
       if (!terminalInstance || !fitAddonRef.current) {
         throw new Error("Terminal is not initialized");
       }
-      if (!isCurrentStartup()) {
-        return false;
-      }
-
-      await api.resizeEmbeddedTerminal(id, terminalInstance.cols, terminalInstance.rows);
       if (!isCurrentStartup()) {
         return false;
       }
@@ -546,6 +611,12 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = ({
         return false;
       }
 
+      await api.resizeEmbeddedTerminal(id, terminalInstance.cols, terminalInstance.rows);
+      if (!isCurrentStartup()) {
+        detachListeners();
+        return false;
+      }
+
       exitUnlisten = await tauriListen(`terminal-exit:${id}`, () => {
         if (!terminalInstance) return;
         terminalInstance.writeln("\r\n\x1b[90m[process exited]\x1b[0m");
@@ -599,6 +670,7 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = ({
       const term = new XTerm({
         cursorBlink: true,
         convertEol: true,
+        scrollback: TERMINAL_SCROLLBACK_LINES,
         fontFamily: "Menlo, Monaco, 'Courier New', monospace",
         fontSize: 12,
         lineHeight: 1.2,
@@ -619,6 +691,29 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = ({
       }
 
       term.open(containerRef.current);
+      const viewport = containerRef.current.querySelector(".xterm-viewport");
+      if (viewport instanceof HTMLElement) {
+        const handleWheel = (event: WheelEvent) => {
+          event.stopImmediatePropagation();
+          event.stopPropagation();
+          const { lines, remainder } = normalizeWheelDeltaToScrollLines({
+            deltaMode: event.deltaMode,
+            deltaY: event.deltaY,
+            rows: term.rows,
+            remainder: wheelDeltaRemainder,
+          });
+          wheelDeltaRemainder = remainder;
+          event.preventDefault();
+          if (lines !== 0) {
+            term.scrollLines(lines);
+          }
+        };
+
+        viewport.addEventListener("wheel", handleWheel, { passive: false, capture: true });
+        viewportWheelCleanup = () => {
+          viewport.removeEventListener("wheel", handleWheel, true);
+        };
+      }
       fitAddon.fit();
       applyTerminalInteractivity(term as unknown as InteractiveTerminal, isInteractiveRef.current);
 
@@ -634,7 +729,6 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = ({
             const didReattach = await wireTerminalSession(previousTerminalId, false);
             if (didReattach) {
               emitTerminalEvent("reattach_success", { previousTerminalId });
-              term.writeln(`\x1b[90m[opcode] reattached shell at ${projectPath}\x1b[0m`);
               return;
             }
             if (!isCurrentStartup()) {
@@ -653,7 +747,6 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = ({
           }
         }
 
-        term.writeln(`\x1b[90m[opcode] shell started at ${projectPath}\x1b[0m`);
         const started = await api.startEmbeddedTerminal(projectPath, term.cols, term.rows, persistentSessionId);
         const id = started.terminalId;
         emitTerminalEvent("start_success", {
@@ -753,6 +846,9 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = ({
         return;
       }
       if (isEditableTarget(target)) {
+        return;
+      }
+      if (!shouldRouteKeyboardFallbackInput(event)) {
         return;
       }
 

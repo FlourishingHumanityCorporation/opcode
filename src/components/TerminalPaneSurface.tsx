@@ -199,6 +199,13 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
     });
   };
 
+  const handleAutoRenameTerminalTitle = React.useCallback(
+    (title: string) => {
+      updateTab(terminal.id, { title });
+    },
+    [terminal.id, updateTab]
+  );
+
   return (
     <div
       className={cn(
@@ -296,6 +303,9 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
             restorePreference={paneRuntime.restorePreference}
             onRestorePreferenceChange={handleRestorePreferenceChange}
             onResumeSessionIdChange={handleResumeSessionIdChange}
+            currentTerminalTitle={terminal.title}
+            isTerminalTitleLocked={Boolean(terminal.titleLocked)}
+            onAutoRenameTerminalTitle={handleAutoRenameTerminalTitle}
             onBack={() => {}}
             className="h-full"
           />
