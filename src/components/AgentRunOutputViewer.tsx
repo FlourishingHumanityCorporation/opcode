@@ -28,6 +28,12 @@ import { AGENT_ICONS } from './CCAgents';
 import type { ClaudeStreamMessage } from './AgentExecution';
 import { useTabState } from '@/hooks/useTabState';
 import { getModelDisplayName } from '@/lib/providerModels';
+import {
+  emitAgentAttention,
+  extractAttentionText,
+  shouldTriggerNeedsInput,
+  summarizeAttentionBody,
+} from '@/services/agentAttention';
 
 interface AgentRunOutputViewerProps {
   /**
@@ -58,7 +64,7 @@ export function AgentRunOutputViewer({
   tabId,
   className 
 }: AgentRunOutputViewerProps) {
-  const { updateTabTitle, updateTabStatus } = useTabState();
+  const { tabs, updateTabTitle, updateTabStatus } = useTabState();
   const [run, setRun] = useState<AgentRunWithMetrics | null>(null);
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
   const [rawJsonlOutput, setRawJsonlOutput] = useState<string[]>([]);
@@ -79,6 +85,12 @@ export function AgentRunOutputViewer({
   const fullscreenMessagesEndRef = useRef<HTMLDivElement>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
   const { getCachedOutput, setCachedOutput } = useOutputCache();
+  const workspaceIdForTab = useMemo(() => {
+    const ownerWorkspace = tabs.find((workspace) =>
+      workspace.terminalTabs.some((terminal) => terminal.id === tabId)
+    );
+    return ownerWorkspace?.id;
+  }, [tabId, tabs]);
 
   // Auto-scroll logic
   const isAtBottom = () => {
@@ -293,6 +305,20 @@ export function AgentRunOutputViewer({
           
           // Parse and display
           const message = JSON.parse(event.payload) as ClaudeStreamMessage;
+          if (message.type === "assistant") {
+            const candidateText = extractAttentionText(message);
+            if (shouldTriggerNeedsInput(candidateText)) {
+              void emitAgentAttention({
+                kind: "needs_input",
+                workspaceId: workspaceIdForTab,
+                terminalTabId: tabId,
+                source: "agent_run_output",
+                body:
+                  summarizeAttentionBody(candidateText) ||
+                  "The agent is waiting for your input.",
+              });
+            }
+          }
           setMessages(prev => [...prev, message]);
         } catch (err) {
           console.error("[AgentRunOutputViewer] Failed to parse message:", err, event.payload);
@@ -304,9 +330,17 @@ export function AgentRunOutputViewer({
         setToast({ message: event.payload, type: 'error' });
       });
 
-      const completeUnlisten = await listen<boolean>(`agent-complete:${run!.id}`, () => {
+      const completeUnlisten = await listen<boolean>(`agent-complete:${run!.id}`, (event) => {
         setToast({ message: 'Agent execution completed', type: 'success' });
-        // Don't set status here as the parent component should handle it
+        if (event.payload) {
+          void emitAgentAttention({
+            kind: "done",
+            workspaceId: workspaceIdForTab,
+            terminalTabId: tabId,
+            source: "agent_run_output",
+            body: `${run?.agent_name || "Agent"} completed successfully.`,
+          });
+        }
       });
 
       const cancelUnlisten = await listen<boolean>(`agent-cancelled:${run!.id}`, () => {

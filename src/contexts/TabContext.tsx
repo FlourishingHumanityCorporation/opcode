@@ -24,7 +24,7 @@ export type UtilityOverlayType =
   | 'diagnostics'
   | null;
 
-export type WorkspaceStatus = 'active' | 'idle' | 'running' | 'complete' | 'error';
+export type WorkspaceStatus = 'active' | 'idle' | 'running' | 'complete' | 'attention' | 'error';
 
 export interface PaneLeafNode {
   id: string;

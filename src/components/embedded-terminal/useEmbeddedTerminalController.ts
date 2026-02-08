@@ -23,7 +23,7 @@ import {
   encodeTerminalKeyInput,
   focusTerminalIfInteractive,
   getTerminalTextarea,
-  isEditableTarget,
+  isEditableTargetOutsideContainer,
   normalizeWheelDeltaToScrollLines,
   shouldRouteKeyboardFallbackInput,
 } from "@/components/embedded-terminal/input";
@@ -68,6 +68,51 @@ export function shouldReattachUsingExistingTerminalId(
   return Boolean(existingTerminalId) && !persistentSessionId;
 }
 
+export const TERMINAL_AUTO_FOCUS_RETRY_DELAYS_MS = [0, 80, 180, 320, 500] as const;
+
+export type TerminalAutoFocusRetryDecision =
+  | "continue"
+  | "stop-missing-terminal"
+  | "stop-not-interactive"
+  | "stop-not-running"
+  | "stop-focused"
+  | "stop-editable-outside";
+
+interface TerminalAutoFocusRetryDecisionInput {
+  terminal: Pick<InteractiveTerminal, "focus"> | null | undefined;
+  terminalTextarea: HTMLTextAreaElement | null;
+  container: Element | null | undefined;
+  activeElement: Element | null;
+  isInteractive: boolean;
+  isRunning: boolean;
+}
+
+export function getTerminalAutoFocusRetryDecision({
+  terminal,
+  terminalTextarea,
+  container,
+  activeElement,
+  isInteractive,
+  isRunning,
+}: TerminalAutoFocusRetryDecisionInput): TerminalAutoFocusRetryDecision {
+  if (!terminal) {
+    return "stop-missing-terminal";
+  }
+  if (!isInteractive) {
+    return "stop-not-interactive";
+  }
+  if (!isRunning) {
+    return "stop-not-running";
+  }
+  if (terminalTextarea && activeElement === terminalTextarea) {
+    return "stop-focused";
+  }
+  if (isEditableTargetOutsideContainer(activeElement, container)) {
+    return "stop-editable-outside";
+  }
+  return "continue";
+}
+
 export function useEmbeddedTerminalController({
   projectPath,
   autoRunCommand,
@@ -101,6 +146,7 @@ export function useEmbeddedTerminalController({
   const lastOutputAtRef = useRef<number | null>(Date.now());
   const lastStaleRecoveryAtRef = useRef(0);
   const lastOutputEventEmitAtRef = useRef(0);
+  const focusRetryTimeoutIdsRef = useRef<number[]>([]);
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [restartToken, setRestartToken] = useState(0);
@@ -204,9 +250,72 @@ export function useEmbeddedTerminalController({
     }
   }, [emitTerminalEvent]);
 
+  const clearAutoFocusRetryTimers = useCallback(() => {
+    focusRetryTimeoutIdsRef.current.forEach((timeoutId) => {
+      window.clearTimeout(timeoutId);
+    });
+    focusRetryTimeoutIdsRef.current = [];
+  }, []);
+
+  const scheduleTerminalAutoFocusRetry = useCallback(
+    (source: "startup" | "interactive") => {
+      clearAutoFocusRetryTimers();
+
+      const runAttempt = (attempt: number) => {
+        const terminal = terminalRef.current;
+        const container = containerRef.current;
+        const terminalTextarea = getTerminalTextarea(terminal);
+        const decision = getTerminalAutoFocusRetryDecision({
+          terminal,
+          terminalTextarea,
+          container,
+          activeElement: document.activeElement,
+          isInteractive: isInteractiveRef.current,
+          isRunning: isRunningRef.current,
+        });
+
+        if (decision === "stop-focused") {
+          emitTerminalEvent("focus_recovered", { source: "auto-retry", trigger: source, attempt });
+          clearAutoFocusRetryTimers();
+          return;
+        }
+
+        if (decision === "stop-editable-outside") {
+          emitTerminalEvent("focus_retry_cancelled", {
+            source,
+            attempt,
+            reason: "editable-target-outside-terminal",
+          });
+          clearAutoFocusRetryTimers();
+          return;
+        }
+
+        if (decision !== "continue") {
+          clearAutoFocusRetryTimers();
+          return;
+        }
+
+        focusTerminalIfInteractive(terminal, isInteractiveRef.current);
+        if (terminalTextarea && document.activeElement === terminalTextarea) {
+          emitTerminalEvent("focus_recovered", { source: "auto-retry", trigger: source, attempt });
+          clearAutoFocusRetryTimers();
+        }
+      };
+
+      TERMINAL_AUTO_FOCUS_RETRY_DELAYS_MS.forEach((delay, attempt) => {
+        const timeoutId = window.setTimeout(() => {
+          runAttempt(attempt);
+        }, delay);
+        focusRetryTimeoutIdsRef.current.push(timeoutId);
+      });
+    },
+    [clearAutoFocusRetryTimers, emitTerminalEvent]
+  );
+
   const handleRestart = useCallback(async () => {
     suppressAutoRecoverRef.current = true;
     autoRecoverCountRef.current = 0;
+    clearAutoFocusRetryTimers();
     emitTerminalEvent("restart_requested");
     const id = terminalIdRef.current;
     if (id) {
@@ -214,7 +323,7 @@ export function useEmbeddedTerminalController({
       onTerminalIdChangeRef.current?.(undefined);
     }
     setRestartToken((prev) => prev + 1);
-  }, [emitTerminalEvent]);
+  }, [clearAutoFocusRetryTimers, emitTerminalEvent]);
 
   useEffect(() => {
     existingTerminalIdRef.current = existingTerminalId;
@@ -295,6 +404,7 @@ export function useEmbeddedTerminalController({
       terminalIdRef.current = id;
       setTerminalId(id);
       setIsRunning(true);
+      isRunningRef.current = true;
       setError(null);
       lastOutputAtRef.current = Date.now();
 
@@ -358,6 +468,7 @@ export function useEmbeddedTerminalController({
         terminalInstance.writeln("\r\n\x1b[90m[process exited]\x1b[0m");
         emitTerminalEvent("exit_event", { terminalId: id });
         setIsRunning(false);
+        isRunningRef.current = false;
         terminalIdRef.current = null;
         setTerminalId(null);
         onTerminalIdChangeRef.current?.(undefined);
@@ -395,6 +506,7 @@ export function useEmbeddedTerminalController({
           void runInTerminal(commandToRun);
         }, 120);
       }
+      scheduleTerminalAutoFocusRetry("startup");
       return true;
     };
 
@@ -402,6 +514,7 @@ export function useEmbeddedTerminalController({
       setIsStarting(true);
       setError(null);
       setIsRunning(false);
+      isRunningRef.current = false;
 
       const term = new XTerm({
         cursorBlink: true,
@@ -474,6 +587,7 @@ export function useEmbeddedTerminalController({
           terminalIdRef.current = null;
           setTerminalId(null);
           setIsRunning(false);
+          isRunningRef.current = false;
           onTerminalIdChangeRef.current?.(undefined);
         }
 
@@ -497,6 +611,7 @@ export function useEmbeddedTerminalController({
             terminalIdRef.current = null;
             setTerminalId(null);
             setIsRunning(false);
+            isRunningRef.current = false;
             onTerminalIdChangeRef.current?.(undefined);
           }
         }
@@ -532,6 +647,7 @@ export function useEmbeddedTerminalController({
         });
         setError(message);
         setIsRunning(false);
+        isRunningRef.current = false;
       } finally {
         setIsStarting(false);
       }
@@ -542,11 +658,13 @@ export function useEmbeddedTerminalController({
     return () => {
       disposed = true;
       suppressAutoRecoverRef.current = true;
+      clearAutoFocusRetryTimers();
       detachListeners();
 
       terminalIdRef.current = null;
       setTerminalId(null);
       setIsRunning(false);
+      isRunningRef.current = false;
 
       if (terminalInstance) {
         terminalInstance.dispose();
@@ -559,6 +677,8 @@ export function useEmbeddedTerminalController({
     restartToken,
     runInTerminal,
     scheduleSoftReattach,
+    scheduleTerminalAutoFocusRetry,
+    clearAutoFocusRetryTimers,
     emitTerminalEvent,
     persistentSessionId,
   ]);
@@ -571,14 +691,20 @@ export function useEmbeddedTerminalController({
     if (isInteractive) {
       if (applied) {
         emitTerminalEvent("became_interactive");
-        window.setTimeout(() => {
-          focusTerminalIfInteractive(terminalRef.current, isInteractiveRef.current);
-        }, 120);
+        scheduleTerminalAutoFocusRetry("interactive");
       }
       return;
     }
+    clearAutoFocusRetryTimers();
     emitTerminalEvent("stdin_disabled");
-  }, [isInteractive, terminalId, isStarting, emitTerminalEvent]);
+  }, [
+    isInteractive,
+    terminalId,
+    isStarting,
+    emitTerminalEvent,
+    scheduleTerminalAutoFocusRetry,
+    clearAutoFocusRetryTimers,
+  ]);
 
   useEffect(() => {
     if (!isInteractive || !isRunning || !terminalIdRef.current) {
@@ -596,15 +722,15 @@ export function useEmbeddedTerminalController({
       }
 
       const target = event.target;
-      if (target instanceof Node && target !== document.body && !container.contains(target)) {
+      if (
+        isEditableTargetOutsideContainer(target, container) ||
+        isEditableTargetOutsideContainer(document.activeElement, container)
+      ) {
         return;
       }
 
       const terminalTextarea = getTerminalTextarea(terminalRef.current);
       if (terminalTextarea && document.activeElement === terminalTextarea) {
-        return;
-      }
-      if (isEditableTarget(target)) {
         return;
       }
       if (!shouldRouteKeyboardFallbackInput(event)) {
@@ -755,8 +881,9 @@ export function useEmbeddedTerminalController({
     return () => {
       staleRecoveryPendingRef.current = false;
       softReattachPendingRef.current = false;
+      clearAutoFocusRetryTimers();
     };
-  }, []);
+  }, [clearAutoFocusRetryTimers]);
 
   const statusText = useMemo(() => {
     if (isStarting) return "Starting terminal...";

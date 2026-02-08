@@ -102,6 +102,12 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTrackEvent, useComponentMetrics, useWorkflowTracking } from "@/hooks";
 import { SessionPersistenceService } from "@/services/sessionPersistence";
 import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
+import {
+  emitAgentAttention,
+  extractAttentionText,
+  shouldTriggerNeedsInput,
+  summarizeAttentionBody,
+} from "@/services/agentAttention";
 import { createStreamWatchdog } from "@/lib/streamWatchdog";
 import {
   getDefaultModelForProvider,
@@ -109,10 +115,13 @@ import {
   getProviderDisplayName,
 } from "@/lib/providerModels";
 import {
+  NATIVE_TERMINAL_START_COMMAND_EVENT,
   NATIVE_TERMINAL_MODE_EVENT,
   PLAIN_TERMINAL_MODE_EVENT,
+  loadNativeTerminalStartCommandPreference,
   loadNativeTerminalModePreference,
   loadPlainTerminalModePreference,
+  readNativeTerminalStartCommandFromStorage,
   readNativeTerminalModeFromStorage,
   readPlainTerminalModeFromStorage,
   saveNativeTerminalModePreference,
@@ -411,7 +420,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [hasBootedNativeTerminal, setHasBootedNativeTerminal] = useState<boolean>(
     () => Boolean(embeddedTerminalId)
   );
-  const [nativeTerminalCommand, setNativeTerminalCommand] = useState<string>("claude");
+  const [nativeTerminalStartupCommand, setNativeTerminalStartupCommand] = useState<string>(() =>
+    readNativeTerminalStartCommandFromStorage()
+  );
+  const [nativeTerminalCommand, setNativeTerminalCommand] = useState<string>("");
   const [showNativeRestorePrompt, setShowNativeRestorePrompt] = useState<boolean>(false);
   const [isResolvingNativeRestore, setIsResolvingNativeRestore] = useState<boolean>(false);
   const [nativeRestoreNotice, setNativeRestoreNotice] = useState<string | null>(null);
@@ -552,6 +564,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         setNativeTerminalMode(enabled);
       }
     });
+    loadNativeTerminalStartCommandPreference().then((command) => {
+      if (!isCancelled) {
+        setNativeTerminalStartupCommand(command);
+      }
+    });
 
     const handlePlainModeChange = (event: Event) => {
       const detail = (event as CustomEvent<{ enabled?: boolean }>).detail;
@@ -569,13 +586,29 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         setNativeTerminalMode(readNativeTerminalModeFromStorage());
       }
     };
+    const handleNativeStartCommandChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ command?: string }>).detail;
+      if (typeof detail?.command === "string") {
+        setNativeTerminalStartupCommand(detail.command);
+      } else {
+        setNativeTerminalStartupCommand(readNativeTerminalStartCommandFromStorage());
+      }
+    };
 
     window.addEventListener(PLAIN_TERMINAL_MODE_EVENT, handlePlainModeChange as EventListener);
     window.addEventListener(NATIVE_TERMINAL_MODE_EVENT, handleNativeModeChange as EventListener);
+    window.addEventListener(
+      NATIVE_TERMINAL_START_COMMAND_EVENT,
+      handleNativeStartCommandChange as EventListener
+    );
     return () => {
       isCancelled = true;
       window.removeEventListener(PLAIN_TERMINAL_MODE_EVENT, handlePlainModeChange as EventListener);
       window.removeEventListener(NATIVE_TERMINAL_MODE_EVENT, handleNativeModeChange as EventListener);
+      window.removeEventListener(
+        NATIVE_TERMINAL_START_COMMAND_EVENT,
+        handleNativeStartCommandChange as EventListener
+      );
     };
   }, []);
 
@@ -673,6 +706,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     setHasBootedNativeTerminal(true);
   }, [onResumeSessionIdChange]);
 
+  const bootNativeTerminalWithStartupCommand = React.useCallback(() => {
+    bootNativeTerminalWithCommand(nativeTerminalStartupCommand);
+  }, [bootNativeTerminalWithCommand, nativeTerminalStartupCommand]);
+
   const resolveLatestNativeSessionAndBoot = React.useCallback(async () => {
     if (!projectPath) {
       return;
@@ -689,15 +726,20 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       }
 
       setNativeRestoreNotice('No prior Claude session found for this project. Starting fresh.');
-      bootNativeTerminalWithCommand('claude');
+      bootNativeTerminalWithStartupCommand();
     } catch (restoreError) {
       console.warn('[ClaudeCodeSession] Failed to resolve latest native restore session', restoreError);
       setNativeRestoreNotice('Could not load prior sessions. Starting fresh.');
-      bootNativeTerminalWithCommand('claude');
+      bootNativeTerminalWithStartupCommand();
     } finally {
       setIsResolvingNativeRestore(false);
     }
-  }, [bootNativeTerminalWithCommand, onResumeSessionIdChange, projectPath]);
+  }, [
+    bootNativeTerminalWithCommand,
+    bootNativeTerminalWithStartupCommand,
+    onResumeSessionIdChange,
+    projectPath,
+  ]);
 
   useEffect(() => {
     if (!nativeTerminalMode || !projectPath || hasBootedNativeTerminal || !isPaneVisible) {
@@ -716,13 +758,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
 
     if (restorePreference === 'start_fresh') {
-      bootNativeTerminalWithCommand('claude');
+      bootNativeTerminalWithStartupCommand();
       return;
     }
 
-    bootNativeTerminalWithCommand('claude');
+    bootNativeTerminalWithStartupCommand();
   }, [
     bootNativeTerminalWithCommand,
+    bootNativeTerminalWithStartupCommand,
     hasBootedNativeTerminal,
     isPaneVisible,
     nativeTerminalMode,
@@ -1471,6 +1514,21 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             
             debugLog('[ClaudeCodeSession] handleStreamMessage - message type:', message.type);
 
+            if (message.type === "assistant") {
+              const candidateText = extractAttentionText(message);
+              if (shouldTriggerNeedsInput(candidateText)) {
+                void emitAgentAttention({
+                  kind: "needs_input",
+                  workspaceId,
+                  terminalTabId,
+                  source: "claude_session",
+                  body:
+                    summarizeAttentionBody(candidateText) ||
+                    "The agent is waiting for your input.",
+                });
+              }
+            }
+
             // Store raw JSONL
             setRawJsonlOutput((prev) => [...prev, rawPayload]);
 
@@ -1553,6 +1611,17 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           setIsLoading(false);
           hasActiveSessionRef.current = false;
           isListeningRef.current = false; // Reset listening state
+
+          if (success) {
+            void emitAgentAttention({
+              kind: "done",
+              workspaceId,
+              terminalTabId,
+              source: "claude_session",
+              body: `Run completed for ${runProjectPath || "the current workspace"}.`,
+            });
+          }
+
           logWorkspaceEvent({
             category: 'stream_watchdog',
             action: 'stream_complete',
@@ -2287,8 +2356,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     onRestorePreferenceChange?.('start_fresh');
     onResumeSessionIdChange?.(undefined);
     setNativeRestoreNotice(null);
-    bootNativeTerminalWithCommand('claude');
-  }, [bootNativeTerminalWithCommand, onRestorePreferenceChange, onResumeSessionIdChange]);
+    bootNativeTerminalWithStartupCommand();
+  }, [bootNativeTerminalWithStartupCommand, onRestorePreferenceChange, onResumeSessionIdChange]);
 
   const nativeTerminalPanel = (() => {
     if (!projectPath) {

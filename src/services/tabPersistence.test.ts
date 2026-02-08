@@ -190,4 +190,19 @@ describe('TabPersistenceService', () => {
     const restoredWithMissingField = TabPersistenceService.loadWorkspace();
     expect(restoredWithMissingField.tabs[0].terminalTabs[0].titleLocked).toBe(false);
   });
+
+  it('round-trips attention status for terminals and workspaces', () => {
+    const workspace = makeWorkspace(
+      'workspace-attention',
+      0,
+      [makeTerminal('terminal-attention', { status: 'attention' })],
+      { status: 'attention' }
+    );
+
+    TabPersistenceService.saveWorkspace([workspace], workspace.id);
+    const restored = TabPersistenceService.loadWorkspace();
+
+    expect(restored.tabs[0].status).toBe('attention');
+    expect(restored.tabs[0].terminalTabs[0].status).toBe('attention');
+  });
 });

@@ -6,6 +6,43 @@ import { useTabState } from '@/hooks/useTabState';
 import { ProjectWorkspaceView } from '@/components/ProjectWorkspaceView';
 import { UtilityOverlayHost } from '@/components/UtilityOverlayHost';
 import { logWorkspaceEvent } from '@/services/workspaceDiagnostics';
+import {
+  OPCODE_AGENT_ATTENTION_EVENT,
+  type AgentAttentionEventDetail,
+} from '@/services/agentAttention';
+import type { Tab, TerminalTab } from '@/contexts/TabContext';
+
+export function mapAgentAttentionKindToStatus(
+  kind: AgentAttentionEventDetail["kind"]
+): TerminalTab["status"] {
+  return kind === "needs_input" ? "attention" : "complete";
+}
+
+export function applyAgentAttentionStatusUpdate(
+  tabs: Tab[],
+  updateTab: (id: string, updates: Partial<Tab> | Partial<TerminalTab>) => void,
+  detail: AgentAttentionEventDetail
+): boolean {
+  if (!detail.terminalTabId) {
+    return false;
+  }
+
+  const matchingWorkspace =
+    (detail.workspaceId
+      ? tabs.find((workspace) => workspace.id === detail.workspaceId)
+      : undefined) ||
+    tabs.find((workspace) =>
+      workspace.terminalTabs.some((terminal) => terminal.id === detail.terminalTabId)
+    );
+
+  if (!matchingWorkspace) {
+    return false;
+  }
+
+  const status = mapAgentAttentionKindToStatus(detail.kind);
+  updateTab(detail.terminalTabId, { status });
+  return true;
+}
 
 export const TabContent: React.FC = () => {
   const {
@@ -106,6 +143,12 @@ export const TabContent: React.FC = () => {
       closeUtilityOverlay();
     };
 
+    const handleAgentAttention = (event: Event) => {
+      const detail = (event as CustomEvent<AgentAttentionEventDetail>).detail;
+      if (!detail) return;
+      applyAgentAttentionStatusUpdate(tabs, updateTab, detail);
+    };
+
     window.addEventListener('open-session-in-tab', handleOpenSessionInTab as EventListener);
     window.addEventListener('open-claude-file', handleOpenClaudeFile as EventListener);
     window.addEventListener('open-agent-execution', handleOpenAgentExecution as EventListener);
@@ -115,6 +158,7 @@ export const TabContent: React.FC = () => {
     window.addEventListener('claude-session-selected', handleClaudeSessionSelected as EventListener);
     window.addEventListener('open-utility-overlay', handleOpenUtilityOverlay as EventListener);
     window.addEventListener('close-utility-overlay', handleCloseUtilityOverlay);
+    window.addEventListener(OPCODE_AGENT_ATTENTION_EVENT, handleAgentAttention as EventListener);
 
     return () => {
       window.removeEventListener('open-session-in-tab', handleOpenSessionInTab as EventListener);
@@ -126,6 +170,7 @@ export const TabContent: React.FC = () => {
       window.removeEventListener('claude-session-selected', handleClaudeSessionSelected as EventListener);
       window.removeEventListener('open-utility-overlay', handleOpenUtilityOverlay as EventListener);
       window.removeEventListener('close-utility-overlay', handleCloseUtilityOverlay);
+      window.removeEventListener(OPCODE_AGENT_ATTENTION_EVENT, handleAgentAttention as EventListener);
     };
   }, [
     closeTab,

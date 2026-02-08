@@ -227,6 +227,111 @@ fn should_terminate_persistent_session(terminate_persistent_session: Option<bool
     terminate_persistent_session.unwrap_or(true)
 }
 
+#[derive(Default)]
+struct Utf8StreamDecoder {
+    pending: Vec<u8>,
+}
+
+impl Utf8StreamDecoder {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn push(&mut self, bytes: &[u8]) -> String {
+        if !bytes.is_empty() {
+            self.pending.extend_from_slice(bytes);
+        }
+        self.decode_pending(false)
+    }
+
+    fn flush_eof(&mut self) -> String {
+        self.decode_pending(true)
+    }
+
+    fn decode_pending(&mut self, flush_incomplete: bool) -> String {
+        let mut output = String::new();
+        let mut cursor = 0usize;
+
+        while cursor < self.pending.len() {
+            match std::str::from_utf8(&self.pending[cursor..]) {
+                Ok(valid) => {
+                    output.push_str(valid);
+                    cursor = self.pending.len();
+                }
+                Err(error) => {
+                    let valid_up_to = error.valid_up_to();
+                    if valid_up_to > 0 {
+                        let valid_end = cursor + valid_up_to;
+                        let valid_slice = &self.pending[cursor..valid_end];
+                        let valid_text =
+                            std::str::from_utf8(valid_slice).expect("valid UTF-8 slice");
+                        output.push_str(valid_text);
+                        cursor = valid_end;
+                    }
+
+                    match error.error_len() {
+                        Some(invalid_len) => {
+                            output.push(char::REPLACEMENT_CHARACTER);
+                            cursor = (cursor + invalid_len).min(self.pending.len());
+                        }
+                        None => {
+                            if flush_incomplete {
+                                output.push(char::REPLACEMENT_CHARACTER);
+                                cursor = self.pending.len();
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if cursor >= self.pending.len() {
+            self.pending.clear();
+        } else if cursor > 0 {
+            self.pending.drain(..cursor);
+        }
+
+        output
+    }
+}
+
+fn has_non_empty_locale(value: Option<&str>) -> bool {
+    value.map(|entry| !entry.trim().is_empty()).unwrap_or(false)
+}
+
+fn should_apply_utf8_locale_fallback(
+    lang: Option<&str>,
+    lc_all: Option<&str>,
+    lc_ctype: Option<&str>,
+) -> bool {
+    !has_non_empty_locale(lang) && !has_non_empty_locale(lc_all) && !has_non_empty_locale(lc_ctype)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn should_apply_utf8_locale_fallback_from_env() -> bool {
+    let lang = std::env::var("LANG").ok();
+    let lc_all = std::env::var("LC_ALL").ok();
+    let lc_ctype = std::env::var("LC_CTYPE").ok();
+    should_apply_utf8_locale_fallback(lang.as_deref(), lc_all.as_deref(), lc_ctype.as_deref())
+}
+
+#[cfg(target_os = "windows")]
+fn should_apply_utf8_locale_fallback_from_env() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_utf8_locale_fallback(command: &mut CommandBuilder) {
+    if should_apply_utf8_locale_fallback_from_env() {
+        command.env("LANG", "en_US.UTF-8");
+        command.env("LC_CTYPE", "en_US.UTF-8");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn apply_utf8_locale_fallback(_command: &mut CommandBuilder) {}
+
 #[tauri::command]
 pub async fn start_embedded_terminal(
     app: AppHandle,
@@ -279,6 +384,7 @@ pub async fn start_embedded_terminal(
         cmd.env_remove("PREFIX");
         cmd.env_remove("NO_COLOR");
         cmd.env_remove("ANSI_COLORS_DISABLED");
+        apply_utf8_locale_fallback(&mut cmd);
         start_tmux_attached(&mut cmd, session_id, &cwd);
         cmd
     } else {
@@ -296,6 +402,7 @@ pub async fn start_embedded_terminal(
         cmd.env_remove("PREFIX");
         cmd.env_remove("NO_COLOR");
         cmd.env_remove("ANSI_COLORS_DISABLED");
+        apply_utf8_locale_fallback(&mut cmd);
 
         #[cfg(not(target_os = "windows"))]
         {
@@ -350,6 +457,8 @@ pub async fn start_embedded_terminal(
 
     std::thread::spawn(move || {
         let mut buffer = [0u8; 8192];
+        let output_event_name = format!("terminal-output:{}", terminal_id_for_reader);
+        let mut output_decoder = Utf8StreamDecoder::new();
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,
@@ -357,9 +466,10 @@ pub async fn start_embedded_terminal(
                     if let Ok(mut session_guard) = session_for_reader.lock() {
                         mark_output_read(&mut session_guard.debug_meta);
                     }
-                    let chunk = String::from_utf8_lossy(&buffer[..read_bytes]).to_string();
-                    let event_name = format!("terminal-output:{}", terminal_id_for_reader);
-                    let _ = app_for_reader.emit(&event_name, chunk);
+                    let chunk = output_decoder.push(&buffer[..read_bytes]);
+                    if !chunk.is_empty() {
+                        let _ = app_for_reader.emit(&output_event_name, chunk);
+                    }
                 }
                 Err(error) => {
                     if let Ok(mut session_guard) = session_for_reader.lock() {
@@ -370,11 +480,16 @@ pub async fn start_embedded_terminal(
             }
         }
 
+        let final_chunk = output_decoder.flush_eof();
+        if !final_chunk.is_empty() {
+            let _ = app_for_reader.emit(&output_event_name, final_chunk);
+        }
+
         if let Ok(mut session_guard) = session_for_reader.lock() {
             mark_exit_reason(&mut session_guard.debug_meta, "reader_closed");
         }
-        let event_name = format!("terminal-exit:{}", terminal_id_for_reader);
-        let _ = app_for_reader.emit(&event_name, true);
+        let exit_event_name = format!("terminal-exit:{}", terminal_id_for_reader);
+        let _ = app_for_reader.emit(&exit_event_name, true);
         if let Ok(mut sessions) = state_for_reader.lock() {
             sessions.remove(&terminal_id_for_reader);
         }
@@ -549,8 +664,9 @@ pub async fn write_terminal_incident_bundle(
 mod tests {
     use super::{
         mark_input_write_result, mark_resize, missing_terminal_session_error,
-        should_terminate_persistent_session, EmbeddedTerminalDebugSession,
-        EmbeddedTerminalDebugSnapshot, TerminalSessionDebugMeta,
+        should_apply_utf8_locale_fallback, should_terminate_persistent_session,
+        EmbeddedTerminalDebugSession, EmbeddedTerminalDebugSnapshot, TerminalSessionDebugMeta,
+        Utf8StreamDecoder,
     };
 
     #[test]
@@ -615,5 +731,46 @@ mod tests {
         let message = missing_terminal_session_error("term-missing");
         assert!(message.starts_with("ERR_SESSION_NOT_FOUND:"));
         assert!(message.contains("term-missing"));
+    }
+
+    #[test]
+    fn decoder_keeps_split_multibyte_sequence_until_complete() {
+        let mut decoder = Utf8StreamDecoder::new();
+        assert_eq!(decoder.push(&[0xE2, 0x94]), "");
+        assert_eq!(decoder.push(&[0x94, b' ', b'O', b'K']), "\u{2514} OK");
+        assert_eq!(decoder.flush_eof(), "");
+    }
+
+    #[test]
+    fn decoder_preserves_mixed_ascii_and_split_utf8() {
+        let mut decoder = Utf8StreamDecoder::new();
+        assert_eq!(decoder.push(b"abc"), "abc");
+        assert_eq!(decoder.push(&[0xF0, 0x9F]), "");
+        assert_eq!(decoder.push(&[0x99, 0x82, b'd', b'e', b'f']), "\u{1F642}def");
+        assert_eq!(decoder.flush_eof(), "");
+    }
+
+    #[test]
+    fn decoder_replaces_invalid_bytes_and_continues() {
+        let mut decoder = Utf8StreamDecoder::new();
+        let expected = format!("f{}o", char::REPLACEMENT_CHARACTER);
+        assert_eq!(decoder.push(&[b'f', 0x80, b'o']), expected);
+        assert_eq!(decoder.flush_eof(), "");
+    }
+
+    #[test]
+    fn decoder_replaces_incomplete_sequence_on_eof() {
+        let mut decoder = Utf8StreamDecoder::new();
+        assert_eq!(decoder.push(&[0xE2]), "");
+        assert_eq!(decoder.flush_eof(), char::REPLACEMENT_CHARACTER.to_string());
+    }
+
+    #[test]
+    fn locale_fallback_applies_only_when_locale_is_missing() {
+        assert!(should_apply_utf8_locale_fallback(None, None, None));
+        assert!(should_apply_utf8_locale_fallback(Some(""), None, None));
+        assert!(!should_apply_utf8_locale_fallback(Some("en_US.UTF-8"), None, None));
+        assert!(!should_apply_utf8_locale_fallback(None, Some("C.UTF-8"), None));
+        assert!(!should_apply_utf8_locale_fallback(None, None, Some("en_US.UTF-8")));
     }
 }

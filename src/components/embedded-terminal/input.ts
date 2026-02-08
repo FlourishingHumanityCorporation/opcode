@@ -66,6 +66,22 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   return target.getAttribute("contenteditable") === "true";
 }
 
+export function isEditableTargetOutsideContainer(
+  target: EventTarget | null,
+  container: Element | null | undefined
+): boolean {
+  if (!isEditableTarget(target)) {
+    return false;
+  }
+  if (!(target instanceof Node)) {
+    return true;
+  }
+  if (!container) {
+    return true;
+  }
+  return !container.contains(target);
+}
+
 export function getTerminalTextarea(terminal: unknown): HTMLTextAreaElement | null {
   if (!terminal || typeof terminal !== "object") {
     return null;

@@ -24,8 +24,8 @@
     "debug:session-start:gate": "node scripts/measure-session-startup.mjs --runs 3 --fail-on-slow-ms 5000",
     "debug:assistant-benchmark:json": "node scripts/measure-session-startup.mjs --benchmark-kind assistant --json",
     "debug:assistant-benchmark:gate": "node scripts/measure-session-startup.mjs --runs 3 --benchmark-kind assistant --fail-on-assistant-slow-ms 50000",
-    "smoke:ui": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts",
-    "smoke:ui:headed": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts --headed"
+    "smoke:ui": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts",
+    "smoke:ui:headed": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts --headed"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -45,6 +45,7 @@
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2.0.2",
     "@tauri-apps/plugin-global-shortcut": "^2.0.0",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-shell": "^2.0.1",
     "@types/diff": "^8.0.0",

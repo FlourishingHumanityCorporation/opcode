@@ -26,6 +26,7 @@ import { TabContent } from "@/components/TabContent";
 import { useTabState } from "@/hooks/useTabState";
 import { useAppLifecycle, useTrackEvent } from "@/hooks";
 import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
+import { initAgentAttention } from "@/services/agentAttention";
 
 type View = 
   | "welcome" 
@@ -86,6 +87,13 @@ function AppContent() {
   // Initialize web mode compatibility on mount
   useEffect(() => {
     initializeWebMode();
+  }, []);
+
+  useEffect(() => {
+    const teardownAttention = initAgentAttention();
+    return () => {
+      teardownAttention();
+    };
   }, []);
 
   // Load projects on mount when in projects view

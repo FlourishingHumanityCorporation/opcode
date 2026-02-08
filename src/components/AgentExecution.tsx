@@ -35,6 +35,12 @@ import { HooksEditor } from "./HooksEditor";
 import { useTrackEvent, useComponentMetrics, useFeatureAdoptionTracking } from "@/hooks";
 import { useTabState } from "@/hooks/useTabState";
 import {
+  emitAgentAttention,
+  extractAttentionText,
+  shouldTriggerNeedsInput,
+  summarizeAttentionBody,
+} from "@/services/agentAttention";
+import {
   getDefaultModelForProvider,
   getModelDisplayName,
   getProviderDisplayName,
@@ -146,7 +152,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
   const [providerRuntimeLoading, setProviderRuntimeLoading] = useState(false);
   
   // Get tab state functions
-  const { updateTabStatus } = useTabState();
+  const { tabs, updateTabStatus } = useTabState();
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
   const [rawJsonlOutput, setRawJsonlOutput] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -179,6 +185,14 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
   const unlistenRefs = useRef<UnlistenFn[]>([]);
   const elapsedTimeIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [runId, setRunId] = useState<number | null>(null);
+
+  const workspaceIdForTab = React.useMemo(() => {
+    if (!tabId) return undefined;
+    const ownerWorkspace = tabs.find((workspace) =>
+      workspace.terminalTabs.some((terminal) => terminal.id === tabId)
+    );
+    return ownerWorkspace?.id;
+  }, [tabId, tabs]);
 
   // Filter out messages that shouldn't be displayed
   const displayableMessages = React.useMemo(() => {
@@ -418,6 +432,22 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
           
           // Parse and display
           const message = JSON.parse(event.payload) as ClaudeStreamMessage;
+
+          if (message.type === "assistant") {
+            const candidateText = extractAttentionText(message);
+            if (shouldTriggerNeedsInput(candidateText)) {
+              void emitAgentAttention({
+                kind: "needs_input",
+                workspaceId: workspaceIdForTab,
+                terminalTabId: tabId,
+                source: "agent_execution",
+                body:
+                  summarizeAttentionBody(candidateText) ||
+                  "The agent is waiting for your input.",
+              });
+            }
+          }
+
           setMessages(prev => [...prev, message]);
         } catch (err) {
           console.error("Failed to parse message:", err, event.payload);
@@ -460,6 +490,13 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
           if (tabId) {
             updateTabStatus(tabId, 'complete');
           }
+          void emitAgentAttention({
+            kind: "done",
+            workspaceId: workspaceIdForTab,
+            terminalTabId: tabId,
+            source: "agent_execution",
+            body: `${agent.name || "Agent"} completed successfully.`,
+          });
           trackEvent.agentExecuted(agent.name || 'custom', true, agent.name, duration);
         }
       });

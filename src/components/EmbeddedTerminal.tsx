@@ -11,6 +11,7 @@ import {
   applyTerminalInteractivity,
   encodeTerminalKeyInput,
   focusTerminalIfInteractive,
+  isEditableTargetOutsideContainer,
   normalizeWheelDeltaToScrollLines,
   shouldRouteKeyboardFallbackInput,
 } from "@/components/embedded-terminal/input";
@@ -109,6 +110,7 @@ export {
   encodeTerminalKeyInput,
   focusTerminalIfInteractive,
   isMissingEmbeddedTerminalError,
+  isEditableTargetOutsideContainer,
   normalizeWheelDeltaToScrollLines,
   shouldAttemptStaleInputRecovery,
   shouldRouteKeyboardFallbackInput,

@@ -18,6 +18,7 @@ import {
   encodeTerminalKeyInput,
   focusTerminalIfInteractive,
   isMissingEmbeddedTerminalError,
+  isEditableTargetOutsideContainer,
   normalizeWheelDeltaToScrollLines,
   shouldRouteKeyboardFallbackInput,
   shouldAttemptStaleInputRecovery,
@@ -243,5 +244,24 @@ describe("EmbeddedTerminal lifecycle close behavior", () => {
         altKey: false,
       })
     ).toBe(false);
+  });
+
+  it("treats editable targets outside terminal as keyboard fallback blockers", () => {
+    const container = document.createElement("div");
+    const insideInput = document.createElement("input");
+    const outsideInput = document.createElement("input");
+    const outsideButton = document.createElement("button");
+    container.appendChild(insideInput);
+    document.body.appendChild(container);
+    document.body.appendChild(outsideInput);
+    document.body.appendChild(outsideButton);
+
+    expect(isEditableTargetOutsideContainer(insideInput, container)).toBe(false);
+    expect(isEditableTargetOutsideContainer(outsideInput, container)).toBe(true);
+    expect(isEditableTargetOutsideContainer(outsideButton, container)).toBe(false);
+
+    container.remove();
+    outsideInput.remove();
+    outsideButton.remove();
   });
 });

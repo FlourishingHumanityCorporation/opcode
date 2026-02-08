@@ -3,7 +3,7 @@ import { AnimatePresence, Reorder, motion } from 'framer-motion';
 import { Folder, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTabState } from '@/hooks/useTabState';
-import type { Tab } from '@/contexts/TabContext';
+import type { Tab, WorkspaceStatus } from '@/contexts/TabContext';
 
 interface TabManagerProps {
   className?: string;
@@ -11,12 +11,50 @@ interface TabManagerProps {
 
 interface ProjectTabItemProps {
   tab: Tab;
+  aggregateStatus: WorkspaceStatus;
   isActive: boolean;
   onClick: (id: string) => void;
   onClose: (id: string) => void;
 }
 
-const ProjectTabItem: React.FC<ProjectTabItemProps> = ({ tab, isActive, onClick, onClose }) => {
+interface WorkspaceStatusMeta {
+  label: string;
+  className: string;
+}
+
+export function getWorkspaceStatusMeta(
+  status: WorkspaceStatus
+): WorkspaceStatusMeta | null {
+  switch (status) {
+    case 'attention':
+      return { label: 'Needs input', className: 'bg-amber-500' };
+    case 'error':
+      return { label: 'Error', className: 'bg-rose-500' };
+    case 'running':
+      return { label: 'Running', className: 'bg-emerald-500' };
+    case 'complete':
+      return { label: 'Complete', className: 'bg-sky-500' };
+    default:
+      return null;
+  }
+}
+
+export function getWorkspaceAggregateStatus(tab: Tab): WorkspaceStatus {
+  const priority: WorkspaceStatus[] = ['attention', 'error', 'running', 'complete'];
+  for (const status of priority) {
+    if (tab.terminalTabs.some((terminal) => terminal.status === status)) {
+      return status;
+    }
+  }
+
+  if (priority.includes(tab.status)) {
+    return tab.status;
+  }
+  return 'idle';
+}
+
+const ProjectTabItem: React.FC<ProjectTabItemProps> = ({ tab, aggregateStatus, isActive, onClick, onClose }) => {
+  const statusMeta = getWorkspaceStatusMeta(aggregateStatus);
   return (
     <Reorder.Item
       value={tab}
@@ -32,6 +70,13 @@ const ProjectTabItem: React.FC<ProjectTabItemProps> = ({ tab, isActive, onClick,
       data-testid={`workspace-tab-${tab.id}`}
     >
       <Folder className="h-3.5 w-3.5 shrink-0" />
+      {statusMeta && (
+        <span
+          className={cn('h-1.5 w-1.5 shrink-0 rounded-full', statusMeta.className)}
+          title={statusMeta.label}
+          aria-label={statusMeta.label}
+        />
+      )}
       <span className="min-w-0 flex-1 truncate text-left">{tab.title || 'Project'}</span>
       <button
         className={cn(
@@ -166,6 +211,7 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
             <ProjectTabItem
               key={tab.id}
               tab={tab}
+              aggregateStatus={getWorkspaceAggregateStatus(tab)}
               isActive={tab.id === activeTabId}
               onClick={switchToTab}
               onClose={closeProjectWorkspaceTab}
