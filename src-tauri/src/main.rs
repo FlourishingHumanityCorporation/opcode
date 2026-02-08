@@ -6,6 +6,7 @@ mod checkpoint;
 mod claude_binary;
 mod commands;
 mod process;
+mod providers;
 mod usage_index;
 
 use checkpoint::state::CheckpointState;
@@ -34,7 +35,8 @@ use commands::claude::{
     update_hooks_config, validate_hook_command,
 };
 use commands::agent_session::{
-    continue_agent_session, execute_agent_session, resume_agent_session,
+    continue_agent_session, execute_agent_session, list_provider_capabilities,
+    resume_agent_session,
 };
 use commands::provider_session::{
     cancel_provider_session, continue_provider_session, execute_provider_session,
@@ -258,6 +260,7 @@ fn main() {
             get_agent,
             execute_agent,
             check_provider_runtime,
+            list_provider_capabilities,
             list_agent_runs,
             get_agent_run,
             list_agent_runs_with_metrics,

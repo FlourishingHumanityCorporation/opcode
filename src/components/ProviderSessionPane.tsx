@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover } from "@/components/ui/popover";
-import { api, type Session } from "@/lib/api";
+import { api, type ProviderCapability, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const ENABLE_DEBUG_LOGS =
@@ -51,7 +51,7 @@ import { TooltipProvider, TooltipSimple } from "@/components/ui/tooltip-modern";
 import { SplitPane } from "@/components/ui/split-pane";
 import { WebviewPreview } from "./WebviewPreview";
 import { EmbeddedTerminal } from "./EmbeddedTerminal";
-import type { ClaudeStreamMessage } from "./AgentExecution";
+import type { ProviderSessionMessage } from "@/lib/providerSessionProtocol";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTrackEvent, useComponentMetrics, useWorkflowTracking } from "@/hooks";
 import { SessionPersistenceService } from "@/services/sessionPersistence";
@@ -94,6 +94,63 @@ import {
 } from "@/services/terminalAutoTitle";
 import { useProviderDetection } from "./provider-session-pane/useProviderDetection";
 import { useNativeTerminalRestore } from "./provider-session-pane/useNativeTerminalRestore";
+
+const DEFAULT_PROVIDER_CAPABILITIES: Record<string, ProviderCapability> = {
+  claude: {
+    provider_id: "claude",
+    supports_continue: true,
+    supports_resume: true,
+    supports_reasoning_effort: false,
+    model_strategy: "flag_optional",
+  },
+  codex: {
+    provider_id: "codex",
+    supports_continue: false,
+    supports_resume: false,
+    supports_reasoning_effort: true,
+    model_strategy: "flag_optional",
+  },
+  gemini: {
+    provider_id: "gemini",
+    supports_continue: false,
+    supports_resume: false,
+    supports_reasoning_effort: false,
+    model_strategy: "flag_optional",
+  },
+  aider: {
+    provider_id: "aider",
+    supports_continue: false,
+    supports_resume: false,
+    supports_reasoning_effort: false,
+    model_strategy: "flag_optional",
+  },
+  goose: {
+    provider_id: "goose",
+    supports_continue: false,
+    supports_resume: false,
+    supports_reasoning_effort: false,
+    model_strategy: "flag_optional",
+  },
+  opencode: {
+    provider_id: "opencode",
+    supports_continue: false,
+    supports_resume: false,
+    supports_reasoning_effort: false,
+    model_strategy: "flag_optional",
+  },
+};
+
+function fallbackProviderCapability(providerId: string): ProviderCapability {
+  return (
+    DEFAULT_PROVIDER_CAPABILITIES[providerId] ?? {
+      provider_id: providerId,
+      supports_continue: false,
+      supports_resume: false,
+      supports_reasoning_effort: false,
+      model_strategy: "flag_optional",
+    }
+  );
+}
 
 interface ProviderSessionPaneProps {
   /**
@@ -251,13 +308,13 @@ function toPlainTextValue(value: unknown): string {
   return String(value);
 }
 
-function getPlainRoleLabel(message: ClaudeStreamMessage): string {
+function getPlainRoleLabel(message: ProviderSessionMessage): string {
   const base = (message.type || "message").toUpperCase();
   const subtype = typeof message.subtype === "string" && message.subtype.trim() ? `:${message.subtype}` : "";
   return `${base}${subtype}`;
 }
 
-function getPlainMessageBody(message: ClaudeStreamMessage): string {
+function getPlainMessageBody(message: ProviderSessionMessage): string {
   if (message.type === "assistant" || message.type === "user") {
     const content = message.message?.content;
     if (Array.isArray(content)) {
@@ -334,7 +391,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   };
 
   const [projectPath, setProjectPath] = useState(initialProjectPath || session?.project_path || "");
-  const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
+  const [messages, setMessages] = useState<ProviderSessionMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rawJsonlOutput, setRawJsonlOutput] = useState<string[]>([]);
@@ -374,6 +431,9 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     isPaneVisible,
     onProviderChange,
   });
+  const [providerCapabilityById, setProviderCapabilityById] = useState<Record<string, ProviderCapability>>(
+    DEFAULT_PROVIDER_CAPABILITIES
+  );
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [plainTerminalMode, setPlainTerminalMode] = useState<boolean>(() => readPlainTerminalModeFromStorage());
   const [nativeTerminalMode, setNativeTerminalMode] = useState<boolean>(() =>
@@ -393,6 +453,10 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     setNativeRestoreNotice,
     resolveLatestProviderSession,
   } = useNativeTerminalRestore();
+  const activeProviderCapability = useMemo(
+    () => providerCapabilityById[activeProviderId] ?? fallbackProviderCapability(activeProviderId),
+    [activeProviderId, providerCapabilityById]
+  );
 
   const parentRef = useRef<HTMLDivElement>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
@@ -485,6 +549,38 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     const nextPath = initialProjectPath || session?.project_path || "";
     setProjectPath((prev) => (prev === nextPath ? prev : nextPath));
   }, [initialProjectPath, session?.project_path]);
+
+  useEffect(() => {
+    if (!isPaneVisible) {
+      return;
+    }
+
+    let cancelled = false;
+    api
+      .listProviderCapabilities()
+      .then((capabilities) => {
+        if (cancelled || !Array.isArray(capabilities)) {
+          return;
+        }
+        setProviderCapabilityById((prev) => {
+          const next: Record<string, ProviderCapability> = { ...prev };
+          for (const capability of capabilities) {
+            if (capability?.provider_id) {
+              next[capability.provider_id] = capability;
+            }
+          }
+          return next;
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn("[ProviderSessionPane] Failed to load provider capabilities:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isPaneVisible]);
 
   // Notify parent when project path is available/changes.
   useEffect(() => {
@@ -1014,7 +1110,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
       }
       
       // Convert history to messages format
-      const loadedMessages: ClaudeStreamMessage[] = history.map(entry => ({
+      const loadedMessages: ProviderSessionMessage[] = history.map(entry => ({
         ...entry,
         type: entry.type || "assistant"
       }));
@@ -1110,7 +1206,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         setRawJsonlOutput(prev => [...prev, event.payload]);
         
         // Parse and display
-        const message = JSON.parse(event.payload) as ClaudeStreamMessage;
+        const message = JSON.parse(event.payload) as ProviderSessionMessage;
         setMessages(prev => [...prev, message]);
       } catch (err) {
         console.error("Failed to parse message:", err, event.payload);
@@ -1266,7 +1362,11 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   ) => {
     promptAttemptStartedAtRef.current = Date.now();
     const providerToUse = options?.providerIdOverride || activeProviderId;
-    const reasoningEffort = options?.reasoningEffort;
+    const providerCapability =
+      providerCapabilityById[providerToUse] ?? fallbackProviderCapability(providerToUse);
+    const reasoningEffort = providerCapability.supports_reasoning_effort
+      ? options?.reasoningEffort
+      : undefined;
     const isClaudeProviderForRun = providerToUse === "claude";
     const modelForTracking = model || "default";
     let runProjectPath = projectPath;
@@ -1350,7 +1450,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         // --------------------------------------------------------------------
         // 1️⃣  Event Listener Setup Strategy
         // --------------------------------------------------------------------
-        // Claude Code may emit a *new* session_id even when we pass --resume. If
+        // Runtime providers may emit a *new* session_id even when we pass --resume. If
         // we listen only on the old session-scoped channel we will miss the
         // stream until the user navigates away & back. To avoid this we:
         //   • Always start with GENERIC listeners (no suffix) so we catch the
@@ -1408,8 +1508,8 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           try {
             const msg =
               typeof event.payload === "string"
-                ? (JSON.parse(event.payload) as ClaudeStreamMessage)
-                : (event.payload as ClaudeStreamMessage);
+                ? (JSON.parse(event.payload) as ProviderSessionMessage)
+                : (event.payload as ProviderSessionMessage);
             if (msg.type === 'system' && msg.subtype === 'init' && msg.session_id) {
               if (!currentSessionId || currentSessionId !== msg.session_id) {
                 debugLog('[ProviderSessionPane] Detected new session_id from generic listener:', msg.session_id);
@@ -1440,19 +1540,19 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         });
 
         // Helper to process any JSONL stream message string or object
-        function handleStreamMessage(payload: string | ClaudeStreamMessage) {
+        function handleStreamMessage(payload: string | ProviderSessionMessage) {
           try {
             // Don't process if component unmounted
             if (!isMountedRef.current) return;
             markFirstStreamSeen(providerToUse);
             
-            let message: ClaudeStreamMessage;
+            let message: ProviderSessionMessage;
             let rawPayload: string;
             
             if (typeof payload === 'string') {
               // Tauri mode: payload is a JSON string
               rawPayload = payload;
-              message = JSON.parse(payload) as ClaudeStreamMessage;
+              message = JSON.parse(payload) as ProviderSessionMessage;
             } else {
               // Web mode: payload is already parsed object
               message = payload;
@@ -1583,7 +1683,11 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           
           // Track enhanced session stopped metrics when session completes
           if (effectiveSession && providerSessionId) {
-            const sessionStartTimeValue = messages.length > 0 ? messages[0].timestamp || Date.now() : Date.now();
+            const firstMessageTimestamp =
+              messages.length > 0 ? Date.parse(String(messages[0].timestamp ?? "")) : NaN;
+            const sessionStartTimeValue = Number.isFinite(firstMessageTimestamp)
+              ? firstMessageTimestamp
+              : Date.now();
             const duration = Date.now() - sessionStartTimeValue;
             const metrics = sessionMetrics.current;
             const timeToFirstMessage = metrics.firstMessageTime 
@@ -1707,7 +1811,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         // --------------------------------------------------------------------
 
         // Add the user message immediately to the UI (after setting up listeners)
-        const userMessage: ClaudeStreamMessage = {
+        const userMessage: ProviderSessionMessage = {
           type: "user",
           message: {
             content: [
@@ -1769,14 +1873,32 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           if (isClaudeProviderForRun) {
             await api.resumeProviderSession(runProjectPath, effectiveSession.id, prompt, model);
           } else {
-            await api.resumeAgentSession(
-              providerToUse,
-              runProjectPath,
-              effectiveSession.id,
-              prompt,
-              model,
-              reasoningEffort
-            );
+            if (providerCapability.supports_resume) {
+              await api.resumeAgentSession(
+                providerToUse,
+                runProjectPath,
+                effectiveSession.id,
+                prompt,
+                model,
+                reasoningEffort
+              );
+            } else if (providerCapability.supports_continue) {
+              await api.continueAgentSession(
+                providerToUse,
+                runProjectPath,
+                prompt,
+                model,
+                reasoningEffort
+              );
+            } else {
+              await api.executeAgentSession(
+                providerToUse,
+                runProjectPath,
+                prompt,
+                model,
+                reasoningEffort
+              );
+            }
           }
         } else {
           debugLog('[ProviderSessionPane] Starting new session, provider:', providerToUse);
@@ -1908,8 +2030,12 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     if (!providerSessionId || !isLoading) return;
     
     try {
-      const sessionStartTime = messages.length > 0 ? messages[0].timestamp || Date.now() : Date.now();
-      const duration = Date.now() - sessionStartTime;
+      const firstMessageTimestamp =
+        messages.length > 0 ? Date.parse(String(messages[0].timestamp ?? "")) : NaN;
+      const sessionStartAtMs = Number.isFinite(firstMessageTimestamp)
+        ? firstMessageTimestamp
+        : Date.now();
+      const duration = Date.now() - sessionStartAtMs;
       
       await api.cancelProviderSession(providerSessionId);
       
@@ -1983,7 +2109,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
       setQueuedPrompts([]);
       
       // Add a message indicating the session was cancelled
-      const cancelMessage: ClaudeStreamMessage = {
+      const cancelMessage: ProviderSessionMessage = {
         type: "system",
         subtype: "info",
         result: "Session cancelled by user",
@@ -1995,7 +2121,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
       
       // Even if backend fails, we should update UI to reflect stopped state
       // Add error message but still stop the UI loading state
-      const errorMessage: ClaudeStreamMessage = {
+      const errorMessage: ProviderSessionMessage = {
         type: "system",
         subtype: "error",
         result: `Failed to cancel execution: ${err instanceof Error ? err.message : 'Unknown error'}. The process may still be running in the background.`,
@@ -2775,6 +2901,8 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
                 disabled={false}
                 providerId={activeProviderId}
                 defaultModel={getDefaultModelForProvider(activeProviderId)}
+                supportsReasoningEffort={activeProviderCapability.supports_reasoning_effort}
+                modelStrategy={activeProviderCapability.model_strategy}
                 projectPath={projectPath}
                 className={embedded ? "!absolute !left-0 !right-0 !bottom-0 !z-40" : undefined}
                 extraMenuItems={

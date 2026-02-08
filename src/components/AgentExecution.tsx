@@ -46,6 +46,7 @@ import {
   getProviderDisplayName,
   getProviderModelOptions,
 } from "@/lib/providerModels";
+import type { ProviderSessionMessage } from "@/lib/providerSessionProtocol";
 
 interface AgentExecutionProps {
   /**
@@ -83,22 +84,7 @@ const CODEX_REASONING_OPTIONS: Array<{
   { id: "xhigh", name: "Extra High", description: "Maximum reasoning effort" },
 ];
 
-export interface ClaudeStreamMessage {
-  type: "system" | "assistant" | "user" | "result";
-  subtype?: string;
-  message?: {
-    content?: any[];
-    usage?: {
-      input_tokens: number;
-      output_tokens: number;
-    };
-  };
-  usage?: {
-    input_tokens: number;
-    output_tokens: number;
-  };
-  [key: string]: any;
-}
+export type ClaudeStreamMessage = ProviderSessionMessage;
 
 async function listenToAgentEvent<T>(
   eventName: string,

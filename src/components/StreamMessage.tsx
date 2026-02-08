@@ -13,7 +13,7 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { getClaudeSyntaxTheme } from "@/lib/claudeSyntaxTheme";
 import { useTheme } from "@/hooks";
-import type { ClaudeStreamMessage } from "./AgentExecution";
+import type { ProviderSessionMessage } from "@/lib/providerSessionProtocol";
 import {
   TodoWidget,
   TodoReadWidget,
@@ -42,9 +42,9 @@ import {
 } from "./ToolWidgets";
 
 interface StreamMessageProps {
-  message: ClaudeStreamMessage;
+  message: ProviderSessionMessage;
   className?: string;
-  streamMessages: ClaudeStreamMessage[];
+  streamMessages: ProviderSessionMessage[];
   onLinkDetected?: (url: string) => void;
 }
 

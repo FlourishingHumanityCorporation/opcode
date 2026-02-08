@@ -237,6 +237,14 @@ async fn get_agents() -> Json<ApiResponse<Vec<serde_json::Value>>> {
     Json(ApiResponse::success(vec![]))
 }
 
+/// List provider runtime capabilities.
+async fn list_provider_capabilities(
+) -> Json<ApiResponse<Vec<crate::providers::runtime::ProviderCapability>>> {
+    Json(ApiResponse::success(
+        crate::providers::runtime::list_provider_capabilities(),
+    ))
+}
+
 /// Simple usage endpoint - return empty for now
 async fn get_usage() -> Json<ApiResponse<Vec<serde_json::Value>>> {
     Json(ApiResponse::success(vec![]))
@@ -1094,6 +1102,7 @@ pub async fn create_web_server(port: u16) -> Result<(), Box<dyn std::error::Erro
         .route("/api/projects", get(get_projects))
         .route("/api/projects/{project_id}/sessions", get(get_sessions))
         .route("/api/agents", get(get_agents))
+        .route("/api/providers/capabilities", get(list_provider_capabilities))
         .route("/api/usage", get(get_usage))
         .route("/api/usage/range", get(get_usage_range))
         .route("/api/usage/sessions", get(get_usage_sessions))

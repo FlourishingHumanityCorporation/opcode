@@ -8,6 +8,10 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import {
+  normalizeProviderSessionCompletionPayload,
+  type ProviderSessionCompletionPayload,
+} from "@/lib/providerSessionProtocol";
 
 const ENABLE_DEBUG_LOGS =
   Boolean((globalThis as any)?.__OPCODE_DEBUG_LOGS__) &&
@@ -66,74 +70,6 @@ interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
-}
-
-type ProviderSessionCompletionStatus = 'success' | 'error' | 'cancelled';
-
-interface ProviderSessionCompletionPayload {
-  status: ProviderSessionCompletionStatus;
-  success: boolean;
-  error?: string;
-  sessionId?: string;
-  providerId?: string;
-}
-
-function normalizeProviderSessionCompletionPayload(detail: unknown): ProviderSessionCompletionPayload {
-  if (typeof detail === 'boolean') {
-    return {
-      status: detail ? 'success' : 'error',
-      success: detail,
-    };
-  }
-
-  if (!detail || typeof detail !== 'object') {
-    return {
-      status: 'error',
-      success: false,
-    };
-  }
-
-  const payload = detail as Record<string, unknown>;
-  const rawStatus = payload.status;
-  const rawSuccess = payload.success;
-  const error = typeof payload.error === 'string'
-    ? payload.error
-    : typeof payload.message === 'string'
-      ? payload.message
-      : undefined;
-
-  let status: ProviderSessionCompletionStatus;
-  if (rawStatus === 'success' || rawStatus === 'error' || rawStatus === 'cancelled') {
-    status = rawStatus;
-  } else if (typeof rawSuccess === 'boolean') {
-    status = rawSuccess ? 'success' : 'error';
-  } else if (typeof error === 'string' && /cancelled|canceled|interrupted/i.test(error)) {
-    status = 'cancelled';
-  } else {
-    status = 'error';
-  }
-
-  const success = status === 'success';
-  const sessionId =
-    typeof payload.sessionId === 'string'
-      ? payload.sessionId
-      : typeof payload.session_id === 'string'
-        ? payload.session_id
-        : undefined;
-  const providerId =
-    typeof payload.providerId === 'string'
-      ? payload.providerId
-      : typeof payload.provider_id === 'string'
-        ? payload.provider_id
-        : undefined;
-
-  return {
-    status,
-    success,
-    ...(error ? { error } : {}),
-    ...(sessionId ? { sessionId } : {}),
-    ...(providerId ? { providerId } : {}),
-  };
 }
 
 /**
@@ -272,6 +208,7 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'load_agent_session_history': '/api/agents/sessions/{sessionId}/history',
     'list_detected_agents': '/api/agents/detected',
     'check_provider_runtime': '/api/providers/{providerId}/runtime',
+    'list_provider_capabilities': '/api/providers/capabilities',
     'run_session_startup_probe': '/api/diagnostics/session-startup-probe',
     'open_external_terminal': '/api/diagnostics/open-external-terminal',
     'start_embedded_terminal': '/api/terminal/start',

@@ -66,6 +66,14 @@ interface FloatingPromptInputProps {
    */
   providerId?: string;
   /**
+   * Whether runtime reasoning effort flags are supported for this provider.
+   */
+  supportsReasoningEffort?: boolean;
+  /**
+   * Provider model strategy from runtime capabilities.
+   */
+  modelStrategy?: string;
+  /**
    * Project path for file picker
    */
   projectPath?: string;
@@ -261,6 +269,8 @@ const FloatingPromptInputInner = (
     disabled = false,
     defaultModel,
     providerId = "claude",
+    supportsReasoningEffort,
+    modelStrategy,
     projectPath,
     className,
     onCancel,
@@ -298,6 +308,9 @@ const FloatingPromptInputInner = (
   );
   const providerDisplayName = getProviderDisplayName(providerId);
   const isCodexProvider = providerId === "codex";
+  const supportsReasoningEffortForProvider = supportsReasoningEffort ?? isCodexProvider;
+  const showReasoningControl = !isCodexProvider || supportsReasoningEffortForProvider;
+  const allowModelSelection = modelStrategy !== "fixed_default";
   const reasoningLabel = isCodexProvider ? "Reasoning" : "Thinking";
   const selectedReasoningMode = isCodexProvider
     ? CODEX_REASONING_MODES.find((mode) => mode.id === selectedCodexReasoningEffort)
@@ -862,7 +875,7 @@ const FloatingPromptInputInner = (
         finalPrompt = `${finalPrompt}.\n\n${thinkingMode.phrase}.`;
       }
 
-      const sendOptions: PromptSendOptions | undefined = isCodexProvider
+      const sendOptions: PromptSendOptions | undefined = isCodexProvider && supportsReasoningEffortForProvider
         ? { reasoningEffort: selectedCodexReasoningEffort }
         : undefined;
       onSend(finalPrompt, selectedModel, sendOptions);
@@ -1086,6 +1099,7 @@ const FloatingPromptInputInner = (
                           variant="outline"
                           size="sm"
                           onClick={() => setModelPickerOpen(!modelPickerOpen)}
+                          disabled={!allowModelSelection}
                           className="gap-2"
                         >
                           <span className={getModelIconColorClass()}>
@@ -1131,14 +1145,15 @@ const FloatingPromptInputInner = (
                     />
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{reasoningLabel}:</span>
-                    <Popover
-                      trigger={
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="outline"
+                  {showReasoningControl && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">{reasoningLabel}:</span>
+                      <Popover
+                        trigger={
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="outline"
                                 size="sm"
                                 onClick={() => setThinkingModePickerOpen(!thinkingModePickerOpen)}
                                 className="gap-2"
@@ -1146,8 +1161,8 @@ const FloatingPromptInputInner = (
                                 <span className={selectedReasoningMode?.color}>
                                   {selectedReasoningMode?.icon}
                                 </span>
-                                <ThinkingModeIndicator 
-                                  level={selectedReasoningMode?.level || 0} 
+                                <ThinkingModeIndicator
+                                  level={selectedReasoningMode?.level || 0}
                                 />
                               </Button>
                             </TooltipTrigger>
@@ -1156,66 +1171,67 @@ const FloatingPromptInputInner = (
                               <p className="text-xs text-muted-foreground">{selectedReasoningMode?.description}</p>
                             </TooltipContent>
                           </Tooltip>
-                      }
-                      content={
-                        <div className="w-[280px] p-1">
-                          {(isCodexProvider ? CODEX_REASONING_MODES : THINKING_MODES).map((mode) => (
-                            <button
-                              key={mode.id}
-                              onClick={() => {
-                                if (isCodexProvider) {
-                                  setSelectedCodexReasoningEffort(mode.id as CodexReasoningEffort);
-                                } else {
-                                  setSelectedThinkingMode(mode.id as ThinkingMode);
-                                }
-                                setThinkingModePickerOpen(false);
-                              }}
-                              className={cn(
-                                "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
-                                "hover:bg-accent",
-                                (isCodexProvider
-                                  ? selectedCodexReasoningEffort === mode.id
-                                  : selectedThinkingMode === mode.id) && "bg-accent"
-                              )}
-                            >
-                              <span className={cn("mt-0.5", mode.color)}>
-                                {mode.icon}
-                              </span>
-                              <div className="flex-1 space-y-1">
-                                <div className="font-medium text-sm">
-                                  {mode.name}
+                        }
+                        content={
+                          <div className="w-[280px] p-1">
+                            {(isCodexProvider ? CODEX_REASONING_MODES : THINKING_MODES).map((mode) => (
+                              <button
+                                key={mode.id}
+                                onClick={() => {
+                                  if (isCodexProvider) {
+                                    setSelectedCodexReasoningEffort(mode.id as CodexReasoningEffort);
+                                  } else {
+                                    setSelectedThinkingMode(mode.id as ThinkingMode);
+                                  }
+                                  setThinkingModePickerOpen(false);
+                                }}
+                                className={cn(
+                                  "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
+                                  "hover:bg-accent",
+                                  (isCodexProvider
+                                    ? selectedCodexReasoningEffort === mode.id
+                                    : selectedThinkingMode === mode.id) && "bg-accent"
+                                )}
+                              >
+                                <span className={cn("mt-0.5", mode.color)}>
+                                  {mode.icon}
+                                </span>
+                                <div className="flex-1 space-y-1">
+                                  <div className="font-medium text-sm">
+                                    {mode.name}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {mode.description}
+                                  </div>
                                 </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {mode.description}
+                                <ThinkingModeIndicator level={mode.level} />
+                              </button>
+                            ))}
+                            {!isCodexProvider && (
+                              <div className="mt-1 border-t border-border/60 px-2 py-2">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="space-y-0.5">
+                                    <div className="text-xs font-medium">Prompt Hints</div>
+                                    <div className="text-[11px] text-muted-foreground">
+                                      Append think/ultrathink words
+                                    </div>
+                                  </div>
+                                  <Switch
+                                    checked={thinkingPromptHintsEnabled}
+                                    onCheckedChange={handleThinkingPromptHintsToggle}
+                                  />
                                 </div>
                               </div>
-                              <ThinkingModeIndicator level={mode.level} />
-                            </button>
-                          ))}
-                          {!isCodexProvider && (
-                          <div className="mt-1 border-t border-border/60 px-2 py-2">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="space-y-0.5">
-                                <div className="text-xs font-medium">Prompt Hints</div>
-                                <div className="text-[11px] text-muted-foreground">
-                                  Append think/ultrathink words
-                                </div>
-                              </div>
-                              <Switch
-                                checked={thinkingPromptHintsEnabled}
-                                onCheckedChange={handleThinkingPromptHintsToggle}
-                              />
-                            </div>
+                            )}
                           </div>
-                          )}
-                        </div>
-                      }
-                      open={thinkingModePickerOpen}
-                      onOpenChange={setThinkingModePickerOpen}
-                      align="start"
-                      side="top"
-                    />
-                  </div>
+                        }
+                        open={thinkingModePickerOpen}
+                        onOpenChange={setThinkingModePickerOpen}
+                        align="start"
+                        side="top"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <TooltipSimple content="Send message" side="top">
@@ -1280,7 +1296,7 @@ const FloatingPromptInputInner = (
                             <Button
                               variant="ghost"
                               size="sm"
-                              disabled={disabled}
+                              disabled={disabled || !allowModelSelection}
                               className="h-5 px-1 hover:bg-accent/50 gap-0.5"
                             >
                               <span className={getModelIconColorClass()}>
@@ -1339,12 +1355,13 @@ const FloatingPromptInputInner = (
                 side="top"
               />
 
-                <Popover
-                  trigger={
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <motion.div
-                          whileTap={{ scale: 0.97 }}
+                {showReasoningControl && (
+                  <Popover
+                    trigger={
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <motion.div
+                            whileTap={{ scale: 0.97 }}
                             transition={{ duration: 0.15 }}
                           >
                             <Button
@@ -1368,65 +1385,66 @@ const FloatingPromptInputInner = (
                           <p className="text-xs text-muted-foreground">{selectedReasoningMode?.description}</p>
                         </TooltipContent>
                       </Tooltip>
-                  }
-                content={
-                  <div className="w-[280px] p-1">
-                    {(isCodexProvider ? CODEX_REASONING_MODES : THINKING_MODES).map((mode) => (
-                      <button
-                        key={mode.id}
-                        onClick={() => {
-                          if (isCodexProvider) {
-                            setSelectedCodexReasoningEffort(mode.id as CodexReasoningEffort);
-                          } else {
-                            setSelectedThinkingMode(mode.id as ThinkingMode);
-                          }
-                          setThinkingModePickerOpen(false);
-                        }}
-                        className={cn(
-                          "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
-                          "hover:bg-accent",
-                          (isCodexProvider
-                            ? selectedCodexReasoningEffort === mode.id
-                            : selectedThinkingMode === mode.id) && "bg-accent"
+                    }
+                    content={
+                      <div className="w-[280px] p-1">
+                        {(isCodexProvider ? CODEX_REASONING_MODES : THINKING_MODES).map((mode) => (
+                          <button
+                            key={mode.id}
+                            onClick={() => {
+                              if (isCodexProvider) {
+                                setSelectedCodexReasoningEffort(mode.id as CodexReasoningEffort);
+                              } else {
+                                setSelectedThinkingMode(mode.id as ThinkingMode);
+                              }
+                              setThinkingModePickerOpen(false);
+                            }}
+                            className={cn(
+                              "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
+                              "hover:bg-accent",
+                              (isCodexProvider
+                                ? selectedCodexReasoningEffort === mode.id
+                                : selectedThinkingMode === mode.id) && "bg-accent"
+                            )}
+                          >
+                            <span className={cn("mt-0.5", mode.color)}>
+                              {mode.icon}
+                            </span>
+                            <div className="flex-1 space-y-1">
+                              <div className="font-medium text-sm">
+                                {mode.name}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {mode.description}
+                              </div>
+                            </div>
+                            <ThinkingModeIndicator level={mode.level} />
+                          </button>
+                        ))}
+                        {!isCodexProvider && (
+                          <div className="mt-1 border-t border-border/60 px-2 py-2">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-0.5">
+                                <div className="text-xs font-medium">Prompt Hints</div>
+                                <div className="text-[11px] text-muted-foreground">
+                                  Append think/ultrathink words
+                                </div>
+                              </div>
+                              <Switch
+                                checked={thinkingPromptHintsEnabled}
+                                onCheckedChange={handleThinkingPromptHintsToggle}
+                              />
+                            </div>
+                          </div>
                         )}
-                      >
-                        <span className={cn("mt-0.5", mode.color)}>
-                          {mode.icon}
-                        </span>
-                        <div className="flex-1 space-y-1">
-                          <div className="font-medium text-sm">
-                            {mode.name}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {mode.description}
-                          </div>
-                        </div>
-                        <ThinkingModeIndicator level={mode.level} />
-                      </button>
-                    ))}
-                    {!isCodexProvider && (
-                    <div className="mt-1 border-t border-border/60 px-2 py-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-0.5">
-                          <div className="text-xs font-medium">Prompt Hints</div>
-                          <div className="text-[11px] text-muted-foreground">
-                            Append think/ultrathink words
-                          </div>
-                        </div>
-                        <Switch
-                          checked={thinkingPromptHintsEnabled}
-                          onCheckedChange={handleThinkingPromptHintsToggle}
-                        />
                       </div>
-                    </div>
-                    )}
-                  </div>
-                }
-                open={thinkingModePickerOpen}
-                onOpenChange={setThinkingModePickerOpen}
-                align="start"
-                side="top"
-              />
+                    }
+                    open={thinkingModePickerOpen}
+                    onOpenChange={setThinkingModePickerOpen}
+                    align="start"
+                    side="top"
+                  />
+                )}
 
               </div>
 

@@ -4,10 +4,10 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { StreamMessage } from '../StreamMessage';
 import { Terminal } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { ClaudeStreamMessage } from '../AgentExecution';
+import type { ProviderSessionMessage } from '@/lib/providerSessionProtocol';
 
 interface MessageListProps {
-  messages: ClaudeStreamMessage[];
+  messages: ProviderSessionMessage[];
   projectPath: string;
   isStreaming: boolean;
   onLinkDetected?: (url: string) => void;
@@ -81,7 +81,7 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
             <h3 className="text-lg font-semibold mb-2">Ready to start coding</h3>
             <p className="text-sm text-muted-foreground">
               {projectPath 
-                ? "Enter a prompt below to begin your Claude Code session"
+                ? "Enter a prompt below to begin your provider session"
                 : "Select a project folder to begin"}
             </p>
           </div>
@@ -146,7 +146,7 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
         >
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <div className="h-2 w-2 bg-primary rounded-full animate-pulse" />
-            <span>Claude is thinking...</span>
+            <span>Provider is thinking...</span>
           </div>
         </motion.div>
       )}

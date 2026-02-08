@@ -1,5 +1,10 @@
 import type { Session } from "@/lib/api";
 import type { PromptSendOptions } from "@/components/FloatingPromptInput";
+export type {
+  ProviderSessionCompletionPayload,
+  ProviderSessionCompletionStatus,
+  ProviderSessionMessage,
+} from "@/lib/providerSessionProtocol";
 
 export interface ProviderSessionPaneProps {
   session?: Session;
@@ -46,14 +51,4 @@ export interface DetectedProvider {
   binaryPath: string;
   version: string | null;
   source: string;
-}
-
-export type ProviderSessionCompletionStatus = "success" | "error" | "cancelled";
-
-export interface ProviderSessionCompletionPayload {
-  status: ProviderSessionCompletionStatus;
-  success: boolean;
-  error?: string;
-  sessionId?: string;
-  providerId?: string;
 }

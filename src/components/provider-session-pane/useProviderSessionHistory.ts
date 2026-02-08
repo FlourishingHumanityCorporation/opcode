@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { api } from "@/lib/api";
 import { SessionPersistenceService } from "@/services/sessionPersistence";
 import type { Session } from "@/lib/api";
-import type { ClaudeStreamMessage } from "@/components/AgentExecution";
+import type { ProviderSessionMessage } from "@/lib/providerSessionProtocol";
 
 export function useProviderSessionHistory() {
   const loadProviderSessionHistory = useCallback(async (session: Session) => {
@@ -17,7 +17,7 @@ export function useProviderSessionHistory() {
       );
     }
 
-    const loadedMessages: ClaudeStreamMessage[] = history.map((entry: any) => ({
+    const loadedMessages: ProviderSessionMessage[] = history.map((entry: any) => ({
       ...entry,
       type: entry.type || "assistant",
     }));

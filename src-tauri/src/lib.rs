@@ -6,6 +6,7 @@ pub mod checkpoint;
 pub mod claude_binary;
 pub mod commands;
 pub mod process;
+pub mod providers;
 pub mod usage_index;
 pub mod web_server;
 

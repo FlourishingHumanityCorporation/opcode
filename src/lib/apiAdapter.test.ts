@@ -91,6 +91,21 @@ describe("apiAdapter provider-session mappings", () => {
     expect(requestUrl).not.toContain("sessionId=");
   });
 
+  it("maps list_provider_capabilities to /api/providers/capabilities", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, data: [{ provider_id: "claude" }] }),
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { apiCall } = await loadApiAdapter();
+    const result = await apiCall<Array<{ provider_id: string }>>("list_provider_capabilities");
+
+    expect(result).toEqual([{ provider_id: "claude" }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/providers/capabilities");
+  });
+
   it("uses /ws/provider-session and dispatches generic + scoped output/complete events", async () => {
     const { apiCall } = await loadApiAdapter();
     const outputEvents: unknown[] = [];

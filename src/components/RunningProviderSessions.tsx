@@ -18,8 +18,35 @@ interface RunningProviderSessionsProps {
   className?: string;
 }
 
+function inferProviderIdFromSessionId(sessionId: string): string {
+  const trimmed = sessionId.trim();
+  if (!trimmed) return "unknown";
+  const prefix = trimmed.split("_")[0]?.toLowerCase();
+  if (["claude", "codex", "gemini", "aider", "goose", "opencode"].includes(prefix)) {
+    return prefix;
+  }
+  // Claude session IDs are UUIDs without provider prefix.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
+    return "claude";
+  }
+  return "unknown";
+}
+
+function providerDisplayName(providerId: string): string {
+  const names: Record<string, string> = {
+    claude: "Claude",
+    codex: "Codex",
+    gemini: "Gemini",
+    aider: "Aider",
+    goose: "Goose",
+    opencode: "OpenCode",
+    unknown: "Provider",
+  };
+  return names[providerId] ?? providerId;
+}
+
 /**
- * Component to display currently running Claude sessions
+ * Component to display currently running provider sessions.
  */
 export const RunningProviderSessions: React.FC<RunningProviderSessionsProps> = ({
   onSessionClick,
@@ -111,6 +138,7 @@ export const RunningProviderSessions: React.FC<RunningProviderSessionsProps> = (
           const sessionId = 'ProviderSession' in session.process_type 
             ? session.process_type.ProviderSession.session_id 
             : null;
+          const providerId = sessionId ? inferProviderIdFromSessionId(sessionId) : "unknown";
           
           if (!sessionId) return null;
 
@@ -134,6 +162,9 @@ export const RunningProviderSessions: React.FC<RunningProviderSessionsProps> = (
                           <p className="font-mono text-xs text-muted-foreground truncate">
                             {sessionId.substring(0, 20)}...
                           </p>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/40 text-foreground">
+                            {providerDisplayName(providerId)}
+                          </span>
                           <span className="text-xs text-green-600 font-medium">
                             Running
                           </span>

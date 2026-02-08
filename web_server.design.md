@@ -1,18 +1,18 @@
 # Opcode Web Server Design
 
-This document describes the implementation of Opcode's web server mode, which allows access to Claude Code from mobile devices and browsers while maintaining full functionality.
+This document describes the implementation of Opcode's web server mode, which allows access to provider sessions from mobile devices and browsers while maintaining full functionality.
 
 ## Overview
 
-The web server provides a REST API and WebSocket interface that mirrors the Tauri desktop app's functionality, enabling phone/browser access to Claude Code sessions.
+The web server provides a REST API and WebSocket interface that mirrors the Tauri desktop app's functionality, enabling phone/browser access to provider sessions.
 
 ## Architecture
 
 ```
 ┌─────────────────┐    WebSocket     ┌─────────────────┐    Process     ┌─────────────────┐
-│   Browser UI    │ ←──────────────→ │  Rust Backend   │ ────────────→  │  Claude Binary  │
+│   Browser UI    │ ←──────────────→ │  Rust Backend   │ ────────────→  │ Provider Binary │
 │                 │    REST API      │   (Axum Server) │               │                 │
-│ • React/TS      │ ←──────────────→ │                 │               │ • claude-code   │
+│ • React/TS      │ ←──────────────→ │                 │               │ • provider CLI  │
 │ • WebSocket     │                  │ • Session Mgmt  │               │ • Subprocess    │
 │ • DOM Events    │                  │ • Process Spawn │               │ • Stream Output │
 └─────────────────┘                  └─────────────────┘               └─────────────────┘
@@ -24,14 +24,14 @@ The web server provides a REST API and WebSocket interface that mirrors the Taur
 
 **Main Functions:**
 - `create_web_server()` - Sets up Axum server with routes
-- `claude_websocket_handler()` - Manages WebSocket connections
-- `execute_claude_command()` / `continue_claude_command()` / `resume_claude_command()` - Execute Claude processes
+- `provider_session_websocket_handler()` - Manages WebSocket connections
+- `execute_provider_session_command()` / `continue_provider_session_command()` / `resume_provider_session_command()` - Execute provider session processes
 - `find_claude_binary_web()` - Locates Claude binary (bundled or system)
 
 **Key Features:**
-- **WebSocket Streaming**: Real-time output from Claude processes
+- **WebSocket Streaming**: Real-time output from provider processes
 - **Session Management**: Tracks active WebSocket sessions
-- **Process Spawning**: Launches Claude subprocesses with proper arguments
+- **Process Spawning**: Launches provider subprocesses with proper arguments
 - **Comprehensive Logging**: Detailed trace output for debugging
 
 ### 2. Frontend Event Handling (`src/components/ProviderSessionPane.tsx`)
@@ -70,9 +70,9 @@ const listen = tauriListen || ((eventName: string, callback: (event: any) => voi
 ```json
 {
   "type": "start|output|completion|error",
-  "content": "parsed Claude message",
+  "content": "parsed provider message",
   "message": "status message",
-  "status": "success|error"
+  "status": "success|error|cancelled"
 }
 ```
 
@@ -80,18 +80,18 @@ const listen = tauriListen || ((eventName: string, callback: (event: any) => voi
 
 ### 1. Prompt Submission
 ```
-Browser → WebSocket Request → Rust Backend → Claude Process
+Browser → WebSocket Request → Rust Backend → Provider Process
 ```
 
 ### 2. Streaming Response
 ```
-Claude Process → Rust Backend → WebSocket → Browser DOM Events → UI Update
+Provider Process → Rust Backend → WebSocket → Browser DOM Events → UI Update
 ```
 
 ### 3. Event Chain
 1. **User Input**: Prompt submitted via FloatingPromptInput
 2. **WebSocket Send**: JSON request sent to `/ws/provider-session`
-3. **Process Spawn**: Rust spawns `claude` subprocess
+3. **Process Spawn**: Rust spawns provider subprocess
 4. **Stream Parse**: Stdout lines parsed and wrapped in JSON
 5. **Event Dispatch**: DOM events fired for `provider-session-output`
 6. **UI Update**: React components receive and display messages
@@ -108,7 +108,7 @@ opcode/
 │   └── components/
 │       ├── ProviderSessionPane.tsx           # Main session component
 │       └── provider-session-pane/
-│           └── useClaudeMessages.ts        # Alternative hook implementation
+│           └── sessionEventBus.ts          # Session event normalization helpers
 └── justfile                    # Build configuration (just web)
 ```
 
@@ -162,8 +162,8 @@ nix-shell --run 'just web'
 **Solution**: HashMap-based session tracking with proper cleanup
 
 ### 5. Missing REST Endpoints
-**Problem**: Frontend expected cancel and output endpoints that didn't exist
-**Solution**: Added `/api/provider-sessions/{sessionId}/cancel` and `/api/provider-sessions/{sessionId}/output` endpoints
+**Problem**: Frontend expected cancel, output, and capability endpoints
+**Solution**: Added `/api/provider-sessions/{sessionId}/cancel`, `/api/provider-sessions/{sessionId}/output`, and `/api/providers/capabilities`
 
 ### 6. Error Event Handling
 **Problem**: WebSocket errors and unexpected closures didn't dispatch UI events
@@ -185,6 +185,13 @@ The remaining work is smoke reliability and unrelated workspace-persistence flak
 
 ### Session-Scoped Events
 `apiAdapter.ts` now dispatches both generic and session-scoped `provider-session-*` events once `session_id` is known.
+
+### Provider Capability Contract
+Provider runtime capabilities are exposed through:
+- Tauri command: `list_provider_capabilities`
+- Web route: `/api/providers/capabilities`
+
+`ProviderSessionPane.tsx` consumes these capabilities to gate provider-specific behavior (resume/continue/reasoning/model strategy).
 
 ### Web Runtime Session Lifecycle
 Web mode now tracks lifecycle explicitly in `AppState`:

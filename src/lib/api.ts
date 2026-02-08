@@ -204,6 +204,14 @@ export interface ProviderRuntimeStatus {
   setup_hints: string[];
 }
 
+export interface ProviderCapability {
+  provider_id: string;
+  supports_continue: boolean;
+  supports_resume: boolean;
+  supports_reasoning_effort: boolean;
+  model_strategy: string;
+}
+
 export interface SessionStartupProbeResult {
   benchmark_kind: "startup" | "assistant" | "assistant_iterm";
   provider_id: string;
@@ -1135,28 +1143,28 @@ export const api = {
   },
 
   /**
-   * Executes a new interactive Claude Code session with streaming output
+   * Executes a new interactive provider session with streaming output
    */
   async executeProviderSession(projectPath: string, prompt: string, model: string): Promise<void> {
     return apiCall("execute_provider_session", { projectPath, prompt, model });
   },
 
   /**
-   * Continues an existing Claude Code conversation with streaming output
+   * Continues an existing provider conversation with streaming output
    */
   async continueProviderSession(projectPath: string, prompt: string, model: string): Promise<void> {
     return apiCall("continue_provider_session", { projectPath, prompt, model });
   },
 
   /**
-   * Resumes an existing Claude Code session by ID with streaming output
+   * Resumes an existing provider session by ID with streaming output
    */
   async resumeProviderSession(projectPath: string, sessionId: string, prompt: string, model: string): Promise<void> {
     return apiCall("resume_provider_session", { projectPath, sessionId, prompt, model });
   },
 
   /**
-   * Cancels the currently running Claude Code execution
+   * Cancels the currently running provider session execution
    * @param sessionId - Optional session ID to cancel a specific session
    */
   async cancelProviderSession(sessionId?: string): Promise<void> {
@@ -1164,15 +1172,15 @@ export const api = {
   },
 
   /**
-   * Lists all currently running Claude sessions
-   * @returns Promise resolving to list of running Claude sessions
+   * Lists all currently running provider sessions
+   * @returns Promise resolving to list of running provider sessions
    */
   async listRunningProviderSessions(): Promise<any[]> {
     return apiCall("list_running_provider_sessions");
   },
 
   /**
-   * Gets live output from a Claude session
+   * Gets live output from a provider session
    * @param sessionId - The session ID to get output for
    * @returns Promise resolving to the current live output
    */
@@ -1194,6 +1202,13 @@ export const api = {
    */
   async checkProviderRuntime(providerId: string): Promise<ProviderRuntimeStatus> {
     return apiCall("check_provider_runtime", { providerId });
+  },
+
+  /**
+   * Lists provider runtime capabilities used by the provider-session UI.
+   */
+  async listProviderCapabilities(): Promise<ProviderCapability[]> {
+    return apiCall("list_provider_capabilities");
   },
 
   /**
