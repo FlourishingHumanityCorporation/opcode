@@ -1,11 +1,19 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { FolderOpen, Lock, LockOpen, Plus, Terminal, X } from 'lucide-react';
+import { Files, FolderOpen, Lock, LockOpen, Plus, Terminal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { Tab, TerminalTab } from '@/contexts/TabContext';
 import { WorkspacePaneTree } from '@/components/WorkspacePaneTree';
+import { ProjectExplorerPanel } from '@/components/ProjectExplorerPanel';
+import { SplitPane } from '@/components/ui/split-pane';
 import { useTabState } from '@/hooks/useTabState';
+import {
+  getExplorerOpen,
+  getExplorerWidth,
+  setExplorerOpen,
+  setExplorerWidth,
+} from '@/lib/projectExplorerPreferences';
 
 interface ProjectWorkspaceViewProps {
   workspace: Tab;
@@ -19,6 +27,37 @@ function getTerminalTitle(terminal: TerminalTab, index: number): string {
   return `Terminal ${index + 1}`;
 }
 
+interface TerminalStatusMeta {
+  label: string;
+  className: string;
+}
+
+export function getTerminalStatusMeta(
+  status: TerminalTab["status"]
+): TerminalStatusMeta | null {
+  switch (status) {
+    case "running":
+      return { label: "Running", className: "bg-emerald-500" };
+    case "complete":
+      return { label: "Complete", className: "bg-sky-500" };
+    case "attention":
+      return { label: "Needs input", className: "bg-amber-500" };
+    case "error":
+      return { label: "Error", className: "bg-rose-500" };
+    default:
+      return null;
+  }
+}
+
+export function resolveTerminalStatusOnActivate(
+  status: TerminalTab["status"]
+): TerminalTab["status"] {
+  if (status === "complete" || status === "attention") {
+    return "idle";
+  }
+  return status;
+}
+
 export function toggleTerminalTitleLock(
   updateTab: (id: string, updates: Partial<TerminalTab>) => void,
   terminal: TerminalTab
@@ -26,6 +65,15 @@ export function toggleTerminalTitleLock(
   updateTab(terminal.id, {
     titleLocked: !terminal.titleLocked,
   });
+}
+
+export function toggleExplorerPanel(currentlyOpen: boolean): boolean {
+  return !currentlyOpen;
+}
+
+export function persistExplorerSplitWidth(workspaceId: string, width: number): number {
+  setExplorerWidth(workspaceId, width);
+  return width;
 }
 
 export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
@@ -38,6 +86,8 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
     setActiveTerminalTab,
     updateTab,
   } = useTabState();
+  const [explorerOpen, setExplorerPanelOpen] = React.useState<boolean>(() => getExplorerOpen(workspace.id));
+  const [explorerSplit, setExplorerSplit] = React.useState<number>(() => getExplorerWidth(workspace.id));
 
   const activeTerminal = workspace.terminalTabs.find((tab) => tab.id === workspace.activeTerminalTabId) || workspace.terminalTabs[0];
   const openProjectPicker = async () => {
@@ -112,6 +162,11 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
     };
   }, [workspace.id]);
 
+  React.useEffect(() => {
+    setExplorerPanelOpen(getExplorerOpen(workspace.id));
+    setExplorerSplit(getExplorerWidth(workspace.id));
+  }, [workspace.id]);
+
   const handleCreateTerminal = () => {
     const terminalCount = workspace.terminalTabs.length;
     createTerminalTab(workspace.id, {
@@ -124,11 +179,35 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
     });
   };
 
+  const handleActivateTerminal = (terminal: TerminalTab) => {
+    setActiveTerminalTab(workspace.id, terminal.id);
+    const nextStatus = resolveTerminalStatusOnActivate(terminal.status);
+    if (nextStatus !== terminal.status) {
+      updateTab(terminal.id, { status: nextStatus });
+    }
+  };
+
   const handleRenameTerminal = (terminal: TerminalTab) => {
     const nextTitle = window.prompt('Rename terminal', terminal.title || 'Terminal');
     if (!nextTitle) return;
     updateTab(terminal.id, { title: nextTitle.trim() });
   };
+
+  const handleToggleExplorer = () => {
+    setExplorerPanelOpen((current) => {
+      const next = toggleExplorerPanel(current);
+      setExplorerOpen(workspace.id, next);
+      return next;
+    });
+  };
+
+  const handleExplorerSplitChange = React.useCallback(
+    (nextWidth: number) => {
+      const persisted = persistExplorerSplitWidth(workspace.id, nextWidth);
+      setExplorerSplit(persisted);
+    },
+    [workspace.id]
+  );
 
   if (!activeTerminal) {
     return (
@@ -145,11 +224,12 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
           <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto scrollbar-hide">
             {workspace.terminalTabs.map((terminal, index) => {
               const isActive = terminal.id === activeTerminal.id;
+              const statusMeta = getTerminalStatusMeta(terminal.status);
               return (
                 <motion.button
                   key={terminal.id}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => setActiveTerminalTab(workspace.id, terminal.id)}
+                  onClick={() => handleActivateTerminal(terminal)}
                   onDoubleClick={() => handleRenameTerminal(terminal)}
                   className={cn(
                     'group flex h-7 min-w-[132px] max-w-[280px] items-center gap-1.5 rounded-md border px-2.5 text-[12px] leading-none tracking-[0.01em]',
@@ -160,6 +240,13 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
                   data-testid={isVisible ? `terminal-tab-${terminal.id}` : `hidden-terminal-tab-${terminal.id}`}
                 >
                   <Terminal className="h-3.5 w-3.5 shrink-0" />
+                  {statusMeta && (
+                    <span
+                      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusMeta.className)}
+                      title={statusMeta.label}
+                      aria-label={statusMeta.label}
+                    />
+                  )}
                   <span className="truncate text-left">{getTerminalTitle(terminal, index)}</span>
                   <Button
                     size="icon"
@@ -196,6 +283,20 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
           <Button
             size="icon"
             variant="ghost"
+            className={cn(
+              "h-7 w-7 shrink-0 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]",
+              explorerOpen && "bg-[var(--color-chrome-active)] text-[var(--color-chrome-text-active)]"
+            )}
+            onClick={handleToggleExplorer}
+            title={explorerOpen ? "Hide explorer" : "Show explorer"}
+            data-testid={isVisible ? `workspace-toggle-explorer-${workspace.id}` : `hidden-workspace-toggle-explorer-${workspace.id}`}
+          >
+            <Files className="h-4 w-4" />
+          </Button>
+
+          <Button
+            size="icon"
+            variant="ghost"
             className="h-7 w-7 shrink-0 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
             onClick={handleCreateTerminal}
             title="New terminal tab"
@@ -207,32 +308,77 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
       </div>
 
       <div className="min-h-0 flex-1">
-        <div className="relative h-full">
-          {workspace.terminalTabs.map((terminal) => {
-            const isActive = terminal.id === activeTerminal.id;
-            const isTerminalVisible = isVisible && isActive;
-            return (
-              <div
-                key={terminal.id}
-                className={cn(
-                  'absolute inset-0 h-full transition-opacity duration-150',
-                  isActive
-                    ? 'visible opacity-100 pointer-events-auto'
-                    : 'invisible opacity-0 pointer-events-none'
-                )}
-                aria-hidden={!isActive}
-              >
-                <WorkspacePaneTree
-                  workspace={workspace}
-                  terminal={terminal}
-                  node={terminal.paneTree}
-                  exposeTestIds={isActive}
-                  isPaneVisible={isTerminalVisible}
-                />
+        {workspace.projectPath ? (
+          <SplitPane
+            left={
+              <ProjectExplorerPanel
+                projectPath={workspace.projectPath}
+                workspaceId={workspace.id}
+                isVisible={isVisible && explorerOpen}
+              />
+            }
+            right={
+              <div className="relative h-full">
+                {workspace.terminalTabs.map((terminal) => {
+                  const isActive = terminal.id === activeTerminal.id;
+                  const isTerminalVisible = isVisible && isActive;
+                  return (
+                    <div
+                      key={terminal.id}
+                      className={cn(
+                        'absolute inset-0 h-full transition-opacity duration-150',
+                        isActive
+                          ? 'visible opacity-100 pointer-events-auto'
+                          : 'invisible opacity-0 pointer-events-none'
+                      )}
+                      aria-hidden={!isActive}
+                    >
+                      <WorkspacePaneTree
+                        workspace={workspace}
+                        terminal={terminal}
+                        node={terminal.paneTree}
+                        exposeTestIds={isActive}
+                        isPaneVisible={isTerminalVisible}
+                      />
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
+            }
+            initialSplit={explorerSplit}
+            minLeftWidth={220}
+            minRightWidth={420}
+            onSplitChange={handleExplorerSplitChange}
+            leftCollapsed={!explorerOpen}
+          />
+        ) : (
+          <div className="relative h-full">
+            {workspace.terminalTabs.map((terminal) => {
+              const isActive = terminal.id === activeTerminal.id;
+              const isTerminalVisible = isVisible && isActive;
+              return (
+                <div
+                  key={terminal.id}
+                  className={cn(
+                    'absolute inset-0 h-full transition-opacity duration-150',
+                    isActive
+                      ? 'visible opacity-100 pointer-events-auto'
+                      : 'invisible opacity-0 pointer-events-none'
+                  )}
+                  aria-hidden={!isActive}
+                >
+                  <WorkspacePaneTree
+                    workspace={workspace}
+                    terminal={terminal}
+                    node={terminal.paneTree}
+                    exposeTestIds={isActive}
+                    isPaneVisible={isTerminalVisible}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {!workspace.projectPath && (
