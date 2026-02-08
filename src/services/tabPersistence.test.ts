@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { PaneNode, ProjectWorkspaceTab, TerminalTab } from '@/contexts/TabContext';
+import {
+  sanitizeTerminalForHydration,
+  type PaneNode,
+  type ProjectWorkspaceTab,
+  type TerminalTab,
+} from '@/contexts/TabContext';
 import { TabPersistenceService, validateWorkspaceGraph } from '@/services/tabPersistence';
 
 function makeLeafPane(id: string): PaneNode {
@@ -139,5 +144,25 @@ describe('TabPersistenceService', () => {
     const validation = validateWorkspaceGraph(restored.tabs, restored.activeTabId);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toHaveLength(0);
+  });
+
+  it('clears stale embedded terminal ids during hydration while preserving pane restore metadata', () => {
+    const paneId = 'terminal-1-pane-1';
+    const terminal = makeTerminal('terminal-1', {
+      paneStates: {
+        [paneId]: {
+          embeddedTerminalId: 'embedded-stale-1',
+          sessionId: 'session-123',
+          restorePreference: 'resume_latest',
+          projectPath: '/tmp/project',
+        },
+      },
+    });
+
+    const sanitized = sanitizeTerminalForHydration(terminal);
+    expect(sanitized.paneStates[paneId]?.embeddedTerminalId).toBeUndefined();
+    expect(sanitized.paneStates[paneId]?.sessionId).toBe('session-123');
+    expect(sanitized.paneStates[paneId]?.restorePreference).toBe('resume_latest');
+    expect(sanitized.paneStates[paneId]?.projectPath).toBe('/tmp/project');
   });
 });

@@ -21,6 +21,15 @@ import { Popover } from "@/components/ui/popover";
 import { api, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+const ENABLE_DEBUG_LOGS =
+  Boolean((globalThis as any)?.__OPCODE_DEBUG_LOGS__) &&
+  Boolean(import.meta.env?.DEV);
+
+function debugLog(...args: unknown[]) {
+  if (!ENABLE_DEBUG_LOGS) return;
+  console.log(...args);
+}
+
 // Tauri event listener — use dynamic import to work with Vite's ESM environment.
 // `require()` does not work in Vite; `import()` returns the correct ESM module.
 type UnlistenFn = () => void;
@@ -54,9 +63,9 @@ function getTauriListen(): Promise<any> {
 
 // DOM-based fallback for web mode (non-Tauri)
 const domListen = (eventName: string, callback: (event: any) => void): Promise<UnlistenFn> => {
-  console.log('[ClaudeCodeSession] Setting up DOM event listener for:', eventName);
+  debugLog('[ClaudeCodeSession] Setting up DOM event listener for:', eventName);
   const domEventHandler = (event: any) => {
-    console.log('[ClaudeCodeSession] DOM event received:', eventName, event.detail);
+    debugLog('[ClaudeCodeSession] DOM event received:', eventName, event.detail);
     callback({ payload: event.detail });
   };
   window.addEventListener(eventName, domEventHandler);
@@ -87,6 +96,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { TooltipProvider, TooltipSimple } from "@/components/ui/tooltip-modern";
 import { SplitPane } from "@/components/ui/split-pane";
 import { WebviewPreview } from "./WebviewPreview";
+import { EmbeddedTerminal } from "./EmbeddedTerminal";
 import type { ClaudeStreamMessage } from "./AgentExecution";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTrackEvent, useComponentMetrics, useWorkflowTracking } from "@/hooks";
@@ -98,6 +108,20 @@ import {
   getModelDisplayName,
   getProviderDisplayName,
 } from "@/lib/providerModels";
+import {
+  NATIVE_TERMINAL_MODE_EVENT,
+  PLAIN_TERMINAL_MODE_EVENT,
+  loadNativeTerminalModePreference,
+  loadPlainTerminalModePreference,
+  readNativeTerminalModeFromStorage,
+  readPlainTerminalModeFromStorage,
+  saveNativeTerminalModePreference,
+  savePlainTerminalModePreference,
+} from "@/lib/uiPreferences";
+import {
+  resolveLatestSessionIdForProject,
+  sanitizeClaudeSessionId,
+} from "@/services/nativeTerminalRestore";
 
 interface ClaudeCodeSessionProps {
   /**
@@ -137,6 +161,10 @@ interface ClaudeCodeSessionProps {
    */
   onProviderChange?: (providerId: string) => void;
   /**
+   * Callback when a runtime session is identified/resolved.
+   */
+  onSessionResolved?: (session: Session) => void;
+  /**
    * Whether this is rendered as an embedded pane.
    */
   embedded?: boolean;
@@ -149,6 +177,46 @@ interface ClaudeCodeSessionProps {
    */
   workspaceId?: string;
   /**
+   * Optional terminal tab identity for multi-terminal rendering.
+   */
+  terminalTabId?: string;
+  /**
+   * Existing embedded terminal session id for reattachment.
+   */
+  embeddedTerminalId?: string;
+  /**
+   * Callback when embedded terminal session id changes.
+   */
+  onEmbeddedTerminalIdChange?: (terminalId: string | undefined) => void;
+  /**
+   * Whether this pane is currently visible to the user.
+   */
+  isPaneVisible?: boolean;
+  /**
+   * Whether this pane is the active pane for terminal keyboard input.
+   */
+  isPaneActive?: boolean;
+  /**
+   * Explicit session id to resume on next native terminal boot.
+   */
+  resumeSessionId?: string;
+  /**
+   * Stable persistent terminal session id used for detached shell continuity.
+   */
+  persistentTerminalSessionId?: string;
+  /**
+   * Pane-level restore preference used when no explicit session id exists.
+   */
+  restorePreference?: 'resume_latest' | 'start_fresh';
+  /**
+   * Callback when pane restore preference changes.
+   */
+  onRestorePreferenceChange?: (value: 'resume_latest' | 'start_fresh') => void;
+  /**
+   * Callback when pane resume session id is updated.
+   */
+  onResumeSessionIdChange?: (sessionId: string | undefined) => void;
+  /**
    * Hide project/provider bar for embedded usage.
    */
   hideProjectBar?: boolean;
@@ -160,6 +228,82 @@ interface ClaudeCodeSessionProps {
    * Preview layout mode.
    */
   previewMode?: 'split' | 'slideover';
+}
+
+export function shouldShowProjectPathHeader(
+  hideProjectBar: boolean,
+  nativeTerminalMode: boolean,
+  detectedProviderCount: number,
+  projectPath: string
+): boolean {
+  return !hideProjectBar && (nativeTerminalMode || detectedProviderCount > 0 || Boolean(projectPath));
+}
+
+export function shouldShowProviderSelectorInHeader(
+  nativeTerminalMode: boolean,
+  detectedProviderCount: number
+): boolean {
+  return !nativeTerminalMode && detectedProviderCount > 0;
+}
+
+function toPlainTextValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map((entry) => toPlainTextValue(entry)).filter(Boolean).join("\n");
+  }
+  if (typeof value === "object") {
+    const objectValue = value as Record<string, unknown>;
+    if (typeof objectValue.text === "string") {
+      return objectValue.text;
+    }
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function getPlainRoleLabel(message: ClaudeStreamMessage): string {
+  const base = (message.type || "message").toUpperCase();
+  const subtype = typeof message.subtype === "string" && message.subtype.trim() ? `:${message.subtype}` : "";
+  return `${base}${subtype}`;
+}
+
+function getPlainMessageBody(message: ClaudeStreamMessage): string {
+  if (message.type === "assistant" || message.type === "user") {
+    const content = message.message?.content;
+    if (Array.isArray(content)) {
+      const chunks = content
+        .map((chunk: any) => {
+          if (!chunk || typeof chunk !== "object") return toPlainTextValue(chunk);
+          if (chunk.type === "text") return toPlainTextValue(chunk.text);
+          if (chunk.type === "tool_use") {
+            return `[tool:${chunk.name || "unknown"}]\n${toPlainTextValue(chunk.input)}`;
+          }
+          if (chunk.type === "tool_result") {
+            return `[tool_result]\n${toPlainTextValue(chunk.content)}`;
+          }
+          return toPlainTextValue(chunk);
+        })
+        .filter((entry) => entry.trim().length > 0);
+
+      if (chunks.length > 0) {
+        return chunks.join("\n\n");
+      }
+    }
+  }
+
+  if (typeof message.result === "string" && message.result.trim()) {
+    return message.result;
+  }
+  if (typeof message.error === "string" && message.error.trim()) {
+    return message.error;
+  }
+  return toPlainTextValue(message).trim();
 }
 
 /**
@@ -176,10 +320,23 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   onProjectPathChange,
   providerId: initialProviderId = "claude",
   onProviderChange,
+  onSessionResolved,
   embedded = false,
   hideProjectBar = false,
   hideFloatingGlobalControls = false,
   previewMode = 'split',
+  paneId,
+  workspaceId,
+  terminalTabId,
+  embeddedTerminalId,
+  onEmbeddedTerminalIdChange,
+  isPaneVisible = true,
+  isPaneActive = true,
+  resumeSessionId,
+  persistentTerminalSessionId,
+  restorePreference,
+  onRestorePreferenceChange,
+  onResumeSessionIdChange,
 }) => {
   type QueuedPrompt = {
     id: string;
@@ -224,6 +381,17 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [activeProviderId, setActiveProviderId] = useState(initialProviderId);
   const [detectedProviders, setDetectedProviders] = useState<Array<{ providerId: string; binaryPath: string; version: string | null; source: string }>>([]);
   const [showProviderMenu, setShowProviderMenu] = useState(false);
+  const [plainTerminalMode, setPlainTerminalMode] = useState<boolean>(() => readPlainTerminalModeFromStorage());
+  const [nativeTerminalMode, setNativeTerminalMode] = useState<boolean>(() =>
+    readNativeTerminalModeFromStorage()
+  );
+  const [hasBootedNativeTerminal, setHasBootedNativeTerminal] = useState<boolean>(
+    () => Boolean(embeddedTerminalId)
+  );
+  const [nativeTerminalCommand, setNativeTerminalCommand] = useState<string>("claude");
+  const [showNativeRestorePrompt, setShowNativeRestorePrompt] = useState<boolean>(false);
+  const [isResolvingNativeRestore, setIsResolvingNativeRestore] = useState<boolean>(false);
+  const [nativeRestoreNotice, setNativeRestoreNotice] = useState<string | null>(null);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
@@ -240,6 +408,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const streamStartedAtRef = useRef<number | null>(null);
   const sessionStartTime = useRef<number>(Date.now());
   const isIMEComposingRef = useRef(false);
+  const lastResolvedSessionIdRef = useRef<string | null>(session?.id ?? null);
   
   // Session metrics state for enhanced analytics
   const sessionMetrics = useRef({
@@ -271,7 +440,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       hardTimeoutMs: HARD_TIMEOUT_MS,
       onFirstWarning: ({ providerId, projectPath }) => {
         if (!isMountedRef.current) return;
-        setError(FIRST_STREAM_WARNING_TEXT);
+        // Disabled noisy 2s UI warning; keep diagnostics logging only.
+        // setError(FIRST_STREAM_WARNING_TEXT);
         logWorkspaceEvent({
           category: 'stream_watchdog',
           action: 'first_stream_warning',
@@ -318,8 +488,56 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     setActiveProviderId(initialProviderId || "claude");
   }, [initialProviderId]);
 
+  useEffect(() => {
+    if (nativeTerminalMode) {
+      setShowProviderMenu(false);
+    }
+  }, [nativeTerminalMode]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    loadPlainTerminalModePreference().then((enabled) => {
+      if (!isCancelled) {
+        setPlainTerminalMode(enabled);
+      }
+    });
+    loadNativeTerminalModePreference().then((enabled) => {
+      if (!isCancelled) {
+        setNativeTerminalMode(enabled);
+      }
+    });
+
+    const handlePlainModeChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ enabled?: boolean }>).detail;
+      if (typeof detail?.enabled === "boolean") {
+        setPlainTerminalMode(detail.enabled);
+      } else {
+        setPlainTerminalMode(readPlainTerminalModeFromStorage());
+      }
+    };
+    const handleNativeModeChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ enabled?: boolean }>).detail;
+      if (typeof detail?.enabled === "boolean") {
+        setNativeTerminalMode(detail.enabled);
+      } else {
+        setNativeTerminalMode(readNativeTerminalModeFromStorage());
+      }
+    };
+
+    window.addEventListener(PLAIN_TERMINAL_MODE_EVENT, handlePlainModeChange as EventListener);
+    window.addEventListener(NATIVE_TERMINAL_MODE_EVENT, handleNativeModeChange as EventListener);
+    return () => {
+      isCancelled = true;
+      window.removeEventListener(PLAIN_TERMINAL_MODE_EVENT, handlePlainModeChange as EventListener);
+      window.removeEventListener(NATIVE_TERMINAL_MODE_EVENT, handleNativeModeChange as EventListener);
+    };
+  }, []);
+
   // Detect available providers on mount
   useEffect(() => {
+    if (!isPaneVisible) {
+      return;
+    }
     let isCancelled = false;
 
     api.listDetectedAgents()
@@ -362,7 +580,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [initialProviderId, isPaneVisible]);
   
   // Keep ref in sync with state
   useEffect(() => {
@@ -382,6 +600,89 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
     return null;
   }, [session, extractedSessionInfo, projectPath]);
+
+  useEffect(() => {
+    if (!effectiveSession || !onSessionResolved) return;
+    if (lastResolvedSessionIdRef.current === effectiveSession.id) return;
+
+    lastResolvedSessionIdRef.current = effectiveSession.id;
+    onSessionResolved(effectiveSession);
+  }, [effectiveSession, onSessionResolved]);
+
+  useEffect(() => {
+    if (embeddedTerminalId) {
+      setHasBootedNativeTerminal(true);
+    }
+  }, [embeddedTerminalId]);
+
+  const bootNativeTerminalWithCommand = React.useCallback((command: string) => {
+    const resumeMatch = command.match(/^\s*claude\s+--resume\s+([A-Za-z0-9-]+)\s*$/i);
+    if (resumeMatch?.[1]) {
+      onResumeSessionIdChange?.(resumeMatch[1]);
+    }
+    setNativeTerminalCommand(command);
+    setShowNativeRestorePrompt(false);
+    setHasBootedNativeTerminal(true);
+  }, [onResumeSessionIdChange]);
+
+  const resolveLatestNativeSessionAndBoot = React.useCallback(async () => {
+    if (!projectPath) {
+      return;
+    }
+
+    setIsResolvingNativeRestore(true);
+    setNativeRestoreNotice(null);
+    try {
+      const latestSessionId = await resolveLatestSessionIdForProject(projectPath);
+      if (latestSessionId) {
+        onResumeSessionIdChange?.(latestSessionId);
+        bootNativeTerminalWithCommand(`claude --resume ${latestSessionId}`);
+        return;
+      }
+
+      setNativeRestoreNotice('No prior Claude session found for this project. Starting fresh.');
+      bootNativeTerminalWithCommand('claude');
+    } catch (restoreError) {
+      console.warn('[ClaudeCodeSession] Failed to resolve latest native restore session', restoreError);
+      setNativeRestoreNotice('Could not load prior sessions. Starting fresh.');
+      bootNativeTerminalWithCommand('claude');
+    } finally {
+      setIsResolvingNativeRestore(false);
+    }
+  }, [bootNativeTerminalWithCommand, onResumeSessionIdChange, projectPath]);
+
+  useEffect(() => {
+    if (!nativeTerminalMode || !projectPath || hasBootedNativeTerminal || !isPaneVisible) {
+      return;
+    }
+
+    const validExplicitResumeSessionId = sanitizeClaudeSessionId(resumeSessionId);
+    if (validExplicitResumeSessionId) {
+      bootNativeTerminalWithCommand(`claude --resume ${validExplicitResumeSessionId}`);
+      return;
+    }
+
+    if (restorePreference === 'resume_latest') {
+      resolveLatestNativeSessionAndBoot();
+      return;
+    }
+
+    if (restorePreference === 'start_fresh') {
+      bootNativeTerminalWithCommand('claude');
+      return;
+    }
+
+    bootNativeTerminalWithCommand('claude');
+  }, [
+    bootNativeTerminalWithCommand,
+    hasBootedNativeTerminal,
+    isPaneVisible,
+    nativeTerminalMode,
+    projectPath,
+    resolveLatestNativeSessionAndBoot,
+    restorePreference,
+    resumeSessionId,
+  ]);
 
   // Filter out messages that shouldn't be displayed
   const displayableMessages = useMemo(() => {
@@ -446,8 +747,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     });
   }, [messages]);
 
+  const visibleMessageCount = isPaneVisible ? displayableMessages.length : 0;
+
   const rowVirtualizer = useVirtualizer({
-    count: displayableMessages.length,
+    count: visibleMessageCount,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 150, // Estimate, will be dynamically measured
     overscan: 5,
@@ -455,7 +758,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   // Debug logging
   useEffect(() => {
-    console.log('[ClaudeCodeSession] State update:', {
+    debugLog('[ClaudeCodeSession] State update:', {
       projectPath,
       session,
       extractedSessionInfo,
@@ -467,6 +770,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   // Load session history if resuming
   useEffect(() => {
+    if (!isPaneVisible || !session) {
+      return;
+    }
+
     if (session) {
       // Set the claudeSessionId immediately when we have a session
       setClaudeSessionId(session.id);
@@ -482,7 +789,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       
       initializeSession();
     }
-  }, [session]); // Remove hasLoadedSession dependency to ensure it runs on mount
+  }, [session, isPaneVisible]); // Lazy-load session work for visible panes only
 
   // Report streaming state changes
   useEffect(() => {
@@ -491,6 +798,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
+    if (!isPaneVisible) return;
     if (displayableMessages.length > 0) {
       // Use a more precise scrolling method to ensure content is fully visible
       setTimeout(() => {
@@ -509,7 +817,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         }
       }, 50);
     }
-  }, [displayableMessages.length, rowVirtualizer]);
+  }, [displayableMessages.length, isPaneVisible, rowVirtualizer]);
 
   // Calculate total tokens from messages
   useEffect(() => {
@@ -558,6 +866,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       
       // Scroll to bottom after loading history
       setTimeout(() => {
+        if (!isPaneVisible) return;
         if (loadedMessages.length > 0) {
           const scrollElement = parentRef.current;
           if (scrollElement) {
@@ -594,7 +903,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         
         if (activeSession) {
           // Session is still active, reconnect to its stream
-          console.log('[ClaudeCodeSession] Found active session, reconnecting:', session.id);
+          debugLog('[ClaudeCodeSession] Found active session, reconnecting:', session.id);
           // IMPORTANT: Set claudeSessionId before reconnecting
           setClaudeSessionId(session.id);
           
@@ -611,11 +920,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   };
 
   const reconnectToSession = async (sessionId: string) => {
-    console.log('[ClaudeCodeSession] Reconnecting to session:', sessionId);
+    debugLog('[ClaudeCodeSession] Reconnecting to session:', sessionId);
     
     // Prevent duplicate listeners
     if (isListeningRef.current) {
-      console.log('[ClaudeCodeSession] Already listening to session, skipping reconnect');
+      debugLog('[ClaudeCodeSession] Already listening to session, skipping reconnect');
       return;
     }
     
@@ -632,7 +941,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     // Set up session-specific listeners
     const outputUnlisten = await listen(`claude-output:${sessionId}`, async (event: any) => {
       try {
-        console.log('[ClaudeCodeSession] Received claude-output on reconnect:', event.payload);
+        debugLog('[ClaudeCodeSession] Received claude-output on reconnect:', event.payload);
         
         if (!isMountedRef.current) return;
         
@@ -659,7 +968,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     });
 
     const completeUnlisten = await listen(`claude-complete:${sessionId}`, async (event: any) => {
-      console.log('[ClaudeCodeSession] Received claude-complete on reconnect:', event.payload);
+      debugLog('[ClaudeCodeSession] Received claude-complete on reconnect:', event.payload);
       if (isMountedRef.current) {
         clearStreamWatchdogs();
         setIsLoading(false);
@@ -801,7 +1110,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     const modelForTracking = model || "default";
     let runProjectPath = projectPath;
 
-    console.log('[ClaudeCodeSession] handleSendPrompt called with:', {
+    debugLog('[ClaudeCodeSession] handleSendPrompt called with:', {
       prompt,
       model,
       providerToUse,
@@ -890,13 +1199,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         //     generic ones to prevent duplicate handling.
         // --------------------------------------------------------------------
 
-        console.log('[ClaudeCodeSession] Setting up generic event listeners first');
+        debugLog('[ClaudeCodeSession] Setting up generic event listeners first');
 
         let currentSessionId: string | null = claudeSessionId || effectiveSession?.id || null;
 
         // Helper to attach session-specific listeners **once we are sure**
         const attachSessionSpecificListeners = async (sid: string) => {
-          console.log('[ClaudeCodeSession] Attaching session-specific listeners for', sid);
+          debugLog('[ClaudeCodeSession] Attaching session-specific listeners for', sid);
 
           const specificOutputUnlisten = await listen(`claude-output:${sid}`, (evt: any) => {
             handleStreamMessage(evt.payload);
@@ -921,7 +1230,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           });
 
           const specificCompleteUnlisten = await listen(`claude-complete:${sid}`, (evt: any) => {
-            console.log('[ClaudeCodeSession] Received claude-complete (scoped):', evt.payload);
+            debugLog('[ClaudeCodeSession] Received claude-complete (scoped):', evt.payload);
             processComplete(evt.payload);
           });
 
@@ -939,7 +1248,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             const msg = JSON.parse(event.payload) as ClaudeStreamMessage;
             if (msg.type === 'system' && msg.subtype === 'init' && msg.session_id) {
               if (!currentSessionId || currentSessionId !== msg.session_id) {
-                console.log('[ClaudeCodeSession] Detected new session_id from generic listener:', msg.session_id);
+                debugLog('[ClaudeCodeSession] Detected new session_id from generic listener:', msg.session_id);
                 currentSessionId = msg.session_id;
                 setClaudeSessionId(msg.session_id);
 
@@ -986,7 +1295,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               rawPayload = JSON.stringify(payload);
             }
             
-            console.log('[ClaudeCodeSession] handleStreamMessage - message type:', message.type);
+            debugLog('[ClaudeCodeSession] handleStreamMessage - message type:', message.type);
 
             // Store raw JSONL
             setRawJsonlOutput((prev) => [...prev, rawPayload]);
@@ -1193,7 +1502,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         });
 
         const genericCompleteUnlisten = await listen('claude-complete', (evt: any) => {
-          console.log('[ClaudeCodeSession] Received claude-complete (generic):', evt.payload);
+          debugLog('[ClaudeCodeSession] Received claude-complete (generic):', evt.payload);
           processComplete(evt.payload);
         });
 
@@ -1261,7 +1570,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
         // Execute the appropriate command (provider-aware)
         if (effectiveSession && !isFirstPrompt) {
-          console.log('[ClaudeCodeSession] Resuming session:', effectiveSession.id, 'provider:', providerToUse);
+          debugLog('[ClaudeCodeSession] Resuming session:', effectiveSession.id, 'provider:', providerToUse);
           trackEvent.sessionResumed(effectiveSession.id);
           trackEvent.modelSelected(modelForTracking);
           if (isClaudeProviderForRun) {
@@ -1277,7 +1586,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             );
           }
         } else {
-          console.log('[ClaudeCodeSession] Starting new session, provider:', providerToUse);
+          debugLog('[ClaudeCodeSession] Starting new session, provider:', providerToUse);
           setIsFirstPrompt(false);
           trackEvent.sessionCreated(modelForTracking, 'prompt_input');
           trackEvent.modelSelected(modelForTracking);
@@ -1549,7 +1858,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       
       // Open the new forked session
       // You would need to implement navigation to the new session
-      console.log("Forked to new session:", newSessionId);
+      debugLog("Forked to new session:", newSessionId);
       
       setShowForkDialog(false);
       setForkCheckpointId(null);
@@ -1577,7 +1886,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   };
 
   const handlePreviewUrlChange = (url: string) => {
-    console.log('[ClaudeCodeSession] Preview URL changed to:', url);
+    debugLog('[ClaudeCodeSession] Preview URL changed to:', url);
     setPreviewUrl(url);
   };
 
@@ -1594,7 +1903,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     isMountedRef.current = true;
     
     return () => {
-      console.log('[ClaudeCodeSession] Component unmounting, cleaning up listeners');
+      debugLog('[ClaudeCodeSession] Component unmounting, cleaning up listeners');
       isMountedRef.current = false;
       isListeningRef.current = false;
       
@@ -1712,6 +2021,38 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     </div>
   );
 
+  const plainMessagesList = (
+    <div ref={parentRef} className="flex-1 overflow-y-auto pb-20">
+      <div className={cn("mx-auto w-full px-4 py-3", embedded ? "" : "max-w-6xl")}>
+        {displayableMessages.map((message, index) => {
+          const roleLabel = getPlainRoleLabel(message);
+          const body = getPlainMessageBody(message);
+          return (
+            <div
+              key={`${roleLabel}-${index}-${(message as any).timestamp || index}`}
+              className="border-b border-border/40 py-2 font-mono text-[12px] leading-5"
+            >
+              <div className="mb-1 text-[10px] uppercase tracking-[0.06em] text-muted-foreground">{roleLabel}</div>
+              <pre className="m-0 whitespace-pre-wrap break-words text-foreground">{body || "[empty]"}</pre>
+            </div>
+          );
+        })}
+
+        {isLoading && (
+          <div className="py-3 font-mono text-[12px] text-muted-foreground">
+            [running]
+          </div>
+        )}
+
+        {error && (
+          <div className="py-3 font-mono text-[12px] text-destructive">
+            [error] {error}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   // Provider names for display
   const providerNames: Record<string, string> = {
     claude: "Claude Code",
@@ -1737,57 +2078,215 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     onProviderChange?.(newProviderId);
   };
 
-  // Provider selector bar (only shown when multiple providers detected)
-  const projectPathInput = !hideProjectBar && detectedProviders.length > 0 ? (
+  const handlePlainTerminalToggle = async () => {
+    const next = !plainTerminalMode;
+    setPlainTerminalMode(next);
+    await savePlainTerminalModePreference(next);
+  };
+
+  const handleNativeTerminalToggle = async () => {
+    const next = !nativeTerminalMode;
+    setNativeTerminalMode(next);
+    await saveNativeTerminalModePreference(next);
+  };
+
+  async function handleSelectTerminalProject() {
+    const resolvedProjectPath = projectPath || (await resolveProjectPathForPrompt());
+    if (!resolvedProjectPath) {
+      setError("Please select a project directory first");
+      return;
+    }
+
+    if (!projectPath) {
+      setProjectPath(resolvedProjectPath);
+      onProjectPathChange?.(resolvedProjectPath);
+    }
+    setError(null);
+  }
+
+  const handleChooseResumeLatest = React.useCallback(async () => {
+    onRestorePreferenceChange?.('resume_latest');
+    await resolveLatestNativeSessionAndBoot();
+  }, [onRestorePreferenceChange, resolveLatestNativeSessionAndBoot]);
+
+  const handleChooseStartFresh = React.useCallback(() => {
+    onRestorePreferenceChange?.('start_fresh');
+    onResumeSessionIdChange?.(undefined);
+    setNativeRestoreNotice(null);
+    bootNativeTerminalWithCommand('claude');
+  }, [bootNativeTerminalWithCommand, onRestorePreferenceChange, onResumeSessionIdChange]);
+
+  const nativeTerminalPanel = (() => {
+    if (!projectPath) {
+      return (
+        <div className="flex-1 overflow-y-auto pb-20">
+          <div className={cn("mx-auto w-full px-4 py-6", embedded ? "" : "max-w-4xl")}>
+            <div className="rounded-lg border border-border bg-background p-4">
+              <div className="mb-2 text-sm font-medium">In-App Terminal Mode</div>
+              <p className="mb-4 text-sm text-muted-foreground">
+                Select a project path to start an embedded terminal inside this pane.
+              </p>
+              <Button size="sm" onClick={handleSelectTerminalProject}>
+                Select Project
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (!hasBootedNativeTerminal) {
+      return (
+        <div className="flex-1 overflow-y-auto pb-20">
+          <div className={cn("mx-auto w-full px-4 py-6", embedded ? "" : "max-w-4xl")}>
+            <div className="rounded-lg border border-border bg-background p-4">
+              <div className="mb-2 text-sm font-medium">In-App Terminal Mode</div>
+              {isResolvingNativeRestore ? (
+                <p className="mb-2 text-sm text-muted-foreground">
+                  Resolving latest Claude session for this project...
+                </p>
+              ) : !isPaneVisible ? (
+                <p className="mb-2 text-sm text-muted-foreground">
+                  Terminal will start when this pane becomes active.
+                </p>
+              ) : showNativeRestorePrompt ? (
+                <>
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    Restore this pane from the latest Claude session, or start fresh?
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" onClick={handleChooseResumeLatest} data-testid="native-restore-resume-latest">
+                      Resume Latest
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleChooseStartFresh}
+                      data-testid="native-restore-start-fresh"
+                    >
+                      Start Fresh
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <p className="mb-2 text-sm text-muted-foreground">Preparing terminal startup...</p>
+              )}
+              {nativeRestoreNotice && (
+                <p className="mt-3 text-xs text-muted-foreground">{nativeRestoreNotice}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <EmbeddedTerminal
+        projectPath={projectPath}
+        autoRunCommand={nativeTerminalCommand}
+        existingTerminalId={embeddedTerminalId}
+        persistentSessionId={persistentTerminalSessionId}
+        onTerminalIdChange={onEmbeddedTerminalIdChange}
+        isInteractive={isPaneVisible && isPaneActive}
+        workspaceId={workspaceId}
+        terminalTabId={terminalTabId}
+        paneId={paneId}
+        className="min-h-0 flex-1"
+      />
+    );
+  })();
+
+  const showProjectPathHeader = shouldShowProjectPathHeader(
+    hideProjectBar,
+    nativeTerminalMode,
+    detectedProviders.length,
+    projectPath
+  );
+  const showProviderSelector = shouldShowProviderSelectorInHeader(
+    nativeTerminalMode,
+    detectedProviders.length
+  );
+
+  // Provider selector bar and path/toggles row.
+  const projectPathInput = showProjectPathHeader ? (
     <div
       className={cn(
         "flex items-center gap-1.5 px-0 py-1.5 border-b border-border/50 text-xs",
         embedded && "workspace-chip-icon-align"
       )}
     >
-      <div className="relative">
-        <button
-          onClick={() => setShowProviderMenu(!showProviderMenu)}
-          className="flex items-center gap-1.5 px-0 py-1 rounded-md hover:bg-accent/50 transition-colors text-muted-foreground hover:text-foreground"
-        >
-          {(() => {
-            const ActiveProviderIcon = providerIcons[activeProviderId] || Command;
-            return <ActiveProviderIcon className="h-3.5 w-3.5 shrink-0" />;
-          })()}
-          <span className="font-medium">{providerNames[activeProviderId] || activeProviderId}</span>
-          <ChevronDown className="h-3 w-3" />
-        </button>
-        {showProviderMenu && (
-          <div className="absolute top-full left-0 mt-1 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[160px]">
-            {detectedProviders.map((agent) => (
-              <button
-                key={agent.providerId}
-                onClick={() => handleProviderChange(agent.providerId)}
-                className={cn(
-                  "w-full text-left px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors flex items-center justify-between",
-                  agent.providerId === activeProviderId && "bg-accent/30 text-foreground font-medium"
-                )}
-              >
-                {(() => {
-                  const ProviderIcon = providerIcons[agent.providerId] || Command;
-                  return (
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <ProviderIcon className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{providerNames[agent.providerId] || agent.providerId}</span>
-                </span>
-                  );
-                })()}
-                {agent.version && (
-                  <span className="text-muted-foreground ml-2">v{agent.version}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {showProviderSelector ? (
+        <div className="relative">
+          <button
+            onClick={() => setShowProviderMenu(!showProviderMenu)}
+            className="flex items-center gap-1.5 px-0 py-1 rounded-md hover:bg-accent/50 transition-colors text-muted-foreground hover:text-foreground"
+            data-testid="provider-menu-trigger"
+          >
+            {(() => {
+              const ActiveProviderIcon = providerIcons[activeProviderId] || Command;
+              return <ActiveProviderIcon className="h-3.5 w-3.5 shrink-0" />;
+            })()}
+            <span className="font-medium">{providerNames[activeProviderId] || activeProviderId}</span>
+            <ChevronDown className="h-3 w-3" />
+          </button>
+          {showProviderMenu && (
+            <div className="absolute top-full left-0 mt-1 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[160px]">
+              {detectedProviders.map((agent) => (
+                <button
+                  key={agent.providerId}
+                  onClick={() => handleProviderChange(agent.providerId)}
+                  className={cn(
+                    "w-full text-left px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors flex items-center justify-between",
+                    agent.providerId === activeProviderId && "bg-accent/30 text-foreground font-medium"
+                  )}
+                >
+                  {(() => {
+                    const ProviderIcon = providerIcons[agent.providerId] || Command;
+                    return (
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <ProviderIcon className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{providerNames[agent.providerId] || agent.providerId}</span>
+                  </span>
+                    );
+                  })()}
+                  {agent.version && (
+                    <span className="text-muted-foreground ml-2">v{agent.version}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
       {projectPath && (
         <span className="text-muted-foreground truncate">{projectPath.replace(/^\/Users\/[^/]+\//, '~/')}</span>
       )}
+      <div className="ml-auto flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleNativeTerminalToggle}
+          className={cn(
+            "h-6 px-2 text-[10px] font-medium uppercase tracking-[0.06em]",
+            nativeTerminalMode ? "text-foreground" : "text-muted-foreground"
+          )}
+          title={nativeTerminalMode ? "Disable in-app terminal mode" : "Enable in-app terminal mode"}
+        >
+          Terminal
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handlePlainTerminalToggle}
+          className={cn(
+            "h-6 px-2 text-[10px] font-medium uppercase tracking-[0.06em]",
+            plainTerminalMode ? "text-foreground" : "text-muted-foreground"
+          )}
+          title={plainTerminalMode ? "Switch to styled view" : "Switch to plain terminal view"}
+        >
+          {plainTerminalMode ? "Styled" : "Plain"}
+        </Button>
+      </div>
     </div>
   ) : null;
 
@@ -1831,7 +2330,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               left={
                 <div className="h-full flex flex-col">
                   {projectPathInput}
-                  {messagesList}
+                  {nativeTerminalMode
+                    ? nativeTerminalPanel
+                    : plainTerminalMode
+                      ? plainMessagesList
+                      : messagesList}
                 </div>
               }
               right={
@@ -1853,7 +2356,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             // Original layout when no preview
             <div className={cn("h-full flex flex-col", embedded ? "workspace-chrome-row" : "max-w-6xl mx-auto px-6")}>
               {projectPathInput}
-              {messagesList}
+              {nativeTerminalMode
+                ? nativeTerminalPanel
+                : plainTerminalMode
+                  ? plainMessagesList
+                  : messagesList}
               
               {isLoading && messages.length === 0 && (
                 <div className="flex items-center justify-center h-full">
@@ -1896,7 +2403,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         <ErrorBoundary>
           {/* Queued Prompts Display */}
           <AnimatePresence>
-            {queuedPrompts.length > 0 && !hideFloatingGlobalControls && (
+            {queuedPrompts.length > 0 && !hideFloatingGlobalControls && !plainTerminalMode && !nativeTerminalMode && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1962,7 +2469,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           </AnimatePresence>
 
           {/* Navigation Arrows - positioned above prompt bar with spacing */}
-          {displayableMessages.length > 5 && !hideFloatingGlobalControls && (
+          {displayableMessages.length > 5 && !hideFloatingGlobalControls && !plainTerminalMode && !nativeTerminalMode && (
             <motion.div
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -2053,20 +2560,94 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               : "fixed bottom-0 left-0 right-0 transition-all duration-300 z-50",
             showTimeline && "sm:right-96"
           )}>
-            <FloatingPromptInput
-              ref={floatingPromptRef}
-              onSend={handleSendPrompt}
-              onCancel={handleCancelExecution}
-              isLoading={isLoading}
-              disabled={false}
-              providerId={activeProviderId}
-              defaultModel={getDefaultModelForProvider(activeProviderId)}
-              projectPath={projectPath}
-              className={embedded ? "!absolute !left-0 !right-0 !bottom-0 !z-40" : undefined}
-              extraMenuItems={
-                <>
-                  {effectiveSession && !hideFloatingGlobalControls && (
-                    <TooltipSimple content="Session Timeline" side="top">
+            {nativeTerminalMode ? (
+              <div className="border-t border-border bg-background/95 px-4 py-2">
+                <div className={cn("mx-auto flex w-full items-center justify-between", embedded ? "" : "max-w-6xl")}>
+                  <div className="text-xs text-muted-foreground">
+                    {nativeRestoreNotice || 'In-app terminal mode is active'}
+                  </div>
+                  {!projectPath && (
+                    <Button size="sm" onClick={handleSelectTerminalProject}>
+                      Select Project
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <FloatingPromptInput
+                ref={floatingPromptRef}
+                onSend={handleSendPrompt}
+                onCancel={handleCancelExecution}
+                isLoading={isLoading}
+                disabled={false}
+                providerId={activeProviderId}
+                defaultModel={getDefaultModelForProvider(activeProviderId)}
+                projectPath={projectPath}
+                className={embedded ? "!absolute !left-0 !right-0 !bottom-0 !z-40" : undefined}
+                extraMenuItems={
+                  <>
+                    {effectiveSession && !hideFloatingGlobalControls && (
+                      <TooltipSimple content="Session Timeline" side="top">
+                        <motion.div
+                          whileTap={{ scale: 0.97 }}
+                          transition={{ duration: 0.15 }}
+                        >
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setShowTimeline(!showTimeline)}
+                            className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                          >
+                            <GitBranch className={cn("h-2.5 w-2.5", showTimeline && "text-primary")} />
+                          </Button>
+                        </motion.div>
+                      </TooltipSimple>
+                    )}
+                    {messages.length > 0 && !hideFloatingGlobalControls && (
+                      <Popover
+                        trigger={
+                          <TooltipSimple content="Copy conversation" side="top">
+                            <motion.div
+                              whileTap={{ scale: 0.97 }}
+                              transition={{ duration: 0.15 }}
+                            >
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                              >
+                                <Copy className="h-2.5 w-2.5" />
+                              </Button>
+                            </motion.div>
+                          </TooltipSimple>
+                        }
+                        content={
+                          <div className="w-44 p-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={handleCopyAsMarkdown}
+                              className="w-full justify-start text-xs"
+                            >
+                              Copy as Markdown
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={handleCopyAsJsonl}
+                              className="w-full justify-start text-xs"
+                            >
+                              Copy as JSONL
+                            </Button>
+                          </div>
+                        }
+                        open={copyPopoverOpen}
+                        onOpenChange={setCopyPopoverOpen}
+                        side="top"
+                        align="end"
+                      />
+                    )}
+                    <TooltipSimple content="Checkpoint Settings" side="top">
                       <motion.div
                         whileTap={{ scale: 0.97 }}
                         transition={{ duration: 0.15 }}
@@ -2074,80 +2655,21 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => setShowTimeline(!showTimeline)}
+                          onClick={() => setShowSettings(!showSettings)}
                           className="h-5 w-5 text-muted-foreground hover:text-foreground"
                         >
-                          <GitBranch className={cn("h-2.5 w-2.5", showTimeline && "text-primary")} />
+                          <Wrench className={cn("h-2.5 w-2.5", showSettings && "text-primary")} />
                         </Button>
                       </motion.div>
                     </TooltipSimple>
-                  )}
-                  {messages.length > 0 && !hideFloatingGlobalControls && (
-                    <Popover
-                      trigger={
-                        <TooltipSimple content="Copy conversation" side="top">
-                          <motion.div
-                            whileTap={{ scale: 0.97 }}
-                            transition={{ duration: 0.15 }}
-                          >
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                            >
-                              <Copy className="h-2.5 w-2.5" />
-                            </Button>
-                          </motion.div>
-                        </TooltipSimple>
-                      }
-                      content={
-                        <div className="w-44 p-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleCopyAsMarkdown}
-                            className="w-full justify-start text-xs"
-                          >
-                            Copy as Markdown
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleCopyAsJsonl}
-                            className="w-full justify-start text-xs"
-                          >
-                            Copy as JSONL
-                          </Button>
-                        </div>
-                      }
-                      open={copyPopoverOpen}
-                      onOpenChange={setCopyPopoverOpen}
-                      side="top"
-                      align="end"
-                    />
-                  )}
-                  <TooltipSimple content="Checkpoint Settings" side="top">
-                    <motion.div
-                      whileTap={{ scale: 0.97 }}
-                      transition={{ duration: 0.15 }}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setShowSettings(!showSettings)}
-                        className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                      >
-                        <Wrench className={cn("h-2.5 w-2.5", showSettings && "text-primary")} />
-                      </Button>
-                    </motion.div>
-                  </TooltipSimple>
-                </>
-              }
-            />
+                  </>
+                }
+              />
+            )}
           </div>
 
           {/* Token Counter - positioned under the Send button */}
-          {totalTokens > 0 && !hideFloatingGlobalControls && (
+          {totalTokens > 0 && !hideFloatingGlobalControls && !nativeTerminalMode && (
             <div className={cn(
               embedded ? "absolute bottom-0 left-0 right-0 z-30 pointer-events-none" : "fixed bottom-0 left-0 right-0 z-30 pointer-events-none"
             )}>

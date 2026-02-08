@@ -11,6 +11,8 @@ import React, {
 import { TabPersistenceService } from '@/services/tabPersistence';
 import { SessionPersistenceService } from '@/services/sessionPersistence';
 import { hashWorkspaceState, logWorkspaceEvent } from '@/services/workspaceDiagnostics';
+import { setTerminalWorkspaceSnapshotProvider } from '@/services/terminalHangDiagnostics';
+import { api } from '@/lib/api';
 
 export type UtilityOverlayType =
   | 'agents'
@@ -56,6 +58,8 @@ export interface PaneRuntimeState {
   sessionId?: string;
   sessionData?: any;
   projectPath?: string;
+  embeddedTerminalId?: string;
+  restorePreference?: 'resume_latest' | 'start_fresh';
   previewUrl?: string;
   isStreaming?: boolean;
   error?: string | null;
@@ -157,6 +161,43 @@ function collectLeafIds(node: PaneNode): string[] {
     return [node.id];
   }
   return [...collectLeafIds(node.left), ...collectLeafIds(node.right)];
+}
+
+function collectEmbeddedTerminalIds(terminal: TerminalTab): string[] {
+  const ids = new Set<string>();
+  Object.values(terminal.paneStates || {}).forEach((paneState) => {
+    if (paneState?.embeddedTerminalId) {
+      ids.add(paneState.embeddedTerminalId);
+    }
+  });
+  return Array.from(ids);
+}
+
+function sanitizePaneRuntimeStateForHydration(
+  paneState: PaneRuntimeState | undefined
+): PaneRuntimeState {
+  if (!paneState) {
+    return {};
+  }
+
+  const { embeddedTerminalId, ...rest } = paneState;
+  void embeddedTerminalId;
+  return rest;
+}
+
+export function sanitizeTerminalForHydration(terminal: TerminalTab): TerminalTab {
+  const nextPaneStates = Object.entries(terminal.paneStates || {}).reduce<Record<string, PaneRuntimeState>>(
+    (acc, [paneId, paneState]) => {
+      acc[paneId] = sanitizePaneRuntimeStateForHydration(paneState);
+      return acc;
+    },
+    {}
+  );
+
+  return {
+    ...terminal,
+    paneStates: nextPaneStates,
+  };
 }
 
 function createLeafNode(id?: string): PaneLeafNode {
@@ -616,12 +657,22 @@ export function tabReducer(state: WorkspaceState, action: Action): WorkspaceStat
 export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, dispatch] = useReducer(tabReducer, initialState);
   const [isInitialized, setIsInitialized] = useState(false);
-  const saveTimeoutRef = useRef<NodeJS.Timeout>();
   const stateRef = useRef(state);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    setTerminalWorkspaceSnapshotProvider(() => ({
+      tabs: stateRef.current.tabs,
+      activeTabId: stateRef.current.activeTabId,
+    }));
+
+    return () => {
+      setTerminalWorkspaceSnapshotProvider(null);
+    };
+  }, []);
 
   useEffect(() => {
     const loadWorkspace = async () => {
@@ -630,23 +681,25 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const restoredTabs = savedTabs.map((workspace) => ({
         ...workspace,
         terminalTabs: workspace.terminalTabs.map((terminal) => {
-          if (terminal.kind !== 'chat' || !terminal.sessionState?.sessionId) {
-            return terminal;
+          const sanitizedTerminal = sanitizeTerminalForHydration(terminal);
+
+          if (sanitizedTerminal.kind !== 'chat' || !sanitizedTerminal.sessionState?.sessionId) {
+            return sanitizedTerminal;
           }
 
-          const sessionData = SessionPersistenceService.loadSession(terminal.sessionState.sessionId);
+          const sessionData = SessionPersistenceService.loadSession(sanitizedTerminal.sessionState.sessionId);
           if (!sessionData) {
-            return terminal;
+            return sanitizedTerminal;
           }
 
           const restoredSession = SessionPersistenceService.createSessionFromRestoreData(sessionData);
           return {
-            ...terminal,
+            ...sanitizedTerminal,
             sessionState: {
-              ...terminal.sessionState,
+              ...sanitizedTerminal.sessionState,
               sessionData: restoredSession,
-              initialProjectPath: terminal.sessionState.initialProjectPath || sessionData.projectPath,
-              projectPath: terminal.sessionState.projectPath || sessionData.projectPath,
+              initialProjectPath: sanitizedTerminal.sessionState.initialProjectPath || sessionData.projectPath,
+              projectPath: sanitizedTerminal.sessionState.projectPath || sessionData.projectPath,
             },
           };
         }),
@@ -678,29 +731,17 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (!isInitialized) return;
 
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-
-    saveTimeoutRef.current = setTimeout(() => {
-      TabPersistenceService.saveWorkspace(state.tabs, state.activeTabId);
-      logWorkspaceEvent({
-        category: 'state_action',
-        action: 'autosave_workspace',
-        tabCount: state.tabs.length,
-        activeWorkspaceId: state.activeTabId,
-        workspaceHash: hashWorkspaceState({
-          tabs: state.tabs.map((workspace) => workspace.id),
-          activeTabId: state.activeTabId,
-        }),
-      });
-    }, 400);
-
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-    };
+    TabPersistenceService.saveWorkspace(state.tabs, state.activeTabId);
+    logWorkspaceEvent({
+      category: 'state_action',
+      action: 'autosave_workspace',
+      tabCount: state.tabs.length,
+      activeWorkspaceId: state.activeTabId,
+      workspaceHash: hashWorkspaceState({
+        tabs: state.tabs.map((workspace) => workspace.id),
+        activeTabId: state.activeTabId,
+      }),
+    });
   }, [state.tabs, state.activeTabId, isInitialized]);
 
   useEffect(() => {
@@ -749,6 +790,12 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const closeProjectWorkspaceTab = useCallback((id: string) => {
+    const workspace = stateRef.current.tabs.find((tab) => tab.id === id);
+    workspace?.terminalTabs.forEach((terminal) => {
+      collectEmbeddedTerminalIds(terminal).forEach((embeddedTerminalId) => {
+        api.closeEmbeddedTerminal(embeddedTerminalId).catch(() => undefined);
+      });
+    });
     dispatch({ type: 'close-workspace', id });
     logWorkspaceEvent({
       category: 'state_action',
@@ -833,6 +880,13 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const closeTerminalTab = useCallback((workspaceId: string, terminalTabId: string) => {
+    const workspace = stateRef.current.tabs.find((tab) => tab.id === workspaceId);
+    const terminal = workspace?.terminalTabs.find((entry) => entry.id === terminalTabId);
+    if (terminal) {
+      collectEmbeddedTerminalIds(terminal).forEach((embeddedTerminalId) => {
+        api.closeEmbeddedTerminal(embeddedTerminalId).catch(() => undefined);
+      });
+    }
     dispatch({ type: 'close-terminal', workspaceId, terminalTabId });
     logWorkspaceEvent({
       category: 'state_action',
@@ -921,7 +975,11 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       terminalId: terminalTabId,
       updater: (current) => {
         const nextPaneStates = { ...current.paneStates };
+        const embeddedTerminalId = nextPaneStates[paneId]?.embeddedTerminalId;
         delete nextPaneStates[paneId];
+        if (embeddedTerminalId) {
+          api.closeEmbeddedTerminal(embeddedTerminalId).catch(() => undefined);
+        }
 
         return {
           ...current,
@@ -993,6 +1051,13 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [state.tabs]);
 
   const closeAllTabs = useCallback(() => {
+    stateRef.current.tabs.forEach((workspace) => {
+      workspace.terminalTabs.forEach((terminal) => {
+        collectEmbeddedTerminalIds(terminal).forEach((embeddedTerminalId) => {
+          api.closeEmbeddedTerminal(embeddedTerminalId).catch(() => undefined);
+        });
+      });
+    });
     dispatch({ type: 'replace-workspaces', tabs: [], activeTabId: null });
     TabPersistenceService.clearWorkspace();
   }, []);

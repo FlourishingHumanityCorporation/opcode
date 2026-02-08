@@ -148,4 +148,189 @@ describe('tabReducer', () => {
     expect(workspaceAfterLastClose.activeTerminalTabId).toBe(workspaceAfterLastClose.terminalTabs[0].id);
     expect(workspaceAfterLastClose.terminalTabs[0].activePaneId).toBeTruthy();
   });
+
+  it('preserves pane/runtime session state when switching active terminal tabs', () => {
+    const terminalOne = makeTerminal('terminal-1', {
+      sessionState: {
+        providerId: 'claude',
+        sessionId: 'session-123',
+        projectPath: '/tmp/project',
+        initialProjectPath: '/tmp/project',
+      },
+      paneStates: {
+        'terminal-1-pane-1': {
+          sessionId: 'session-123',
+          embeddedTerminalId: 'term-abc',
+          restorePreference: 'resume_latest',
+          projectPath: '/tmp/project',
+        },
+      },
+    });
+    const terminalTwo = makeTerminal('terminal-2');
+
+    const initial = makeState(
+      [makeWorkspace('workspace-a', 0, [terminalOne, terminalTwo])],
+      'workspace-a'
+    );
+
+    const switchedAway = reduce(initial, {
+      type: 'set-active-terminal',
+      workspaceId: 'workspace-a',
+      terminalTabId: 'terminal-2',
+    });
+    const switchedBack = reduce(switchedAway, {
+      type: 'set-active-terminal',
+      workspaceId: 'workspace-a',
+      terminalTabId: 'terminal-1',
+    });
+
+    const restored = switchedBack.tabs[0].terminalTabs.find((terminal) => terminal.id === 'terminal-1');
+    expect(restored?.sessionState?.sessionId).toBe('session-123');
+    expect(restored?.paneStates['terminal-1-pane-1']?.sessionId).toBe('session-123');
+    expect(restored?.paneStates['terminal-1-pane-1']?.embeddedTerminalId).toBe('term-abc');
+    expect(restored?.paneStates['terminal-1-pane-1']?.restorePreference).toBe('resume_latest');
+  });
+
+  it('preserves embedded terminal id when applying partial pane runtime updates', () => {
+    const paneId = 'terminal-1-pane-1';
+    const initial = makeState(
+      [
+        makeWorkspace('workspace-a', 0, [
+          makeTerminal('terminal-1', {
+            paneStates: {
+              [paneId]: {
+                sessionId: 'session-1',
+                projectPath: '/tmp/project',
+                embeddedTerminalId: 'term-abc',
+                restorePreference: 'resume_latest',
+              },
+            },
+          }),
+        ]),
+      ],
+      'workspace-a'
+    );
+
+    const next = reduce(initial, {
+      type: 'replace-terminal',
+      workspaceId: 'workspace-a',
+      terminalId: 'terminal-1',
+      updater: (terminal) => ({
+        ...terminal,
+        paneStates: {
+          ...terminal.paneStates,
+          [paneId]: {
+            ...terminal.paneStates[paneId],
+            sessionId: 'session-2',
+          },
+        },
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+      }),
+    });
+
+    const restored = next.tabs[0].terminalTabs[0].paneStates[paneId];
+    expect(restored?.sessionId).toBe('session-2');
+    expect(restored?.embeddedTerminalId).toBe('term-abc');
+    expect(restored?.restorePreference).toBe('resume_latest');
+    expect(restored?.projectPath).toBe('/tmp/project');
+  });
+
+  it('keeps embedded terminal id across sequential provider/session/path updates', () => {
+    const paneId = 'terminal-1-pane-1';
+    const initial = makeState(
+      [
+        makeWorkspace('workspace-a', 0, [
+          makeTerminal('terminal-1', {
+            sessionState: {
+              providerId: 'claude',
+              sessionId: 'session-1',
+              projectPath: '/tmp/project',
+              initialProjectPath: '/tmp/project',
+            },
+            paneStates: {
+              [paneId]: {
+                providerId: 'claude',
+                sessionId: 'session-1',
+                projectPath: '/tmp/project',
+                embeddedTerminalId: 'term-abc',
+                restorePreference: 'resume_latest',
+              },
+            },
+          }),
+        ]),
+      ],
+      'workspace-a'
+    );
+
+    const withProvider = reduce(initial, {
+      type: 'replace-terminal',
+      workspaceId: 'workspace-a',
+      terminalId: 'terminal-1',
+      updater: (terminal) => ({
+        ...terminal,
+        providerId: 'codex',
+        sessionState: {
+          ...terminal.sessionState,
+          providerId: 'codex',
+        },
+        paneStates: {
+          ...terminal.paneStates,
+          [paneId]: {
+            ...terminal.paneStates[paneId],
+            providerId: 'codex',
+          },
+        },
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+      }),
+    });
+
+    const withSession = reduce(withProvider, {
+      type: 'replace-terminal',
+      workspaceId: 'workspace-a',
+      terminalId: 'terminal-1',
+      updater: (terminal) => ({
+        ...terminal,
+        sessionState: {
+          ...terminal.sessionState,
+          sessionId: 'session-2',
+        },
+        paneStates: {
+          ...terminal.paneStates,
+          [paneId]: {
+            ...terminal.paneStates[paneId],
+            sessionId: 'session-2',
+          },
+        },
+        updatedAt: new Date('2026-01-03T00:00:00.000Z'),
+      }),
+    });
+
+    const withPath = reduce(withSession, {
+      type: 'replace-terminal',
+      workspaceId: 'workspace-a',
+      terminalId: 'terminal-1',
+      updater: (terminal) => ({
+        ...terminal,
+        sessionState: {
+          ...terminal.sessionState,
+          projectPath: '/tmp/other-project',
+        },
+        paneStates: {
+          ...terminal.paneStates,
+          [paneId]: {
+            ...terminal.paneStates[paneId],
+            projectPath: '/tmp/other-project',
+          },
+        },
+        updatedAt: new Date('2026-01-04T00:00:00.000Z'),
+      }),
+    });
+
+    const finalPaneState = withPath.tabs[0].terminalTabs[0].paneStates[paneId];
+    expect(finalPaneState?.providerId).toBe('codex');
+    expect(finalPaneState?.sessionId).toBe('session-2');
+    expect(finalPaneState?.projectPath).toBe('/tmp/other-project');
+    expect(finalPaneState?.embeddedTerminalId).toBe('term-abc');
+    expect(finalPaneState?.restorePreference).toBe('resume_latest');
+  });
 });

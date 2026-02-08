@@ -1,10 +1,15 @@
 import { useCallback, useMemo } from 'react';
 import {
   type CreateTerminalTabInput,
+  type PaneRuntimeState,
   type Tab,
   type TerminalTab,
   useTabContext,
 } from '@/contexts/TabContext';
+import {
+  projectNameFromPath,
+  shouldAutoRenameWorkspaceTitle,
+} from '@/lib/terminalPaneState';
 
 export type LegacyTabType =
   | 'project'
@@ -48,6 +53,12 @@ interface UseTabStateReturn {
   splitPane: (workspaceId: string, terminalTabId: string, paneId: string) => string | null;
   closePane: (workspaceId: string, terminalTabId: string, paneId: string) => void;
   activatePane: (workspaceId: string, terminalTabId: string, paneId: string) => void;
+  updatePaneState: (
+    workspaceId: string,
+    terminalTabId: string,
+    paneId: string,
+    updates: Partial<PaneRuntimeState>
+  ) => void;
   runAgentInTerminalTab: (agent: any, projectPath?: string) => string;
   openUtilityOverlay: (
     overlay: 'agents' | 'usage' | 'mcp' | 'settings' | 'claude-md' | 'claude-file' | 'diagnostics',
@@ -110,6 +121,7 @@ export const useTabState = (): UseTabStateReturn => {
     splitPane,
     closePane,
     activatePane,
+    updatePaneState,
     setActiveTab,
     setWorkspaceOrderByIds,
     openUtilityOverlay,
@@ -182,9 +194,15 @@ export const useTabState = (): UseTabStateReturn => {
       const workspace = activeWorkspace || ensureWorkspace();
 
       if (!workspace.projectPath && projectPath) {
+        const shouldAutoRename = shouldAutoRenameWorkspaceTitle(
+          workspace.title,
+          workspace.projectPath
+        );
         updateProjectWorkspaceTab(workspace.id, {
           projectPath,
-          title: workspace.title === 'Project' ? projectPath.split(/[\\/]/).pop() || workspace.title : workspace.title,
+          title: shouldAutoRename
+            ? projectNameFromPath(projectPath) || workspace.title
+            : workspace.title,
         });
       }
 
@@ -207,9 +225,15 @@ export const useTabState = (): UseTabStateReturn => {
     (projectId?: string, title?: string, projectPath?: string): string => {
       const workspace = activeWorkspace || ensureWorkspace();
       if (projectPath && workspace.projectPath !== projectPath) {
+        const shouldAutoRename = shouldAutoRenameWorkspaceTitle(
+          workspace.title,
+          workspace.projectPath
+        );
         updateProjectWorkspaceTab(workspace.id, {
           projectPath,
-          title: workspace.title === 'Project' ? projectPath.split(/[\\/]/).pop() || 'Project' : workspace.title,
+          title: shouldAutoRename
+            ? projectNameFromPath(projectPath) || workspace.title
+            : workspace.title,
         });
       }
 
@@ -478,6 +502,7 @@ export const useTabState = (): UseTabStateReturn => {
     splitPane,
     closePane,
     activatePane,
+    updatePaneState,
     setWorkspaceOrderByIds,
     runAgentInTerminalTab,
     openUtilityOverlay,

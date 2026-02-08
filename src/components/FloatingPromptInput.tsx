@@ -808,6 +808,17 @@ const FloatingPromptInputInner = (
     }, 0);
   };
 
+  const blobToDataUrl = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read clipboard image'));
+      reader.readAsDataURL(blob);
+    });
+
+  const buildImageMention = (imagePath: string): string =>
+    imagePath.includes(' ') ? `@"${imagePath}"` : `@${imagePath}`;
+
   const isIMEInteraction = (event?: React.KeyboardEvent) => {
     if (isIMEComposingRef.current) {
       return true;
@@ -902,42 +913,48 @@ const FloatingPromptInputInner = (
     const items = e.clipboardData?.items;
     if (!items) return;
 
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        e.preventDefault();
-        
-        // Get the image blob
-        const blob = item.getAsFile();
-        if (!blob) continue;
+    const imageItems = Array.from(items).filter((item) => item.type.startsWith('image/'));
+    if (imageItems.length === 0) {
+      return;
+    }
 
-        try {
-          // Convert blob to base64
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64Data = reader.result as string;
-            
-            // Add the base64 data URL directly to the prompt
-            setPrompt(currentPrompt => {
-              // Use the data URL directly as the image reference
-              const mention = `@"${base64Data}"`;
-              const newPrompt = currentPrompt + (currentPrompt.endsWith(' ') || currentPrompt === '' ? '' : ' ') + mention + ' ';
-              
-              // Focus the textarea and move cursor to end
-              setTimeout(() => {
-                const target = isExpanded ? expandedTextareaRef.current : textareaRef.current;
-                target?.focus();
-                target?.setSelectionRange(newPrompt.length, newPrompt.length);
-              }, 0);
+    e.preventDefault();
 
-              return newPrompt;
-            });
-          };
-          
-          reader.readAsDataURL(blob);
-        } catch (error) {
-          console.error('Failed to paste image:', error);
-        }
+    const normalizedProjectPath = projectPath?.trim();
+    if (!normalizedProjectPath) {
+      console.error('Cannot paste image without an active project path');
+      return;
+    }
+
+    const relativePaths: string[] = [];
+
+    for (const item of imageItems) {
+      const blob = item.getAsFile();
+      if (!blob) continue;
+
+      try {
+        const dataUrl = await blobToDataUrl(blob);
+        const relativePath = await api.saveClipboardImageAttachment(normalizedProjectPath, dataUrl);
+        relativePaths.push(relativePath);
+      } catch (error) {
+        console.error('Failed to save pasted image attachment:', error);
       }
+    }
+
+    if (relativePaths.length > 0) {
+      setPrompt((currentPrompt) => {
+        const mentions = relativePaths.map(buildImageMention).join(' ');
+        const separator = currentPrompt.endsWith(' ') || currentPrompt === '' ? '' : ' ';
+        const newPrompt = `${currentPrompt}${separator}${mentions} `;
+
+        setTimeout(() => {
+          const target = isExpanded ? expandedTextareaRef.current : textareaRef.current;
+          target?.focus();
+          target?.setSelectionRange(newPrompt.length, newPrompt.length);
+        }, 0);
+
+        return newPrompt;
+      });
     }
   };
 

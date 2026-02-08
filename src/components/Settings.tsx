@@ -30,6 +30,12 @@ import { ProxySettings } from "./ProxySettings";
 import { useTheme, useTrackEvent } from "@/hooks";
 import { analytics } from "@/lib/analytics";
 import { TabPersistenceService } from "@/services/tabPersistence";
+import {
+  loadPlainTerminalModePreference,
+  loadNativeTerminalModePreference,
+  savePlainTerminalModePreference,
+  saveNativeTerminalModePreference,
+} from "@/lib/uiPreferences";
 
 interface SettingsProps {
   /**
@@ -94,6 +100,8 @@ export const Settings: React.FC<SettingsProps> = ({
   
   // Tab persistence state
   const [tabPersistenceEnabled, setTabPersistenceEnabled] = useState(true);
+  const [plainTerminalModeEnabled, setPlainTerminalModeEnabled] = useState(false);
+  const [nativeTerminalModeEnabled, setNativeTerminalModeEnabled] = useState(false);
 
   // Provider detection state
   const [detectedAgents, setDetectedAgents] = useState<Array<{ provider_id: string; binary_path: string; version: string | null; source: string }>>([]);
@@ -107,6 +115,8 @@ export const Settings: React.FC<SettingsProps> = ({
     loadDetectedAgents();
     // Load tab persistence setting
     setTabPersistenceEnabled(TabPersistenceService.isEnabled());
+    loadPlainTerminalModePreference().then(setPlainTerminalModeEnabled);
+    loadNativeTerminalModePreference().then(setNativeTerminalModeEnabled);
   }, []);
 
   /**
@@ -765,6 +775,56 @@ export const Settings: React.FC<SettingsProps> = ({
                               ? "Tab persistence enabled - your tabs will be restored on restart" 
                               : "Tab persistence disabled - tabs will not be saved", 
                             type: "success" 
+                          });
+                        }}
+                      />
+                    </div>
+
+                    {/* Plain terminal mode toggle */}
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <Label htmlFor="plain-terminal-mode">Plain Terminal Mode</Label>
+                        <p className="text-caption text-muted-foreground">
+                          Show a compact CLI-like stream view instead of styled message cards
+                        </p>
+                      </div>
+                      <Switch
+                        id="plain-terminal-mode"
+                        checked={plainTerminalModeEnabled}
+                        onCheckedChange={async (checked) => {
+                          setPlainTerminalModeEnabled(checked);
+                          await savePlainTerminalModePreference(checked);
+                          trackEvent.settingsChanged('plain_terminal_mode', checked);
+                          setToast({
+                            message: checked
+                              ? "Plain terminal mode enabled"
+                              : "Plain terminal mode disabled",
+                            type: "success",
+                          });
+                        }}
+                      />
+                    </div>
+
+                    {/* Native terminal mode toggle */}
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <Label htmlFor="native-terminal-mode">In-App Terminal Mode</Label>
+                        <p className="text-caption text-muted-foreground">
+                          Use an embedded PTY terminal in the pane instead of chat cards
+                        </p>
+                      </div>
+                      <Switch
+                        id="native-terminal-mode"
+                        checked={nativeTerminalModeEnabled}
+                        onCheckedChange={async (checked) => {
+                          setNativeTerminalModeEnabled(checked);
+                          await saveNativeTerminalModePreference(checked);
+                          trackEvent.settingsChanged('native_terminal_mode', checked);
+                          setToast({
+                            message: checked
+                              ? "In-app terminal mode enabled"
+                              : "In-app terminal mode disabled",
+                            type: "success",
                           });
                         }}
                       />

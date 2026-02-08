@@ -226,6 +226,30 @@ export interface SessionStartupProbeResult {
   signal?: number | null;
 }
 
+export interface StartEmbeddedTerminalResult {
+  terminalId: string;
+  reusedExistingSession: boolean;
+}
+
+export interface EmbeddedTerminalDebugSession {
+  terminalId: string;
+  persistentSessionId?: string | null;
+  alive: boolean;
+  createdAtMs: number;
+  lastInputWriteMs?: number | null;
+  lastResizeMs?: number | null;
+  lastReadOutputMs?: number | null;
+  lastReadErr?: string | null;
+  lastWriteErr?: string | null;
+  lastExitReason?: string | null;
+}
+
+export interface EmbeddedTerminalDebugSnapshot {
+  capturedAtMs: number;
+  sessionCount: number;
+  sessions: EmbeddedTerminalDebugSession[];
+}
+
 // Usage Dashboard types
 export interface UsageEntry {
   timestamp: string;
@@ -729,6 +753,18 @@ export const api = {
     }
   },
 
+  /**
+   * Saves a pasted clipboard image into the active project and returns a relative path.
+   */
+  async saveClipboardImageAttachment(projectPath: string, dataUrl: string): Promise<string> {
+    try {
+      return await apiCall<string>("save_clipboard_image_attachment", { projectPath, dataUrl });
+    } catch (error) {
+      console.error("Failed to save clipboard image attachment:", error);
+      throw error;
+    }
+  },
+
   // Agent API methods
   
   /**
@@ -1175,6 +1211,69 @@ export const api = {
       timeoutMs: options?.timeoutMs,
       includePartialMessages: options?.includePartialMessages,
       benchmarkKind: options?.benchmarkKind,
+    });
+  },
+
+  /**
+   * Opens a real native terminal window for the project path and runs the provided command.
+   */
+  async openExternalTerminal(projectPath: string, command = "claude"): Promise<string> {
+    return apiCall("open_external_terminal", {
+      projectPath,
+      command,
+    });
+  },
+
+  async startEmbeddedTerminal(
+    projectPath: string,
+    cols?: number,
+    rows?: number,
+    persistentSessionId?: string
+  ): Promise<StartEmbeddedTerminalResult> {
+    return apiCall("start_embedded_terminal", {
+      projectPath,
+      cols,
+      rows,
+      persistentSessionId,
+    });
+  },
+
+  async writeEmbeddedTerminalInput(terminalId: string, data: string): Promise<void> {
+    return apiCall("write_embedded_terminal_input", {
+      terminalId,
+      data,
+    });
+  },
+
+  async resizeEmbeddedTerminal(terminalId: string, cols: number, rows: number): Promise<void> {
+    return apiCall("resize_embedded_terminal", {
+      terminalId,
+      cols,
+      rows,
+    });
+  },
+
+  async closeEmbeddedTerminal(
+    terminalId: string,
+    options?: { terminatePersistentSession?: boolean }
+  ): Promise<void> {
+    return apiCall("close_embedded_terminal", {
+      terminalId,
+      terminatePersistentSession: options?.terminatePersistentSession,
+    });
+  },
+
+  async getEmbeddedTerminalDebugSnapshot(): Promise<EmbeddedTerminalDebugSnapshot> {
+    return apiCall("get_embedded_terminal_debug_snapshot");
+  },
+
+  async writeTerminalIncidentBundle(
+    payload: unknown,
+    note?: string
+  ): Promise<string> {
+    return apiCall("write_terminal_incident_bundle", {
+      payload,
+      note,
     });
   },
 

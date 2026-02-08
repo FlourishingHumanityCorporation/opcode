@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import { FolderOpen, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { useTabState } from '@/hooks/useTabState';
 import { ProjectWorkspaceView } from '@/components/ProjectWorkspaceView';
 import { UtilityOverlayHost } from '@/components/UtilityOverlayHost';
@@ -169,18 +169,25 @@ export const TabContent: React.FC = () => {
       </div>
     </div>
   ) : (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={activeWorkspace.id}
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -6 }}
-        transition={{ duration: 0.15 }}
-        className="h-full"
-      >
-        <ProjectWorkspaceView workspace={activeWorkspace} />
-      </motion.div>
-    </AnimatePresence>
+    <div className="relative h-full">
+      {tabs.map((workspace) => {
+        const isActive = workspace.id === activeTabId;
+        return (
+          <div
+            key={workspace.id}
+            className={cn(
+              'absolute inset-0 h-full transition-opacity duration-150',
+              isActive
+                ? 'visible opacity-100 pointer-events-auto'
+                : 'invisible opacity-0 pointer-events-none'
+            )}
+            aria-hidden={!isActive}
+          >
+            <ProjectWorkspaceView workspace={workspace} isVisible={isActive} />
+          </div>
+        );
+      })}
+    </div>
   );
 
   return (

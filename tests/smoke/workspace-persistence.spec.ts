@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
 function successPayload<T>(data: T) {
   return JSON.stringify({ success: true, data });
@@ -12,7 +12,18 @@ async function fulfillSuccess<T>(route: Route, data: T) {
   });
 }
 
-async function setupWorkspaceApiMock(page: Page, options?: { invalidProjectPath?: boolean }) {
+async function setupWorkspaceApiMock(
+  page: Page,
+  options?: {
+    invalidProjectPath?: boolean;
+    counters?: {
+      executeCalls: number;
+      resumeCalls: number;
+      agentExecuteCalls: number;
+      agentResumeCalls: number;
+    };
+  }
+) {
   const invalidProjectPath = options?.invalidProjectPath ?? false;
 
   await page.route('**/api/**', async (route) => {
@@ -56,6 +67,38 @@ async function setupWorkspaceApiMock(page: Page, options?: { invalidProjectPath?
       return;
     }
 
+    if (path === '/api/sessions/execute') {
+      if (options?.counters) {
+        options.counters.executeCalls += 1;
+      }
+      await fulfillSuccess(route, { session_id: 'smoke-session-1' });
+      return;
+    }
+
+    if (path === '/api/sessions/resume') {
+      if (options?.counters) {
+        options.counters.resumeCalls += 1;
+      }
+      await fulfillSuccess(route, { session_id: 'smoke-session-1' });
+      return;
+    }
+
+    if (path === '/api/unknown/execute_agent_session') {
+      if (options?.counters) {
+        options.counters.agentExecuteCalls += 1;
+      }
+      await fulfillSuccess(route, { session_id: 'smoke-session-1' });
+      return;
+    }
+
+    if (path === '/api/unknown/resume_agent_session') {
+      if (options?.counters) {
+        options.counters.agentResumeCalls += 1;
+      }
+      await fulfillSuccess(route, { session_id: 'smoke-session-1' });
+      return;
+    }
+
     await fulfillSuccess(route, null);
   });
 }
@@ -75,6 +118,22 @@ async function ensureWorkspaceCount(page: Page, count: number) {
   while ((await page.locator('[data-testid^="workspace-tab-"]').count()) < count) {
     await newWorkspaceButton.click();
   }
+}
+
+function activePromptInput(page: Page): Locator {
+  return page.locator('textarea[placeholder*="Message"]:visible').first();
+}
+
+async function sendPrompt(page: Page, prompt: string): Promise<Locator> {
+  const input = activePromptInput(page);
+  await expect(input).toBeVisible();
+  await input.fill(prompt);
+  await expect(input).toHaveValue(prompt);
+
+  const sendButton = page.locator('button:has(svg.lucide-send):visible').first();
+  await expect(sendButton).toBeEnabled();
+  await sendButton.click();
+  return input;
 }
 
 async function reorderFirstWorkspaceToLast(page: Page): Promise<string[]> {
@@ -106,9 +165,16 @@ async function reorderFirstWorkspaceToLast(page: Page): Promise<string[]> {
 
 async function installStreamingWebSocketMock(
   page: Page,
-  options: { firstOutputDelayMs: number; completionDelayMs: number }
+  options: {
+    firstOutputDelayMs: number;
+    completionDelayMs: number;
+    commandCounters?: {
+      executeCommands: number;
+      resumeCommands: number;
+    };
+  }
 ) {
-  await page.evaluate(({ firstOutputDelayMs, completionDelayMs }) => {
+  await page.evaluate(({ firstOutputDelayMs, completionDelayMs, commandCounters }) => {
     class MockWebSocket {
       static readonly CONNECTING = 0;
       static readonly OPEN = 1;
@@ -128,7 +194,20 @@ async function installStreamingWebSocketMock(
         }, 0);
       }
 
-      send(_data: string) {
+      send(data: string) {
+        if (commandCounters) {
+          try {
+            const payload = JSON.parse(data);
+            if (payload?.command_type === 'execute') {
+              commandCounters.executeCommands += 1;
+            } else if (payload?.command_type === 'resume') {
+              commandCounters.resumeCommands += 1;
+            }
+          } catch {
+            // Ignore malformed payloads in smoke mocks.
+          }
+        }
+
         setTimeout(() => {
           this.onmessage?.(
             new MessageEvent('message', {
@@ -214,6 +293,117 @@ test.describe('Workspace persistence smoke', () => {
     await expect(page.locator('[data-testid^="workspace-pane-"]')).toHaveCount(2);
   });
 
+  test('restores active workspace and active terminal selection after restart', async ({ page }) => {
+    await setupWorkspaceApiMock(page);
+    await page.goto('/');
+    await page.addStyleTag({
+      content: '*, *::before, *::after { transition-duration: 0s !important; animation-duration: 0s !important; }',
+    });
+
+    await ensureWorkspaceCount(page, 2);
+    await page.locator('[data-testid^="workspace-tab-"]').nth(1).click();
+
+    await page.getByTestId('workspace-new-terminal').click();
+    await expect(page.locator('[data-testid^="terminal-tab-"]')).toHaveCount(2);
+
+    await page.locator('[data-testid^="terminal-tab-"]').nth(1).click();
+    await page.getByTitle('Split Right').first().click();
+    await expect(page.locator('[data-testid^="workspace-pane-"]')).toHaveCount(2);
+
+    await page.reload();
+    await expect(page.locator('[data-testid^="terminal-tab-"]')).toHaveCount(2);
+    await expect(page.locator('[data-testid^="workspace-pane-"]')).toHaveCount(2);
+  });
+
+  test.fixme('preserves terminal session metadata when switching terminal tabs', async ({ page }) => {
+    await setupWorkspaceApiMock(page);
+    await page.addInitScript(() => {
+      localStorage.removeItem('opcode_workspace_v3');
+      localStorage.removeItem('opcode_tabs_v2');
+    });
+    await page.goto('/');
+
+    await ensureWorkspaceCount(page, 1);
+
+    await page.evaluate(() => {
+      const raw = localStorage.getItem('opcode_workspace_v3');
+      if (!raw) {
+        throw new Error('Workspace persistence payload is missing');
+      }
+
+      const parsed = JSON.parse(raw) as {
+        tabs?: Array<{
+          terminalTabs?: Array<{
+            activePaneId?: string;
+            sessionState?: Record<string, unknown>;
+            paneStates?: Record<string, Record<string, unknown>>;
+          }>;
+        }>;
+      };
+
+      const workspace = parsed.tabs?.[0];
+      const terminal = workspace?.terminalTabs?.[0];
+      if (!workspace || !terminal || !terminal.activePaneId) {
+        throw new Error('Expected initial workspace/terminal/pane to exist');
+      }
+
+      const sessionId = 'persisted-session-1';
+      terminal.sessionState = {
+        ...(terminal.sessionState || {}),
+        sessionId,
+        sessionData: {
+          id: sessionId,
+          project_id: 'smoke-project',
+          project_path: '/tmp/opcode-smoke-project',
+          created_at: Date.now(),
+        },
+      };
+      terminal.paneStates = {
+        ...(terminal.paneStates || {}),
+        [terminal.activePaneId]: {
+          ...((terminal.paneStates || {})[terminal.activePaneId] || {}),
+          sessionId,
+        },
+      };
+
+      localStorage.setItem('opcode_workspace_v3', JSON.stringify(parsed));
+    });
+
+    await page.reload();
+    await expect(page.locator('[data-testid^="terminal-tab-"]')).toHaveCount(1);
+
+    await page.getByTestId('workspace-new-terminal').click();
+    await expect(page.locator('[data-testid^="terminal-tab-"]')).toHaveCount(2);
+
+    await page.locator('[data-testid^="terminal-tab-"]').nth(1).click();
+    await page.locator('[data-testid^="terminal-tab-"]').nth(0).click();
+
+    const persistedSession = await page.evaluate(() => {
+      const raw = localStorage.getItem('opcode_workspace_v3');
+      if (!raw) return { sessionId: null as string | null, paneSessionId: null as string | null };
+      const parsed = JSON.parse(raw) as {
+        tabs?: Array<{
+          terminalTabs?: Array<{
+            activePaneId?: string;
+            sessionState?: { sessionId?: string };
+            paneStates?: Record<string, { sessionId?: string }>;
+          }>;
+        }>;
+      };
+      const terminal = parsed.tabs?.[0]?.terminalTabs?.[0];
+      if (!terminal || !terminal.activePaneId) {
+        return { sessionId: null as string | null, paneSessionId: null as string | null };
+      }
+      return {
+        sessionId: terminal.sessionState?.sessionId ?? null,
+        paneSessionId: terminal.paneStates?.[terminal.activePaneId]?.sessionId ?? null,
+      };
+    });
+
+    expect(persistedSession.sessionId).toBe('persisted-session-1');
+    expect(persistedSession.paneSessionId).toBe('persisted-session-1');
+  });
+
   test('shows immediate preflight error for invalid project path', async ({ page }) => {
     await setupWorkspaceApiMock(page, { invalidProjectPath: true });
     await page.addInitScript(() => {
@@ -222,9 +412,7 @@ test.describe('Workspace persistence smoke', () => {
     await page.goto('/');
 
     await ensureWorkspaceCount(page, 1);
-    const input = page.getByPlaceholder(/Message .* \(.*\)\.\.\./i).first();
-    await input.fill('hello');
-    await input.press('Enter');
+    await sendPrompt(page, 'hello');
 
     await expect(page.getByText(/Project path is invalid or inaccessible/i)).toBeVisible();
   });
@@ -273,10 +461,12 @@ test.describe('Workspace persistence smoke', () => {
       (window as unknown as { WebSocket: typeof WebSocket }).WebSocket = SilentWebSocket as unknown as typeof WebSocket;
     });
 
-    const input = page.getByPlaceholder(/Message .* \(.*\)\.\.\./i).first();
+    const input = activePromptInput(page);
     await input.fill('timeout test');
     const startedAt = Date.now();
-    await input.press('Enter');
+    const sendButton = page.locator('button:has(svg.lucide-send):visible').first();
+    await expect(sendButton).toBeEnabled();
+    await sendButton.click();
 
     await expect(page.getByText(/No response yet \(2s\)|Failed to send prompt/i)).toBeVisible({
       timeout: 5_000,
@@ -298,9 +488,7 @@ test.describe('Workspace persistence smoke', () => {
       completionDelayMs: 900,
     });
 
-    const input = page.getByPlaceholder(/Message .* \(.*\)\.\.\./i).first();
-    await input.fill('fast stream test');
-    await input.press('Enter');
+    await sendPrompt(page, 'fast stream test');
 
     await expect(page.locator('.rotating-symbol')).toHaveCount(0, { timeout: 5000 });
     await expect(

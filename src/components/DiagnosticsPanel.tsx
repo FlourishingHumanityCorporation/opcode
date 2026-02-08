@@ -1,9 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Copy, Download, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useTabContext } from '@/contexts/TabContext';
 import { api, type SessionStartupProbeResult } from '@/lib/api';
+import { useTabState } from '@/hooks/useTabState';
 import { TabPersistenceService } from '@/services/tabPersistence';
+import { runTerminalStressTest } from '@/services/terminalStressRunner';
+import { captureAndPersistIncidentBundle } from '@/services/terminalHangDiagnostics';
 import {
   clearWorkspaceDiagnostics,
   exportWorkspaceDiagnostics,
@@ -17,12 +19,28 @@ import {
 type DiagnosticEntry = WorkspaceDiagnosticEvent & { id: number; timestamp: string };
 
 export const DiagnosticsPanel: React.FC = () => {
-  const { tabs, activeTabId } = useTabContext();
+  const {
+    tabs,
+    activeTabId,
+    switchToTab,
+    setActiveTerminalTab,
+    activatePane: activatePaneInTerminal,
+  } = useTabState();
   const [entries, setEntries] = useState<DiagnosticEntry[]>([]);
   const [copied, setCopied] = useState(false);
   const [isProbing, setIsProbing] = useState(false);
   const [probeResult, setProbeResult] = useState<SessionStartupProbeResult | null>(null);
   const [probeError, setProbeError] = useState<string | null>(null);
+  const [isCapturingTerminalSnapshot, setIsCapturingTerminalSnapshot] = useState(false);
+  const [terminalSnapshotSummary, setTerminalSnapshotSummary] = useState<string | null>(null);
+  const [isReportingHang, setIsReportingHang] = useState(false);
+  const [isRunningStressTest, setIsRunningStressTest] = useState(false);
+  const [stressSummary, setStressSummary] = useState<string | null>(null);
+  const [incidentHistory, setIncidentHistory] = useState<
+    Array<{ path: string; capturedAtMs: number; classification: string }>
+  >([]);
+  const tabsRef = useRef(tabs);
+  const activeTabIdRef = useRef(activeTabId);
 
   const refresh = () => {
     const snapshot = getWorkspaceDiagnosticsSnapshot();
@@ -34,6 +52,11 @@ export const DiagnosticsPanel: React.FC = () => {
     const unsubscribe = subscribeWorkspaceDiagnostics(refresh);
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    tabsRef.current = tabs;
+    activeTabIdRef.current = activeTabId;
+  }, [tabs, activeTabId]);
 
   const storageInspection = useMemo(() => TabPersistenceService.inspectStoredWorkspace(), [entries]);
   const startupLatency = useMemo(() => getStartupLatencyStats(), [entries]);
@@ -55,6 +78,17 @@ export const DiagnosticsPanel: React.FC = () => {
       ''
     );
   }, [activeWorkspace]);
+
+  const activeTerminal = useMemo(() => {
+    if (!activeWorkspace) return undefined;
+    return (
+      activeWorkspace.terminalTabs.find((terminal) => terminal.id === activeWorkspace.activeTerminalTabId) ??
+      activeWorkspace.terminalTabs[0]
+    );
+  }, [activeWorkspace]);
+
+  const activePaneId = activeTerminal?.activePaneId;
+  const activePaneState = activePaneId ? activeTerminal?.paneStates[activePaneId] : undefined;
 
   const handleCopy = async () => {
     const output = exportWorkspaceDiagnostics();
@@ -115,6 +149,136 @@ export const DiagnosticsPanel: React.FC = () => {
     }
   };
 
+  const handleCaptureTerminalSnapshot = async () => {
+    setIsCapturingTerminalSnapshot(true);
+    try {
+      const snapshot = await api.getEmbeddedTerminalDebugSnapshot();
+      setTerminalSnapshotSummary(
+        `captured=${snapshot.capturedAtMs} | sessions=${snapshot.sessionCount} | alive=${snapshot.sessions.filter((s) => s.alive).length}`
+      );
+      logWorkspaceEvent({
+        category: 'state_action',
+        action: 'capture_terminal_snapshot',
+        payload: {
+          sessionCount: snapshot.sessionCount,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setTerminalSnapshotSummary(`snapshot_failed=${message}`);
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'capture_terminal_snapshot_failed',
+        message,
+      });
+    } finally {
+      setIsCapturingTerminalSnapshot(false);
+    }
+  };
+
+  const handleReportTerminalHang = async () => {
+    setIsReportingHang(true);
+    try {
+      const incident = await captureAndPersistIncidentBundle({
+        workspaceId: activeWorkspace?.id,
+        terminalId: activeTerminal?.id,
+        paneId: activePaneId,
+        embeddedTerminalId: activePaneState?.embeddedTerminalId,
+        tabs,
+        activeTabId,
+        note: 'Manual terminal hang report from diagnostics panel',
+      });
+      setIncidentHistory((previous) =>
+        [
+          {
+            path: incident.path,
+            capturedAtMs: incident.bundle.capturedAtMs,
+            classification: incident.bundle.classification,
+          },
+          ...previous,
+        ].slice(0, 10)
+      );
+      setTerminalSnapshotSummary(`incident_saved=${incident.path}`);
+      logWorkspaceEvent({
+        category: 'state_action',
+        action: 'report_terminal_hang',
+        payload: {
+          path: incident.path,
+          classification: incident.bundle.classification,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setTerminalSnapshotSummary(`incident_failed=${message}`);
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'report_terminal_hang_failed',
+        message,
+      });
+    } finally {
+      setIsReportingHang(false);
+    }
+  };
+
+  const handleRunTerminalStressTest = async () => {
+    setIsRunningStressTest(true);
+    setStressSummary(null);
+    try {
+      const result = await runTerminalStressTest({
+        durationMs: 30_000,
+        intervalMs: 350,
+        getState: () => ({
+          tabs: tabsRef.current,
+          activeTabId: activeTabIdRef.current,
+        }),
+        switchWorkspace: (workspaceId) => {
+          switchToTab(workspaceId);
+        },
+        switchTerminal: (workspaceId, terminalId) => {
+          setActiveTerminalTab(workspaceId, terminalId);
+        },
+        activatePane: (workspaceId, terminalId, paneId) => {
+          activatePaneInTerminal(workspaceId, terminalId, paneId);
+        },
+        onIncidentCaptured: (path) => {
+          setIncidentHistory((previous) =>
+            [
+              {
+                path,
+                capturedAtMs: Date.now(),
+                classification: 'stress_test_capture',
+              },
+              ...previous,
+            ].slice(0, 10)
+          );
+        },
+      });
+
+      setStressSummary(
+        `iterations=${result.iterations} | incidents=${result.incidents.length} | durationMs=${result.durationMs}`
+      );
+      logWorkspaceEvent({
+        category: 'state_action',
+        action: 'run_terminal_stress_test',
+        payload: {
+          iterations: result.iterations,
+          incidents: result.incidents.length,
+          durationMs: result.durationMs,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStressSummary(`stress_failed=${message}`);
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'run_terminal_stress_test_failed',
+        message,
+      });
+    } finally {
+      setIsRunningStressTest(false);
+    }
+  };
+
   const handleRunStartupProbe = () => runProbe('startup');
   const handleRunAssistantBenchmark = () => runProbe('assistant_iterm');
 
@@ -128,6 +292,30 @@ export const DiagnosticsPanel: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleCaptureTerminalSnapshot}
+            disabled={isCapturingTerminalSnapshot}
+          >
+            {isCapturingTerminalSnapshot ? 'Capturing...' : 'Capture Terminal Snapshot'}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleReportTerminalHang}
+            disabled={isReportingHang}
+          >
+            {isReportingHang ? 'Reporting...' : 'Report Terminal Hang'}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRunTerminalStressTest}
+            disabled={isRunningStressTest || tabs.length === 0}
+          >
+            {isRunningStressTest ? 'Running Stress...' : 'Run Terminal Stress Test (30s)'}
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -193,6 +381,18 @@ export const DiagnosticsPanel: React.FC = () => {
         </div>
       )}
 
+      {(terminalSnapshotSummary || stressSummary) && (
+        <div className="border-b border-border/60 px-4 py-3 text-xs">
+          <div className="mb-1 font-medium">Terminal Hang Debug</div>
+          {terminalSnapshotSummary && (
+            <div className="text-muted-foreground">{terminalSnapshotSummary}</div>
+          )}
+          {stressSummary && (
+            <div className="text-muted-foreground">{stressSummary}</div>
+          )}
+        </div>
+      )}
+
       <div className="border-b border-border/60 px-4 py-3 text-xs">
         <div className="mb-1 font-medium">Session Startup Latency</div>
         <div className="text-muted-foreground">
@@ -215,6 +415,19 @@ export const DiagnosticsPanel: React.FC = () => {
           invariants={storageInspection.validation.valid ? 'ok' : storageInspection.validation.errors.join(' | ')}
         </div>
       </div>
+
+      {incidentHistory.length > 0 && (
+        <div className="border-b border-border/60 px-4 py-3 text-xs">
+          <div className="mb-1 font-medium">Recent Terminal Incidents</div>
+          <div className="space-y-1">
+            {incidentHistory.map((incident) => (
+              <div key={`${incident.path}-${incident.capturedAtMs}`} className="text-muted-foreground">
+                [{new Date(incident.capturedAtMs).toLocaleTimeString()}] {incident.classification} | {incident.path}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {entries.length === 0 ? (

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -9,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 /// Global state to track current Claude process
 pub struct ClaudeProcessState {
@@ -886,6 +888,87 @@ pub async fn save_claude_md_file(file_path: String, content: String) -> Result<S
     fs::write(&path, content).map_err(|e| format!("Failed to write file: {}", e))?;
 
     Ok("File saved successfully".to_string())
+}
+
+fn image_extension_from_mime(mime: &str) -> Option<&'static str> {
+    match mime.to_ascii_lowercase().as_str() {
+        "image/png" => Some("png"),
+        "image/jpeg" => Some("jpg"),
+        "image/jpg" => Some("jpg"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/bmp" => Some("bmp"),
+        "image/svg+xml" => Some("svg"),
+        "image/x-icon" => Some("ico"),
+        "image/vnd.microsoft.icon" => Some("ico"),
+        _ => None,
+    }
+}
+
+fn decode_clipboard_image_data_url(data_url: &str) -> Result<(Vec<u8>, &'static str), String> {
+    const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
+
+    let (metadata, payload) = data_url
+        .split_once(',')
+        .ok_or_else(|| "Invalid image data URL".to_string())?;
+
+    if !metadata.starts_with("data:image/") {
+        return Err("Clipboard payload is not an image data URL".to_string());
+    }
+    if !metadata.to_ascii_lowercase().contains(";base64") {
+        return Err("Clipboard image payload must be base64 encoded".to_string());
+    }
+
+    let mime = metadata
+        .trim_start_matches("data:")
+        .split(';')
+        .next()
+        .ok_or_else(|| "Failed to parse clipboard image MIME type".to_string())?;
+
+    let extension = image_extension_from_mime(mime)
+        .ok_or_else(|| format!("Unsupported clipboard image MIME type: {}", mime))?;
+
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(payload.trim())
+        .map_err(|e| format!("Failed to decode clipboard image: {}", e))?;
+
+    if decoded.is_empty() {
+        return Err("Clipboard image is empty".to_string());
+    }
+    if decoded.len() > MAX_ATTACHMENT_BYTES {
+        return Err("Clipboard image is too large (max 20MB)".to_string());
+    }
+
+    Ok((decoded, extension))
+}
+
+/// Saves a pasted clipboard image under the project and returns a relative path mention.
+#[tauri::command]
+pub async fn save_clipboard_image_attachment(
+    project_path: String,
+    data_url: String,
+) -> Result<String, String> {
+    let project_dir = PathBuf::from(&project_path);
+    if !project_dir.exists() || !project_dir.is_dir() {
+        return Err(format!("Project path is invalid: {}", project_path));
+    }
+
+    let (bytes, extension) = decode_clipboard_image_data_url(&data_url)?;
+    let attachment_dir = project_dir.join(".opcode").join("attachments");
+    fs::create_dir_all(&attachment_dir)
+        .map_err(|e| format!("Failed to create attachment directory: {}", e))?;
+
+    let filename = format!("clipboard-{}.{}", Uuid::new_v4(), extension);
+    let file_path = attachment_dir.join(filename);
+    fs::write(&file_path, bytes).map_err(|e| format!("Failed to write attachment: {}", e))?;
+
+    let relative_path = file_path
+        .strip_prefix(&project_dir)
+        .unwrap_or(&file_path)
+        .to_string_lossy()
+        .to_string();
+
+    Ok(relative_path)
 }
 
 /// Loads the JSONL history for a specific session
@@ -2802,5 +2885,24 @@ mod tests {
         );
 
         assert!(!args.iter().any(|arg| arg.contains("model_reasoning_effort")));
+    }
+
+    #[test]
+    fn test_decode_clipboard_image_data_url_accepts_png_base64() {
+        let (bytes, ext) = decode_clipboard_image_data_url("data:image/png;base64,aGVsbG8=").unwrap();
+        assert_eq!(ext, "png");
+        assert_eq!(bytes, b"hello");
+    }
+
+    #[test]
+    fn test_decode_clipboard_image_data_url_rejects_non_base64_data_url() {
+        let error = decode_clipboard_image_data_url("data:image/png,hello").unwrap_err();
+        assert!(error.contains("base64"));
+    }
+
+    #[test]
+    fn test_decode_clipboard_image_data_url_rejects_unsupported_mime() {
+        let error = decode_clipboard_image_data_url("data:image/tiff;base64,aGVsbG8=").unwrap_err();
+        assert!(error.contains("Unsupported"));
     }
 }

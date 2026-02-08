@@ -9,6 +9,7 @@ import { useTabState } from '@/hooks/useTabState';
 
 interface ProjectWorkspaceViewProps {
   workspace: Tab;
+  isVisible?: boolean;
 }
 
 function getTerminalTitle(terminal: TerminalTab, index: number): string {
@@ -18,7 +19,10 @@ function getTerminalTitle(terminal: TerminalTab, index: number): string {
   return `Terminal ${index + 1}`;
 }
 
-export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ workspace }) => {
+export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
+  workspace,
+  isVisible = true,
+}) => {
   const {
     createTerminalTab,
     closeTerminalTab,
@@ -27,7 +31,6 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ work
   } = useTabState();
 
   const activeTerminal = workspace.terminalTabs.find((tab) => tab.id === workspace.activeTerminalTabId) || workspace.terminalTabs[0];
-
   const openProjectPicker = async () => {
     try {
       const tauriAvailable = typeof window !== 'undefined' && (
@@ -145,7 +148,7 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ work
                       ? 'border-[var(--color-chrome-border)] bg-[var(--color-chrome-active)] text-[var(--color-chrome-text-active)] font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_1px_1px_rgba(0,0,0,0.05)]'
                       : 'border-transparent bg-[var(--color-chrome-surface)] text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)] font-medium'
                   )}
-                  data-testid={`terminal-tab-${terminal.id}`}
+                  data-testid={isVisible ? `terminal-tab-${terminal.id}` : `hidden-terminal-tab-${terminal.id}`}
                 >
                   <Terminal className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate text-left">{getTerminalTitle(terminal, index)}</span>
@@ -171,7 +174,7 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ work
             className="h-7 w-7 shrink-0 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
             onClick={handleCreateTerminal}
             title="New terminal tab"
-            data-testid="workspace-new-terminal"
+            data-testid={isVisible ? 'workspace-new-terminal' : `hidden-workspace-new-terminal-${workspace.id}`}
           >
             <Plus className="h-4 w-4" />
           </Button>
@@ -179,7 +182,32 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ work
       </div>
 
       <div className="min-h-0 flex-1">
-        <WorkspacePaneTree workspace={workspace} terminal={activeTerminal} node={activeTerminal.paneTree} />
+        <div className="relative h-full">
+          {workspace.terminalTabs.map((terminal) => {
+            const isActive = terminal.id === activeTerminal.id;
+            const isTerminalVisible = isVisible && isActive;
+            return (
+              <div
+                key={terminal.id}
+                className={cn(
+                  'absolute inset-0 h-full transition-opacity duration-150',
+                  isActive
+                    ? 'visible opacity-100 pointer-events-auto'
+                    : 'invisible opacity-0 pointer-events-none'
+                )}
+                aria-hidden={!isActive}
+              >
+                <WorkspacePaneTree
+                  workspace={workspace}
+                  terminal={terminal}
+                  node={terminal.paneTree}
+                  exposeTestIds={isActive}
+                  isPaneVisible={isTerminalVisible}
+                />
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {!workspace.projectPath && (
@@ -187,7 +215,12 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ work
           <div className="pointer-events-auto rounded-lg border border-border/70 bg-card/95 px-4 py-2 shadow-xl backdrop-blur">
             <div className="flex items-center gap-3 text-xs">
               <span className="text-muted-foreground">No project selected for this workspace.</span>
-              <Button size="sm" className="h-7" onClick={openProjectPicker} data-testid="workspace-open-project">
+              <Button
+                size="sm"
+                className="h-7"
+                onClick={openProjectPicker}
+                data-testid={isVisible ? 'workspace-open-project' : `hidden-workspace-open-project-${workspace.id}`}
+              >
                 <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
                 Open Project
               </Button>

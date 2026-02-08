@@ -187,6 +187,30 @@ fn applescript_quote(value: &str) -> String {
     value.replace('\\', r#"\\"#).replace('"', r#"\""#)
 }
 
+#[cfg(target_os = "macos")]
+async fn run_osascript_lines(lines: Vec<String>) -> Result<(), String> {
+    let mut command = Command::new("osascript");
+    for line in lines {
+        command.arg("-e").arg(line);
+    }
+
+    let output = command
+        .output()
+        .await
+        .map_err(|e| format!("Failed to execute osascript: {}", e))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Err(format!(
+        "AppleScript command failed (stdout: {}, stderr: {})",
+        stdout, stderr
+    ))
+}
+
 fn build_probe_args(prompt: &str, model: &str, include_partial_messages: bool) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
@@ -406,26 +430,9 @@ async fn launch_iterm_script(script_path: &Path) -> Result<(), String> {
         r#"end tell"#.to_string(),
     ];
 
-    let mut command = Command::new("osascript");
-    for line in script_lines {
-        command.arg("-e").arg(line);
-    }
-
-    let output = command
-        .output()
+    run_osascript_lines(script_lines)
         .await
-        .map_err(|e| format!("Failed to execute osascript for iTerm probe: {}", e))?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Err(format!(
-        "Failed to launch iTerm benchmark command (stdout: {}, stderr: {})",
-        stdout, stderr
-    ))
+        .map_err(|err| format!("Failed to launch iTerm benchmark command: {}", err))
 }
 
 #[cfg(target_os = "macos")]
@@ -627,6 +634,75 @@ async fn run_iterm_probe(
     _args: Vec<String>,
 ) -> Result<SessionStartupProbeResult, String> {
     Err("assistant_iterm benchmark is only supported on macOS".to_string())
+}
+
+#[cfg(target_os = "macos")]
+async fn launch_native_terminal(project_path: &str, command_text: &str) -> Result<String, String> {
+    let run_command = format!("cd {} && {}", shell_quote(project_path), command_text);
+    let run_command_literal = applescript_quote(&run_command);
+
+    let iterm_script = vec![
+        format!(r#"set runCommand to "{}""#, run_command_literal),
+        r#"tell application "iTerm""#.to_string(),
+        r#"  activate"#.to_string(),
+        r#"  if (count of windows) = 0 then"#.to_string(),
+        r#"    create window with default profile"#.to_string(),
+        r#"  end if"#.to_string(),
+        r#"  tell current session of current window"#.to_string(),
+        r#"    write text runCommand"#.to_string(),
+        r#"  end tell"#.to_string(),
+        r#"end tell"#.to_string(),
+    ];
+
+    match run_osascript_lines(iterm_script).await {
+        Ok(()) => return Ok("iTerm".to_string()),
+        Err(iterm_error) => {
+            let terminal_script = vec![
+                format!(r#"set runCommand to "{}""#, run_command_literal),
+                r#"tell application "Terminal""#.to_string(),
+                r#"  activate"#.to_string(),
+                r#"  do script runCommand"#.to_string(),
+                r#"end tell"#.to_string(),
+            ];
+
+            match run_osascript_lines(terminal_script).await {
+                Ok(()) => Ok("Terminal.app".to_string()),
+                Err(terminal_error) => Err(format!(
+                    "Failed to launch native terminal. iTerm error: {}. Terminal.app error: {}",
+                    iterm_error, terminal_error
+                )),
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn launch_native_terminal(_project_path: &str, _command_text: &str) -> Result<String, String> {
+    Err("Native terminal launch is currently supported on macOS only.".to_string())
+}
+
+#[tauri::command]
+pub async fn open_external_terminal(project_path: String, command: Option<String>) -> Result<String, String> {
+    let path = PathBuf::from(&project_path);
+    if !path.exists() {
+        return Err(format!("Project path does not exist: {}", project_path));
+    }
+    if !path.is_dir() {
+        return Err(format!("Project path is not a directory: {}", project_path));
+    }
+
+    let command_text = command
+        .unwrap_or_else(|| "claude".to_string())
+        .trim()
+        .to_string();
+
+    let command_text = if command_text.is_empty() {
+        "claude".to_string()
+    } else {
+        command_text
+    };
+
+    launch_native_terminal(&project_path, &command_text).await
 }
 
 #[tauri::command]

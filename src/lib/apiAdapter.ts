@@ -9,6 +9,15 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+const ENABLE_DEBUG_LOGS =
+  Boolean((globalThis as any)?.__OPCODE_DEBUG_LOGS__) &&
+  Boolean(import.meta.env?.DEV);
+
+function debugLog(...args: unknown[]) {
+  if (!ENABLE_DEBUG_LOGS) return;
+  console.log(...args);
+}
+
 // Extend Window interface for Tauri
 declare global {
   interface Window {
@@ -44,7 +53,7 @@ function detectEnvironment(): boolean {
     navigator.userAgent.includes('Tauri')
   );
 
-  console.log('[detectEnvironment] isTauri:', isTauri, 'userAgent:', navigator.userAgent);
+  debugLog('[detectEnvironment] isTauri:', isTauri, 'userAgent:', navigator.userAgent);
   
   isTauriEnvironment = isTauri;
   return isTauri;
@@ -65,7 +74,7 @@ interface ApiResponse<T> {
 async function restApiCall<T>(endpoint: string, params?: any): Promise<T> {
   // First handle path parameters in the endpoint string
   let processedEndpoint = endpoint;
-  console.log(`[REST API] Original endpoint: ${endpoint}, params:`, params);
+  debugLog(`[REST API] Original endpoint: ${endpoint}, params:`, params);
   
   if (params) {
     Object.keys(params).forEach(key => {
@@ -78,14 +87,14 @@ async function restApiCall<T>(endpoint: string, params?: any): Promise<T> {
       
       placeholders.forEach(placeholder => {
         if (processedEndpoint.includes(placeholder)) {
-          console.log(`[REST API] Replacing ${placeholder} with ${params[key]}`);
+          debugLog(`[REST API] Replacing ${placeholder} with ${params[key]}`);
           processedEndpoint = processedEndpoint.replace(placeholder, encodeURIComponent(String(params[key])));
         }
       });
     });
   }
   
-  console.log(`[REST API] Processed endpoint: ${processedEndpoint}`);
+  debugLog(`[REST API] Processed endpoint: ${processedEndpoint}`);
   
   const url = new URL(processedEndpoint, window.location.origin);
   
@@ -136,7 +145,7 @@ export async function apiCall<T>(command: string, params?: any): Promise<T> {
   
   if (!isWeb) {
     // Tauri environment - try invoke
-    console.log(`[Tauri] Calling: ${command}`, params);
+    debugLog(`[Tauri] Calling: ${command}`, params);
     try {
       return await invoke<T>(command, params);
     } catch (error) {
@@ -146,7 +155,7 @@ export async function apiCall<T>(command: string, params?: any): Promise<T> {
   }
   
   // Web environment - use REST API
-  console.log(`[Web] Calling: ${command}`, params);
+  debugLog(`[Web] Calling: ${command}`, params);
   
   // Special handling for commands that use streaming/events
   const streamingCommands = ['execute_claude_code', 'continue_claude_code', 'resume_claude_code'];
@@ -196,6 +205,11 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'list_detected_agents': '/api/agents/detected',
     'check_provider_runtime': '/api/providers/{providerId}/runtime',
     'run_session_startup_probe': '/api/diagnostics/session-startup-probe',
+    'open_external_terminal': '/api/diagnostics/open-external-terminal',
+    'start_embedded_terminal': '/api/terminal/start',
+    'write_embedded_terminal_input': '/api/terminal/input',
+    'resize_embedded_terminal': '/api/terminal/resize',
+    'close_embedded_terminal': '/api/terminal/close',
     
     // Usage commands
     'get_usage_stats': '/api/usage',
@@ -215,6 +229,7 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'find_claude_md_files': '/api/claude-md',
     'read_claude_md_file': '/api/claude-md/read',
     'save_claude_md_file': '/api/claude-md/save',
+    'save_clipboard_image_attachment': '/api/attachments/clipboard-image',
     
     // Session management
     'open_new_session': '/api/sessions/new',
@@ -294,15 +309,15 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
     // Use wss:// for HTTPS connections (e.g., ngrok), ws:// for HTTP (localhost)
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${window.location.host}/ws/claude`;
-    console.log(`[TRACE] handleStreamingCommand called:`);
-    console.log(`[TRACE]   command: ${command}`);
-    console.log(`[TRACE]   params:`, params);
-    console.log(`[TRACE]   WebSocket URL: ${wsUrl}`);
+    debugLog(`[TRACE] handleStreamingCommand called:`);
+    debugLog(`[TRACE]   command: ${command}`);
+    debugLog(`[TRACE]   params:`, params);
+    debugLog(`[TRACE]   WebSocket URL: ${wsUrl}`);
     
     const ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
-      console.log(`[TRACE] WebSocket opened successfully`);
+      debugLog(`[TRACE] WebSocket opened successfully`);
       
       // Send execution request
       const request = {
@@ -313,24 +328,24 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
         session_id: params?.sessionId,
       };
       
-      console.log(`[TRACE] Sending WebSocket request:`, request);
-      console.log(`[TRACE] Request JSON:`, JSON.stringify(request));
+      debugLog(`[TRACE] Sending WebSocket request:`, request);
+      debugLog(`[TRACE] Request JSON:`, JSON.stringify(request));
       
       ws.send(JSON.stringify(request));
-      console.log(`[TRACE] WebSocket request sent`);
+      debugLog(`[TRACE] WebSocket request sent`);
     };
     
     ws.onmessage = (event) => {
-      console.log(`[TRACE] WebSocket message received:`, event.data);
+      debugLog(`[TRACE] WebSocket message received:`, event.data);
       try {
         const message = JSON.parse(event.data);
-        console.log(`[TRACE] Parsed WebSocket message:`, message);
+        debugLog(`[TRACE] Parsed WebSocket message:`, message);
         
         if (message.type === 'start') {
-          console.log(`[TRACE] Start message: ${message.message}`);
+          debugLog(`[TRACE] Start message: ${message.message}`);
         } else if (message.type === 'output') {
-          console.log(`[TRACE] Output message, content length: ${message.content?.length || 0}`);
-          console.log(`[TRACE] Raw content:`, message.content);
+          debugLog(`[TRACE] Output message, content length: ${message.content?.length || 0}`);
+          debugLog(`[TRACE] Raw content:`, message.content);
           
           // The backend sends Claude output as a JSON string in the content field
           // We need to parse this to get the actual Claude message
@@ -338,50 +353,50 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
             const claudeMessage = typeof message.content === 'string' 
               ? JSON.parse(message.content) 
               : message.content;
-            console.log(`[TRACE] Parsed Claude message:`, claudeMessage);
+            debugLog(`[TRACE] Parsed Claude message:`, claudeMessage);
             
             // Simulate Tauri event for compatibility with existing UI
             const customEvent = new CustomEvent('claude-output', {
               detail: claudeMessage
             });
-            console.log(`[TRACE] Dispatching claude-output event:`, customEvent.detail);
-            console.log(`[TRACE] Event type:`, customEvent.type);
+            debugLog(`[TRACE] Dispatching claude-output event:`, customEvent.detail);
+            debugLog(`[TRACE] Event type:`, customEvent.type);
             window.dispatchEvent(customEvent);
           } catch (e) {
             console.error(`[TRACE] Failed to parse Claude output content:`, e);
             console.error(`[TRACE] Content that failed to parse:`, message.content);
           }
         } else if (message.type === 'completion') {
-          console.log(`[TRACE] Completion message:`, message);
+          debugLog(`[TRACE] Completion message:`, message);
           
           // Dispatch claude-complete event for UI state management
           const completeEvent = new CustomEvent('claude-complete', {
             detail: message.status === 'success'
           });
-          console.log(`[TRACE] Dispatching claude-complete event:`, completeEvent.detail);
+          debugLog(`[TRACE] Dispatching claude-complete event:`, completeEvent.detail);
           window.dispatchEvent(completeEvent);
           
           ws.close();
           if (message.status === 'success') {
-            console.log(`[TRACE] Resolving promise with success`);
+            debugLog(`[TRACE] Resolving promise with success`);
             resolve({} as T); // Return empty object for now
           } else {
-            console.log(`[TRACE] Rejecting promise with error: ${message.error}`);
+            debugLog(`[TRACE] Rejecting promise with error: ${message.error}`);
             reject(new Error(message.error || 'Execution failed'));
           }
         } else if (message.type === 'error') {
-          console.log(`[TRACE] Error message:`, message);
+          debugLog(`[TRACE] Error message:`, message);
           
           // Dispatch claude-error event for UI error handling
           const errorEvent = new CustomEvent('claude-error', {
             detail: message.message || 'Unknown error'
           });
-          console.log(`[TRACE] Dispatching claude-error event:`, errorEvent.detail);
+          debugLog(`[TRACE] Dispatching claude-error event:`, errorEvent.detail);
           window.dispatchEvent(errorEvent);
           
           reject(new Error(message.message || 'Unknown error'));
         } else {
-          console.log(`[TRACE] Unknown message type: ${message.type}`);
+          debugLog(`[TRACE] Unknown message type: ${message.type}`);
         }
       } catch (e) {
         console.error('[TRACE] Failed to parse WebSocket message:', e);
@@ -396,21 +411,21 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
       const errorEvent = new CustomEvent('claude-error', {
         detail: 'WebSocket connection failed'
       });
-      console.log(`[TRACE] Dispatching claude-error event for WebSocket error`);
+      debugLog(`[TRACE] Dispatching claude-error event for WebSocket error`);
       window.dispatchEvent(errorEvent);
       
       reject(new Error('WebSocket connection failed'));
     };
     
     ws.onclose = (event) => {
-      console.log(`[TRACE] WebSocket closed - code: ${event.code}, reason: ${event.reason}`);
+      debugLog(`[TRACE] WebSocket closed - code: ${event.code}, reason: ${event.reason}`);
       
       // If connection closed unexpectedly (not a normal close), dispatch cancelled event
       if (event.code !== 1000 && event.code !== 1001) {
         const cancelEvent = new CustomEvent('claude-complete', {
           detail: false // false indicates cancellation/failure
         });
-        console.log(`[TRACE] Dispatching claude-complete event for unexpected close`);
+        debugLog(`[TRACE] Dispatching claude-complete event for unexpected close`);
         window.dispatchEvent(cancelEvent);
       }
     };

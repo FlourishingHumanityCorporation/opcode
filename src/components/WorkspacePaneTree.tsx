@@ -7,9 +7,17 @@ interface WorkspacePaneTreeProps {
   workspace: Tab;
   terminal: TerminalTab;
   node: PaneNode;
+  exposeTestIds?: boolean;
+  isPaneVisible?: boolean;
 }
 
-export const WorkspacePaneTree: React.FC<WorkspacePaneTreeProps> = ({ workspace, terminal, node }) => {
+export const WorkspacePaneTree: React.FC<WorkspacePaneTreeProps> = ({
+  workspace,
+  terminal,
+  node,
+  exposeTestIds = true,
+  isPaneVisible = true,
+}) => {
   if (node.type === 'leaf') {
     return (
       <TerminalPaneSurface
@@ -17,6 +25,8 @@ export const WorkspacePaneTree: React.FC<WorkspacePaneTreeProps> = ({ workspace,
         terminal={terminal}
         paneId={node.id}
         isActive={terminal.activePaneId === node.id}
+        exposeTestId={exposeTestIds}
+        isPaneVisible={isPaneVisible}
       />
     );
   }
@@ -26,11 +36,23 @@ export const WorkspacePaneTree: React.FC<WorkspacePaneTreeProps> = ({ workspace,
   return (
     <div className="flex h-full w-full min-w-0 min-h-0 flex-row">
       <div className="min-w-0 min-h-0" style={{ width: `${ratio}%` }}>
-        <WorkspacePaneTree workspace={workspace} terminal={terminal} node={node.left} />
+        <WorkspacePaneTree
+          workspace={workspace}
+          terminal={terminal}
+          node={node.left}
+          exposeTestIds={exposeTestIds}
+          isPaneVisible={isPaneVisible}
+        />
       </div>
       <div className={cn('w-px bg-[var(--color-chrome-border)]/80')} />
       <div className="min-w-0 min-h-0 flex-1" style={{ width: `${100 - ratio}%` }}>
-        <WorkspacePaneTree workspace={workspace} terminal={terminal} node={node.right} />
+        <WorkspacePaneTree
+          workspace={workspace}
+          terminal={terminal}
+          node={node.right}
+          exposeTestIds={exposeTestIds}
+          isPaneVisible={isPaneVisible}
+        />
       </div>
     </div>
   );

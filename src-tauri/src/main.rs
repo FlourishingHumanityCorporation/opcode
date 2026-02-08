@@ -29,11 +29,11 @@ use commands::claude::{
     get_session_timeline, get_system_prompt, list_checkpoints, list_detected_agents,
     list_directory_contents, list_projects, list_running_claude_sessions, load_session_history,
     open_new_session, read_claude_md_file, restore_checkpoint, resume_agent_session,
-    resume_claude_code, save_claude_md_file, save_claude_settings, save_system_prompt,
+    resume_claude_code, save_claude_md_file, save_clipboard_image_attachment, save_claude_settings, save_system_prompt,
     search_files, track_checkpoint_message, track_session_messages, update_checkpoint_settings,
     update_hooks_config, validate_hook_command, ClaudeProcessState,
 };
-use commands::diagnostics::run_session_startup_probe;
+use commands::diagnostics::{open_external_terminal, run_session_startup_probe};
 use commands::mcp::{
     mcp_add, mcp_add_from_claude_desktop, mcp_add_json, mcp_get, mcp_get_server_status, mcp_list,
     mcp_read_project_config, mcp_remove, mcp_reset_project_choices, mcp_save_project_config,
@@ -44,6 +44,11 @@ use commands::proxy::{apply_proxy_settings, get_proxy_settings, save_proxy_setti
 use commands::storage::{
     storage_delete_row, storage_execute_sql, storage_insert_row, storage_list_tables,
     storage_read_table, storage_reset_database, storage_update_row,
+};
+use commands::terminal::{
+    close_embedded_terminal, get_embedded_terminal_debug_snapshot, resize_embedded_terminal,
+    start_embedded_terminal, write_embedded_terminal_input, write_terminal_incident_bundle,
+    EmbeddedTerminalState,
 };
 use commands::usage::{
     cancel_usage_index_sync, get_session_stats, get_usage_by_date_range, get_usage_details,
@@ -149,6 +154,7 @@ fn main() {
 
             // Initialize process registry
             app.manage(ProcessRegistryState::default());
+            app.manage(EmbeddedTerminalState::default());
 
             // Initialize Claude process state
             app.manage(ClaudeProcessState::default());
@@ -205,6 +211,7 @@ fn main() {
             find_claude_md_files,
             read_claude_md_file,
             save_claude_md_file,
+            save_clipboard_image_attachment,
             load_session_history,
             execute_claude_code,
             continue_claude_code,
@@ -305,7 +312,14 @@ fn main() {
             execute_agent_session,
             continue_agent_session,
             resume_agent_session,
+            open_external_terminal,
             run_session_startup_probe,
+            start_embedded_terminal,
+            write_embedded_terminal_input,
+            resize_embedded_terminal,
+            close_embedded_terminal,
+            get_embedded_terminal_debug_snapshot,
+            write_terminal_incident_bundle,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

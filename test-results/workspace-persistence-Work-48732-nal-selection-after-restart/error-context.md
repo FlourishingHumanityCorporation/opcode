@@ -1,0 +1,118 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - button "Close" [ref=e7] [cursor=pointer]
+      - button "Minimize" [ref=e8] [cursor=pointer]
+      - button "Maximize" [ref=e9] [cursor=pointer]
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - button "Agents" [ref=e12] [cursor=pointer]:
+          - img [ref=e13]
+        - button "Usage Dashboard" [ref=e16] [cursor=pointer]:
+          - img [ref=e17]
+      - generic [ref=e20]:
+        - button "Settings" [ref=e21] [cursor=pointer]:
+          - img [ref=e22]
+        - button "More options" [ref=e26] [cursor=pointer]:
+          - img [ref=e27]
+  - generic [ref=e32]:
+    - generic [ref=e33]:
+      - list [ref=e35]:
+        - listitem [ref=e36] [cursor=pointer]:
+          - img [ref=e37]
+          - generic [ref=e39]: Project 1
+          - button "Close Project 1" [ref=e40]:
+            - img [ref=e41]
+        - listitem [ref=e44] [cursor=pointer]:
+          - img [ref=e45]
+          - generic [ref=e47]: Project 2
+          - button "Close Project 2" [ref=e48]:
+            - img [ref=e49]
+      - button "New Project Workspace" [ref=e52] [cursor=pointer]:
+        - img [ref=e53]
+    - generic [ref=e56]:
+      - generic [ref=e58]:
+        - generic [ref=e59]:
+          - generic [ref=e60]:
+            - img [ref=e61]
+            - generic [ref=e63]: Terminal 1
+          - generic [ref=e64]:
+            - button [ref=e65] [cursor=pointer]:
+              - img [ref=e66]
+            - button [ref=e68] [cursor=pointer]:
+              - img [ref=e69]
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - button [ref=e87] [cursor=pointer]:
+              - img [ref=e89]
+              - generic [ref=e91]: D
+              - img [ref=e92]
+            - button [ref=e97] [cursor=pointer]:
+              - img [ref=e99]
+              - generic [ref=e101]: A
+              - img [ref=e102]
+          - generic [ref=e104]:
+            - textbox [ref=e105]:
+              - /placeholder: Message Claude (@ for files, / for commands)...
+            - generic [ref=e106]:
+              - button [ref=e108] [cursor=pointer]:
+                - img [ref=e109]
+              - generic [ref=e114] [cursor=pointer]:
+                - button [disabled]:
+                  - img
+          - button [ref=e117] [cursor=pointer]:
+            - img [ref=e118]
+      - generic [ref=e121]:
+        - generic [ref=e123]:
+          - generic [ref=e124]:
+            - button "Terminal 1" [ref=e125] [cursor=pointer]:
+              - img [ref=e126]
+              - generic [ref=e128]: Terminal 1
+              - button [ref=e129]:
+                - img [ref=e130]
+            - button "Terminal 2" [active] [ref=e133] [cursor=pointer]:
+              - img [ref=e134]
+              - generic [ref=e136]: Terminal 2
+              - button [ref=e137]:
+                - img [ref=e138]
+          - button "New terminal tab" [ref=e141] [cursor=pointer]:
+            - img [ref=e142]
+        - generic [ref=e146]:
+          - generic [ref=e147]:
+            - generic [ref=e148]:
+              - img [ref=e149]
+              - generic [ref=e151]: Terminal 2
+            - generic [ref=e152]:
+              - button "Split Right" [ref=e153] [cursor=pointer]:
+                - img [ref=e154]
+              - button "Close Pane" [ref=e156] [cursor=pointer]:
+                - img [ref=e157]
+          - generic [ref=e170]:
+            - generic [ref=e171]:
+              - button "D" [ref=e175] [cursor=pointer]:
+                - img [ref=e177]
+                - generic [ref=e179]: D
+                - img [ref=e180]
+              - button "A" [ref=e185] [cursor=pointer]:
+                - img [ref=e187]
+                - generic [ref=e189]: A
+                - img [ref=e190]
+            - generic [ref=e192]:
+              - textbox "Message Claude (@ for files, / for commands)..." [ref=e193]
+              - generic [ref=e194]:
+                - button [ref=e196] [cursor=pointer]:
+                  - img [ref=e197]
+                - generic [ref=e202] [cursor=pointer]:
+                  - button [disabled]:
+                    - img
+            - button [ref=e205] [cursor=pointer]:
+              - img [ref=e206]
+        - generic [ref=e209]:
+          - generic [ref=e210]: No project selected for this workspace.
+          - button "Open Project" [ref=e211] [cursor=pointer]:
+            - img [ref=e212]
+            - text: Open Project
+```

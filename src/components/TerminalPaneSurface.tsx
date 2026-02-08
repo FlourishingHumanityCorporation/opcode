@@ -2,6 +2,14 @@ import React from 'react';
 import { Bot, Columns2, Terminal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import {
+  buildPersistentTerminalSessionId,
+  canonicalizeProjectPath,
+  projectNameFromPath,
+  shouldResetEmbeddedTerminal,
+  shouldAutoRenameWorkspaceTitle,
+} from '@/lib/terminalPaneState';
+import { api } from '@/lib/api';
 import type { Tab, TerminalTab } from '@/contexts/TabContext';
 import { ClaudeCodeSession } from '@/components/ClaudeCodeSession';
 import { AgentExecution } from '@/components/AgentExecution';
@@ -13,6 +21,8 @@ interface TerminalPaneSurfaceProps {
   terminal: TerminalTab;
   paneId: string;
   isActive: boolean;
+  isPaneVisible?: boolean;
+  exposeTestId?: boolean;
 }
 
 export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
@@ -20,12 +30,15 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
   terminal,
   paneId,
   isActive,
+  isPaneVisible = true,
+  exposeTestId = true,
 }) => {
   const {
     splitPane,
     closePane,
     activatePane,
     updateTab,
+    updatePaneState,
   } = useTabState();
 
   const paneRuntime = terminal.paneStates[paneId] || {};
@@ -43,6 +56,18 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
     workspace.projectPath ||
     '';
 
+  const resumeSessionId =
+    paneRuntime.sessionId ||
+    terminal.sessionState?.sessionId ||
+    terminal.sessionState?.sessionData?.id ||
+    (terminal.sessionState?.sessionData as any)?.session_id;
+
+  const persistentTerminalSessionId = buildPersistentTerminalSessionId(
+    workspace.id,
+    terminal.id,
+    paneId
+  );
+
   const handleProviderChange = (nextProvider: string) => {
     updateTab(terminal.id, {
       providerId: nextProvider,
@@ -50,38 +75,128 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
         ...terminal.sessionState,
         providerId: nextProvider,
       },
-      paneStates: {
-        ...terminal.paneStates,
-        [paneId]: {
-          ...paneRuntime,
-          providerId: nextProvider,
-        },
-      },
+    });
+
+    updatePaneState(workspace.id, terminal.id, paneId, {
+      providerId: nextProvider,
     });
   };
 
   const handleProjectPathChange = (nextPath: string) => {
+    const nextCanonicalPath = canonicalizeProjectPath(nextPath);
+    const nextProjectName = projectNameFromPath(nextCanonicalPath);
+    const currentPanePath =
+      paneRuntime.projectPath ||
+      terminal.sessionState?.projectPath ||
+      terminal.sessionState?.initialProjectPath ||
+      '';
+    const currentPaneCanonicalPath = canonicalizeProjectPath(currentPanePath);
+    const shouldResetTerminal = shouldResetEmbeddedTerminal(currentPaneCanonicalPath, nextCanonicalPath);
+    const shouldUpdateWorkspacePath = !workspace.projectPath && Boolean(nextCanonicalPath);
+    const shouldUpdatePanePath = nextCanonicalPath !== currentPaneCanonicalPath;
+
+    if (!shouldUpdatePanePath && !shouldUpdateWorkspacePath && !shouldResetTerminal) {
+      return;
+    }
+
     updateTab(terminal.id, {
       sessionState: {
         ...terminal.sessionState,
-        projectPath: nextPath,
-        initialProjectPath: terminal.sessionState?.initialProjectPath || nextPath,
-      },
-      paneStates: {
-        ...terminal.paneStates,
-        [paneId]: {
-          ...paneRuntime,
-          projectPath: nextPath,
-        },
+        projectPath: nextCanonicalPath,
+        initialProjectPath: terminal.sessionState?.initialProjectPath || nextCanonicalPath,
       },
     });
 
-    if (!workspace.projectPath) {
+    if (shouldUpdatePanePath || shouldResetTerminal) {
+      const nextPaneState: {
+        projectPath?: string;
+        embeddedTerminalId?: string;
+      } = {};
+
+      if (shouldUpdatePanePath) {
+        nextPaneState.projectPath = nextCanonicalPath;
+      }
+
+      if (shouldResetTerminal) {
+        if (paneRuntime.embeddedTerminalId) {
+          api.closeEmbeddedTerminal(paneRuntime.embeddedTerminalId).catch(() => undefined);
+        }
+        nextPaneState.embeddedTerminalId = undefined;
+      }
+
+      updatePaneState(workspace.id, terminal.id, paneId, nextPaneState);
+    }
+
+    if (shouldUpdateWorkspacePath) {
+      const shouldAutoRenameWorkspace = shouldAutoRenameWorkspaceTitle(
+        workspace.title,
+        workspace.projectPath
+      );
       updateTab(workspace.id, {
-        projectPath: nextPath,
-        title: workspace.title === 'Project' ? nextPath.split(/[\\/]/).pop() || workspace.title : workspace.title,
+        projectPath: nextCanonicalPath,
+        title: shouldAutoRenameWorkspace && nextProjectName
+          ? nextProjectName
+          : workspace.title,
       });
     }
+  };
+
+  const handleEmbeddedTerminalIdChange = (nextTerminalId: string | undefined) => {
+    if ((paneRuntime.embeddedTerminalId || undefined) === nextTerminalId) {
+      return;
+    }
+
+    updatePaneState(workspace.id, terminal.id, paneId, {
+      embeddedTerminalId: nextTerminalId,
+    });
+  };
+
+  const handleSessionResolved = (nextSession: any) => {
+    if (!nextSession?.id) return;
+
+    const currentSessionId =
+      terminal.sessionState?.sessionId ||
+      terminal.sessionState?.sessionData?.id ||
+      paneRuntime.sessionId;
+
+    if (currentSessionId === nextSession.id && terminal.sessionState?.sessionData?.id === nextSession.id) {
+      return;
+    }
+
+    updateTab(terminal.id, {
+      sessionState: {
+        ...terminal.sessionState,
+        sessionId: nextSession.id,
+        sessionData: nextSession,
+        projectPath: terminal.sessionState?.projectPath || nextSession.project_path,
+        initialProjectPath: terminal.sessionState?.initialProjectPath || nextSession.project_path,
+      },
+    });
+
+    updatePaneState(workspace.id, terminal.id, paneId, {
+      sessionId: nextSession.id,
+      projectPath: paneRuntime.projectPath || nextSession.project_path,
+    });
+  };
+
+  const handleRestorePreferenceChange = (nextPreference: 'resume_latest' | 'start_fresh') => {
+    if (paneRuntime.restorePreference === nextPreference) {
+      return;
+    }
+
+    updatePaneState(workspace.id, terminal.id, paneId, {
+      restorePreference: nextPreference,
+    });
+  };
+
+  const handleResumeSessionIdChange = (nextSessionId: string | undefined) => {
+    if ((paneRuntime.sessionId || undefined) === nextSessionId) {
+      return;
+    }
+
+    updatePaneState(workspace.id, terminal.id, paneId, {
+      sessionId: nextSessionId,
+    });
   };
 
   return (
@@ -91,7 +206,7 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
         isActive ? 'border-[var(--color-chrome-border)]' : 'border-[var(--color-chrome-border)]/70'
       )}
       onMouseDown={() => activatePane(workspace.id, terminal.id, paneId)}
-      data-testid={`workspace-pane-${paneId}`}
+      data-testid={exposeTestId ? `workspace-pane-${paneId}` : `hidden-workspace-pane-${paneId}`}
     >
       <div className="workspace-chrome-row flex h-8 items-center justify-between border-b border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-surface)]">
         <div className="workspace-chip-icon-align flex items-center gap-1.5 text-[12px] leading-none font-medium tracking-[0.01em] text-[var(--color-chrome-text)]">
@@ -112,7 +227,8 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
               event.stopPropagation();
               splitPane(workspace.id, terminal.id, paneId);
             }}
-            title="Split Right"
+            title={exposeTestId ? 'Split Right' : undefined}
+            aria-label={exposeTestId ? 'Split Right' : 'Hidden Split Right'}
           >
             <Columns2 className="h-2.5 w-2.5" />
           </Button>
@@ -124,7 +240,8 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
               event.stopPropagation();
               closePane(workspace.id, terminal.id, paneId);
             }}
-            title="Close Pane"
+            title={exposeTestId ? 'Close Pane' : undefined}
+            aria-label={exposeTestId ? 'Close Pane' : 'Hidden Close Pane'}
           >
             <X className="h-2.5 w-2.5" />
           </Button>
@@ -160,6 +277,7 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
             embedded
             paneId={paneId}
             workspaceId={workspace.id}
+            terminalTabId={terminal.id}
             hideProjectBar={false}
             hideFloatingGlobalControls={false}
             previewMode="slideover"
@@ -168,6 +286,16 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
             providerId={providerId}
             onProviderChange={handleProviderChange}
             onProjectPathChange={handleProjectPathChange}
+            onSessionResolved={handleSessionResolved}
+            embeddedTerminalId={paneRuntime.embeddedTerminalId}
+            onEmbeddedTerminalIdChange={handleEmbeddedTerminalIdChange}
+            isPaneVisible={isPaneVisible}
+            isPaneActive={isActive}
+            resumeSessionId={resumeSessionId}
+            persistentTerminalSessionId={persistentTerminalSessionId}
+            restorePreference={paneRuntime.restorePreference}
+            onRestorePreferenceChange={handleRestorePreferenceChange}
+            onResumeSessionIdChange={handleResumeSessionIdChange}
             onBack={() => {}}
             className="h-full"
           />
