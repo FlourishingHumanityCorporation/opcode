@@ -197,68 +197,28 @@ fn start_tmux_attached(command: &mut CommandBuilder, session_id: &str, cwd: &Pat
     }
 }
 
-fn configure_tmux_defaults() {
-    let _ = ProcessCommand::new("tmux")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .args([
-            "-L",
-            OPCODE_TMUX_SOCKET,
-            "-f",
-            TMUX_CONFIG_PATH,
-            "set-option",
-            "-g",
-            "mouse",
-            "on",
-        ])
-        .status();
-
-    let _ = ProcessCommand::new("tmux")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .args([
-            "-L",
-            OPCODE_TMUX_SOCKET,
-            "-f",
-            TMUX_CONFIG_PATH,
-            "set-option",
-            "-g",
-            "history-limit",
-            TMUX_HISTORY_LIMIT,
-        ])
-        .status();
-}
-
-fn kill_tmux_session(session_id: &str) {
-    let _ = ProcessCommand::new("tmux")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .args([
-            "-L",
-            OPCODE_TMUX_SOCKET,
-            "-f",
-            TMUX_CONFIG_PATH,
-            "kill-session",
-            "-t",
-            session_id,
-        ])
-        .status();
-}
-
-fn tmux_has_session(session_id: &str) -> bool {
+fn run_tmux_command(args: &[&str]) -> Option<std::process::ExitStatus> {
     ProcessCommand::new("tmux")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .args([
-            "-L",
-            OPCODE_TMUX_SOCKET,
-            "-f",
-            TMUX_CONFIG_PATH,
-            "has-session",
-            "-t",
-            session_id,
-        ])
+        .args(["-L", OPCODE_TMUX_SOCKET, "-f", TMUX_CONFIG_PATH])
+        .args(args)
         .status()
+        .ok()
+}
+
+fn configure_tmux_defaults() {
+    let _ = run_tmux_command(&["set-option", "-g", "mouse", "on"]);
+    let _ = run_tmux_command(&["set-option", "-g", "history-limit", TMUX_HISTORY_LIMIT]);
+    let _ = run_tmux_command(&["set-option", "-g", "status", "off"]);
+}
+
+fn kill_tmux_session(session_id: &str) {
+    let _ = run_tmux_command(&["kill-session", "-t", session_id]);
+}
+
+fn tmux_has_session(session_id: &str) -> bool {
+    run_tmux_command(&["has-session", "-t", session_id])
         .map(|status| status.success())
         .unwrap_or(false)
 }
