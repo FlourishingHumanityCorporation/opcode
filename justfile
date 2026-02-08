@@ -71,6 +71,14 @@ web: build-frontend
 web-port PORT: build-frontend
     cd src-tauri && cargo run --bin opcode-web -- --port {{PORT}}
 
+# Configure persistent macOS remote access (opcode-web + userspace tailscale)
+remote-access-macos PORT='8090':
+    bash scripts/setup-remote-access-macos.sh {{PORT}}
+
+# Show macOS remote access runtime status
+remote-access-status PORT='8090':
+    bash scripts/remote-access-status-macos.sh {{PORT}}
+
 # Get local IP for phone access
 ip:
     @echo "🌐 Your PC's IP addresses:"
