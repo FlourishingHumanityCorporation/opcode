@@ -8,7 +8,6 @@ import { UtilityOverlayHost } from '@/components/UtilityOverlayHost';
 import { logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 import {
   OPCODE_AGENT_ATTENTION_EVENT,
-  canonicalizeAgentAttentionSource,
   type AgentAttentionEventDetail,
 } from '@/services/agentAttention';
 import type { Tab, TerminalTab } from '@/contexts/TabContext';
@@ -17,12 +16,6 @@ export function mapAgentAttentionKindToStatus(
   kind: AgentAttentionEventDetail["kind"]
 ): TerminalTab["status"] {
   return kind === "needs_input" ? "attention" : "complete";
-}
-
-export function normalizeAgentAttentionSource(
-  detail: AgentAttentionEventDetail
-): AgentAttentionEventDetail["sourceV2"] {
-  return detail.sourceV2 || canonicalizeAgentAttentionSource(detail.source);
 }
 
 export function applyAgentAttentionStatusUpdate(
@@ -153,11 +146,7 @@ export const TabContent: React.FC = () => {
     const handleAgentAttention = (event: Event) => {
       const detail = (event as CustomEvent<AgentAttentionEventDetail>).detail;
       if (!detail) return;
-      const normalizedDetail: AgentAttentionEventDetail = {
-        ...detail,
-        sourceV2: normalizeAgentAttentionSource(detail),
-      };
-      applyAgentAttentionStatusUpdate(tabs, updateTab, normalizedDetail);
+      applyAgentAttentionStatusUpdate(tabs, updateTab, detail);
     };
 
     window.addEventListener('open-session-in-tab', handleOpenSessionInTab as EventListener);

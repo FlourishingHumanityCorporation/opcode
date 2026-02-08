@@ -55,7 +55,6 @@ import { useTrackEvent, useComponentMetrics, useWorkflowTracking } from "@/hooks
 import { SessionPersistenceService } from "@/services/sessionPersistence";
 import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
 import {
-  getProviderSessionAttentionSource,
   emitAgentAttention,
   extractAttentionText,
   shouldTriggerNeedsInput,
@@ -1405,7 +1404,10 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
 
           // Attempt to extract session_id on the fly (for the very first init)
           try {
-            const msg = JSON.parse(event.payload) as ClaudeStreamMessage;
+            const msg =
+              typeof event.payload === "string"
+                ? (JSON.parse(event.payload) as ClaudeStreamMessage)
+                : (event.payload as ClaudeStreamMessage);
             if (msg.type === 'system' && msg.subtype === 'init' && msg.session_id) {
               if (!currentSessionId || currentSessionId !== msg.session_id) {
                 debugLog('[ProviderSessionPane] Detected new session_id from generic listener:', msg.session_id);
@@ -1464,7 +1466,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
                   kind: "needs_input",
                   workspaceId,
                   terminalTabId,
-                  ...getProviderSessionAttentionSource(),
+                  source: "provider_session",
                   body:
                     summarizeAttentionBody(candidateText) ||
                     "The agent is waiting for your input.",
@@ -1560,7 +1562,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
               kind: "done",
               workspaceId,
               terminalTabId,
-              ...getProviderSessionAttentionSource(),
+              source: "provider_session",
               body: `Run completed for ${runProjectPath || "the current workspace"}.`,
             });
           }

@@ -38,8 +38,7 @@ async function emitAttentionWithDefaults(
     kind: "done" | "needs_input";
     workspaceId?: string;
     terminalTabId?: string;
-    source: "provider_session" | "claude_session" | "agent_execution" | "agent_run_output";
-    sourceV2?: "provider_session" | "agent_execution" | "agent_run_output";
+    source: "provider_session" | "agent_execution" | "agent_run_output";
     title?: string;
     body?: string;
   }) => Promise<boolean>,
@@ -51,7 +50,7 @@ async function emitAttentionWithDefaults(
     kind,
     workspaceId: "workspace-1",
     terminalTabId,
-    source: "claude_session",
+    source: "provider_session",
     body,
   });
 }
@@ -197,7 +196,7 @@ describe("agentAttention notifications and badge behavior", () => {
     expect(mockFns.setBadgeCount).toHaveBeenCalledWith(1);
     expect(mockFns.setBadgeCount).toHaveBeenCalledWith(2);
     expect(dispatched).toHaveLength(2);
-    expect(dispatched[0]?.sourceV2).toBe("provider_session");
+    expect(dispatched[0]?.source).toBe("provider_session");
 
     mockState.focusChangedHandler?.({ payload: true });
     await Promise.resolve();

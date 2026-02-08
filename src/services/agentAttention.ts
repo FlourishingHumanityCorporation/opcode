@@ -3,36 +3,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 export const OPCODE_AGENT_ATTENTION_EVENT = "opcode-agent-attention";
 
 export type AgentAttentionKind = "done" | "needs_input";
-export type LegacyAgentAttentionSource =
-  | "claude_session"
-  | "agent_execution"
-  | "agent_run_output";
-export type CanonicalAgentAttentionSource =
+export type AgentAttentionSource =
   | "provider_session"
   | "agent_execution"
   | "agent_run_output";
-export type AgentAttentionSource =
-  | LegacyAgentAttentionSource
-  | CanonicalAgentAttentionSource;
-
-export function canonicalizeAgentAttentionSource(
-  source: AgentAttentionSource
-): CanonicalAgentAttentionSource {
-  if (source === "claude_session") {
-    return "provider_session";
-  }
-  return source;
-}
-
-export function getProviderSessionAttentionSource(): {
-  source: AgentAttentionSource;
-  sourceV2: CanonicalAgentAttentionSource;
-} {
-  return {
-    source: "claude_session",
-    sourceV2: "provider_session",
-  };
-}
 
 export interface AgentAttentionEventDetail {
   kind: AgentAttentionKind;
@@ -41,7 +15,6 @@ export interface AgentAttentionEventDetail {
   title: string;
   body: string;
   source: AgentAttentionSource;
-  sourceV2: CanonicalAgentAttentionSource;
   timestamp: number;
 }
 
@@ -50,7 +23,6 @@ export interface EmitAgentAttentionInput {
   workspaceId?: string;
   terminalTabId?: string;
   source: AgentAttentionSource;
-  sourceV2?: CanonicalAgentAttentionSource;
   title?: string;
   body?: string;
 }
@@ -257,7 +229,6 @@ function normalizeIncomingAttention(
     workspaceId: input.workspaceId,
     terminalTabId: input.terminalTabId,
     source: input.source,
-    sourceV2: input.sourceV2 || canonicalizeAgentAttentionSource(input.source),
     title,
     body,
     timestamp,

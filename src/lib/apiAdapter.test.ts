@@ -209,4 +209,94 @@ describe("apiAdapter provider-session mappings", () => {
     expect(scopedCancelledEvents).toEqual([true]);
     expect(completeEvents).toEqual([false]);
   });
+
+  it("switches scoped events to streamed session_id when it differs from the request", async () => {
+    const { apiCall } = await loadApiAdapter();
+    const requestScopedOutputEvents: unknown[] = [];
+    const streamedScopedOutputEvents: unknown[] = [];
+    const streamedScopedCompleteEvents: unknown[] = [];
+
+    window.addEventListener("provider-session-output:resume-seed-id", (event) => {
+      requestScopedOutputEvents.push((event as CustomEvent).detail);
+    });
+    window.addEventListener("provider-session-output:runtime-session-456", (event) => {
+      streamedScopedOutputEvents.push((event as CustomEvent).detail);
+    });
+    window.addEventListener("provider-session-complete:runtime-session-456", (event) => {
+      streamedScopedCompleteEvents.push((event as CustomEvent).detail);
+    });
+
+    const callPromise = apiCall("resume_provider_session", {
+      projectPath: "/tmp/project",
+      prompt: "Resume with remap",
+      model: "sonnet",
+      sessionId: "resume-seed-id",
+    });
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    const socket = MockWebSocket.instances[0];
+    socket.emitOpen();
+
+    socket.emitMessage(
+      JSON.stringify({
+        type: "output",
+        content: JSON.stringify({
+          type: "system",
+          subtype: "init",
+          session_id: "runtime-session-456",
+        }),
+      })
+    );
+    socket.emitMessage(
+      JSON.stringify({
+        type: "output",
+        content: JSON.stringify({
+          type: "assistant",
+          session_id: "runtime-session-456",
+        }),
+      })
+    );
+    socket.emitMessage(JSON.stringify({ type: "completion", status: "success" }));
+
+    await expect(callPromise).resolves.toEqual({});
+    expect(requestScopedOutputEvents).toHaveLength(0);
+    expect(streamedScopedOutputEvents).toHaveLength(2);
+    expect(streamedScopedCompleteEvents).toEqual([true]);
+  });
+
+  it("dispatches provider-session-cancelled on abnormal websocket close", async () => {
+    const { apiCall } = await loadApiAdapter();
+    const cancelledEvents: unknown[] = [];
+    const scopedCancelledEvents: unknown[] = [];
+    const completeEvents: unknown[] = [];
+
+    window.addEventListener("provider-session-cancelled", (event) => {
+      cancelledEvents.push((event as CustomEvent).detail);
+    });
+    window.addEventListener("provider-session-cancelled:session-abc", (event) => {
+      scopedCancelledEvents.push((event as CustomEvent).detail);
+    });
+    window.addEventListener("provider-session-complete", (event) => {
+      completeEvents.push((event as CustomEvent).detail);
+    });
+
+    const callPromise = apiCall("execute_provider_session", {
+      projectPath: "/tmp/project",
+      prompt: "Disconnect",
+      model: "sonnet",
+      sessionId: "session-abc",
+    });
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    const socket = MockWebSocket.instances[0];
+    socket.emitOpen();
+    socket.close(1006, "abnormal close");
+
+    await expect(callPromise).rejects.toThrow(
+      "Execution cancelled: WebSocket connection closed unexpectedly"
+    );
+    expect(cancelledEvents).toEqual([true]);
+    expect(scopedCancelledEvents).toEqual([true]);
+    expect(completeEvents).toEqual([false]);
+  });
 });

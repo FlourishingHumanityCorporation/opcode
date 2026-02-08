@@ -316,6 +316,10 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
     debugLog(`[TRACE]   WebSocket URL: ${wsUrl}`);
     
     const ws = new WebSocket(wsUrl);
+    // Session ID selection order:
+    // 1) seed from request.sessionId (resume path or caller-provided ID)
+    // 2) override from streamed payload session_id once runtime emits system:init
+    // Scoped provider-session-* events always use the latest resolved ID.
     let activeSessionId: string | undefined = params?.sessionId;
     let settled = false;
 
@@ -469,7 +473,7 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
       if (event.code !== 1000 && event.code !== 1001) {
         dispatchProviderSessionEvent('provider-session-cancelled', true, activeSessionId);
         dispatchProviderSessionEvent('provider-session-complete', false, activeSessionId);
-        settleReject(new Error('WebSocket connection closed unexpectedly'));
+        settleReject(new Error('Execution cancelled: WebSocket connection closed unexpectedly'));
       }
     };
   });

@@ -171,59 +171,36 @@ nix-shell --run 'just web'
 
 ## Remaining Gaps
 
-### 1. Process Management and Cancellation (CRITICAL)
-**Problem**: The cancel endpoint is just a stub that doesn't actually terminate running Claude processes.
+### 1. Runtime Endpoint Parity (LOW)
+**Current boundary is intentional**:
+- Streaming runtime routes use `/api/provider-sessions/*` and `/ws/provider-session`.
+- Non-stream routes stay on `/api/sessions/*`:
+  - `/api/sessions/new`
+  - `/api/sessions/{sessionId}/history/{projectId}`
 
-**Current Implementation**:
-```rust
-async fn cancel_provider_session(Path(sessionId): Path<String>) -> Json<ApiResponse<()>> {
-    // Just logs - doesn't actually cancel anything
-    println!("[TRACE] Cancel request for session: {}", sessionId);
-    Json(ApiResponse::success(()))
-}
-```
-
-**Missing**:
-- Process tracking and storage in session state
-- Actual process termination via `kill()` or process handles
-- Proper cleanup of WebSocket sessions on cancellation
-- Session-specific process management
-
-### 2. WebSocket Session ID Mapping (MEDIUM)
-**Problem**: The web server generates its own session IDs but doesn't map them to the frontend's session IDs.
-
-**Current**: WebSocket handler creates `uuid::Uuid::new_v4().to_string()` but frontend passes `sessionId` in request.
-**Missing**: Proper session ID mapping and tracking.
-
-## Required Fixes for Full Functionality
-
-### Priority 1 (Critical - Breaks Core Functionality)
-
-1. **Process Management and Cancellation**
-   - Add process handle storage to AppState
-   - Implement actual process termination in `cancel_provider_session`
-   - Add proper cleanup on WebSocket disconnection
-
-### Priority 2 (High - Improves Reliability)
-
-2. **Session ID Mapping**
-   - Use frontend-provided sessionId consistently
-   - Remove UUID generation in WebSocket handler
-   - Ensure session tracking works correctly
+### 2. Stability Follow-up (OUT OF SCOPE HERE)
+The remaining work is smoke reliability and unrelated workspace-persistence flakes, which are tracked separately from this contract hardening pass.
 
 ## Implementation Notes
 
 ### Session-Scoped Events
 `apiAdapter.ts` now dispatches both generic and session-scoped `provider-session-*` events once `session_id` is known.
 
-### Process Management Fix
-The AppState should track process handles:
+### Web Runtime Session Lifecycle
+Web mode now tracks lifecycle explicitly in `AppState`:
 ```rust
 pub struct AppState {
     pub active_sessions: Arc<Mutex<HashMap<String, tokio::sync::mpsc::Sender<String>>>>,
-    pub active_processes: Arc<Mutex<HashMap<String, tokio::process::Child>>>,
+    pub active_cancellations: Arc<Mutex<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
+    pub session_aliases: Arc<Mutex<HashMap<String, String>>>,
 }
 ```
+
+Cancellation contract:
+- `/api/provider-sessions/{sessionId}/cancel` resolves `sessionId` via alias map.
+- Cancellation signal is delivered to running process loop.
+- Process loop uses `tokio::select!` on process completion vs cancel signal.
+- Completion payload is emitted once with status `success | error | cancelled`.
 
 ## Performance Considerations
 
@@ -273,10 +250,10 @@ pub struct AppState {
 2. **WebSocket Errors**: Verify server is running and accessible
 3. **Event Not Received**: Check DOM event listeners in browser console
 4. **Process Spawn Failure**: Verify project path and permissions
-5. **Session Events Not Working**: Check if session-scoped events are being dispatched (critical issue)
-6. **Cancel Button Doesn't Work**: Process cancellation not implemented yet (critical issue)
-7. **Multiple Sessions Interfere**: Generic events cause cross-session interference
-8. **Errors Not Displayed**: stderr not captured, only stdout is shown
+5. **Session Events Not Working**: Confirm `provider-session-*` scoped events are dispatched after `session_id` is resolved.
+6. **Cancel Returns Not Running**: The session may already be completed or not yet aliased from runtime `system:init`.
+7. **Concurrent Session Confusion**: Verify each session updates its own scoped channel suffix (`:${sessionId}`).
+8. **Errors Not Displayed**: Confirm `provider-session-error` events are forwarded from stderr lines.
 
 ### Debug Commands
 ```bash
@@ -294,7 +271,7 @@ tail -f server.log  # if logging to file
 
 ## Current Status
 
-The web server implementation provides **basic functionality** but has **critical issues** that prevent full feature parity with the Tauri desktop app:
+The web server implementation now provides stable provider-session contract behavior for web mode, with follow-up work focused on smoke reliability and non-contract concerns:
 
 ### ✅ Working Features
 - WebSocket-based Claude execution with streaming output
@@ -305,18 +282,13 @@ The web server implementation provides **basic functionality** but has **critica
 - Basic process spawning and output capture
 
 ### ❌ Critical Issues (Breaks Core Functionality)
-- **Session-scoped event dispatching**: Sessions interfere with each other
-- **Process cancellation**: Cancel button doesn't actually terminate processes
-- **stderr handling**: Error messages from Claude not displayed
-- **provider-session-cancelled events**: Missing cancellation event support
+- None in current provider-session contract hardening scope.
 
 ### ⚠️ Current State
-The web server is **functional for single-session use** but **not suitable for production** due to the session isolation issues. Multiple concurrent sessions will interfere with each other, and users cannot cancel running processes.
+The web server now has session alias tracking, scoped event parity, stderr forwarding, and real cancellation lifecycle for provider-session runtime paths.
 
 ### 🔧 Next Steps
-1. Fix session-scoped event dispatching (highest priority)
-2. Implement proper process management and cancellation
-3. Add stderr capture and error event emission
-4. Test with multiple concurrent sessions
+1. Keep non-stream `/api/sessions/*` endpoints unchanged while monitoring provider-session runtime behavior.
+2. Run smoke stabilization as a separate track (workspace-persistence and unrelated flakes).
 
 This implementation successfully bridges the gap between Tauri desktop and web deployment, but requires the above fixes to achieve full feature parity while adapting to browser constraints.

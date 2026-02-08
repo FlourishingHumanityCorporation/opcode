@@ -6,8 +6,7 @@ type AttentionDetail = {
   terminalTabId: string;
   title: string;
   body: string;
-  source: "provider_session" | "claude_session" | "agent_execution" | "agent_run_output";
-  sourceV2?: "provider_session" | "agent_execution" | "agent_run_output";
+  source: "provider_session" | "agent_execution" | "agent_run_output";
   timestamp: number;
 };
 
@@ -140,7 +139,7 @@ test.describe("Agent attention smoke", () => {
       terminalTabId: ids.terminalTabIds[0],
       title: "Needs input",
       body: "Please confirm whether I should proceed.",
-      source: "claude_session",
+      source: "provider_session",
       timestamp: Date.now(),
     });
 
@@ -153,7 +152,7 @@ test.describe("Agent attention smoke", () => {
       terminalTabId: ids.terminalTabIds[0],
       title: "Done",
       body: "Run completed.",
-      source: "claude_session",
+      source: "provider_session",
       timestamp: Date.now() + 10,
     });
 
@@ -172,7 +171,6 @@ test.describe("Agent attention smoke", () => {
       title: "Needs input",
       body: "Please confirm.",
       source: "provider_session",
-      sourceV2: "provider_session",
       timestamp: Date.now(),
     });
     await expect(terminalTab.locator('[aria-label="Needs input"]')).toBeVisible();
@@ -186,7 +184,6 @@ test.describe("Agent attention smoke", () => {
       title: "Done",
       body: "Run completed.",
       source: "provider_session",
-      sourceV2: "provider_session",
       timestamp: Date.now() + 10,
     });
     await expect(terminalTab.locator('[aria-label="Complete"]')).toBeVisible();
@@ -214,7 +211,6 @@ test.describe("Agent attention smoke", () => {
       title: "Done",
       body: "Terminal one complete.",
       source: "provider_session",
-      sourceV2: "provider_session",
       timestamp: Date.now(),
     });
 
@@ -224,8 +220,7 @@ test.describe("Agent attention smoke", () => {
       terminalTabId: secondTerminalId,
       title: "Needs input",
       body: "Terminal two needs a decision.",
-      source: "claude_session",
-      sourceV2: "provider_session",
+      source: "provider_session",
       timestamp: Date.now() + 10,
     });
 

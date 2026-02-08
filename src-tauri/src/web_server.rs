@@ -64,6 +64,11 @@ pub struct AppState {
     // Track active WebSocket sessions for provider-session execution.
     pub active_sessions:
         Arc<Mutex<std::collections::HashMap<String, tokio::sync::mpsc::Sender<String>>>>,
+    // Per-WebSocket-session cancellation signals for currently running provider processes.
+    pub active_cancellations:
+        Arc<Mutex<std::collections::HashMap<String, tokio::sync::watch::Sender<bool>>>>,
+    // Map provider runtime session IDs (session_id) back to WebSocket session IDs.
+    pub session_aliases: Arc<Mutex<std::collections::HashMap<String, String>>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,6 +111,54 @@ fn completion_status_for_result(result: &Result<(), String>) -> ProviderSessionC
                 ProviderSessionCompletionStatus::Error
             }
         }
+    }
+}
+
+async fn register_provider_session_alias(
+    state: &AppState,
+    provider_session_id: &str,
+    websocket_session_id: &str,
+) {
+    let trimmed = provider_session_id.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    let mut aliases = state.session_aliases.lock().await;
+    aliases.insert(trimmed.to_string(), websocket_session_id.to_string());
+}
+
+async fn resolve_websocket_session_id(
+    state: &AppState,
+    requested_session_id: &str,
+) -> Option<String> {
+    if requested_session_id.trim().is_empty() {
+        return None;
+    }
+
+    {
+        let sessions = state.active_sessions.lock().await;
+        if sessions.contains_key(requested_session_id) {
+            return Some(requested_session_id.to_string());
+        }
+    }
+
+    let aliases = state.session_aliases.lock().await;
+    aliases.get(requested_session_id).cloned()
+}
+
+async fn remove_websocket_session_state(state: &AppState, websocket_session_id: &str) {
+    {
+        let mut sessions = state.active_sessions.lock().await;
+        sessions.remove(websocket_session_id);
+    }
+    {
+        let mut cancellations = state.active_cancellations.lock().await;
+        cancellations.remove(websocket_session_id);
+    }
+    {
+        let mut aliases = state.session_aliases.lock().await;
+        aliases.retain(|_, mapped_session_id| mapped_session_id != websocket_session_id);
     }
 }
 
@@ -304,17 +357,45 @@ async fn resume_provider_session() -> Json<ApiResponse<serde_json::Value>> {
 }
 
 /// Cancel provider session execution.
-async fn cancel_provider_session(Path(sessionId): Path<String>) -> Json<ApiResponse<()>> {
-    // In web mode, we don't have a way to cancel the subprocess cleanly
-    // The WebSocket closing should handle cleanup
-    println!("[TRACE] Cancel request for session: {}", sessionId);
+async fn cancel_provider_session(
+    Path(session_id): Path<String>,
+    AxumState(state): AxumState<AppState>,
+) -> Json<ApiResponse<()>> {
+    println!("[TRACE] Cancel request for session: {}", session_id);
+
+    let Some(websocket_session_id) = resolve_websocket_session_id(&state, &session_id).await else {
+        return Json(ApiResponse::error(format!(
+            "Provider session is not running: {}",
+            session_id
+        )));
+    };
+
+    let cancellation_sender = {
+        let cancellations = state.active_cancellations.lock().await;
+        cancellations.get(&websocket_session_id).cloned()
+    };
+
+    let Some(cancellation_sender) = cancellation_sender else {
+        return Json(ApiResponse::error(format!(
+            "Provider session is not running: {}",
+            session_id
+        )));
+    };
+
+    if cancellation_sender.send(true).is_err() {
+        return Json(ApiResponse::error(format!(
+            "Provider session is not running: {}",
+            session_id
+        )));
+    }
+
     Json(ApiResponse::success(()))
 }
 
 /// Get provider session output.
-async fn get_provider_session_output(Path(sessionId): Path<String>) -> Json<ApiResponse<String>> {
+async fn get_provider_session_output(Path(session_id): Path<String>) -> Json<ApiResponse<String>> {
     // In web mode, output is streamed via WebSocket, not stored
-    println!("[TRACE] Output request for session: {}", sessionId);
+    println!("[TRACE] Output request for session: {}", session_id);
     Json(ApiResponse::success(
         "Output available via WebSocket only".to_string(),
     ))
@@ -327,11 +408,11 @@ async fn provider_session_websocket(ws: WebSocketUpgrade, AxumState(state): Axum
 
 async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
-    let session_id = uuid::Uuid::new_v4().to_string();
+    let websocket_session_id = uuid::Uuid::new_v4().to_string();
 
     println!(
         "[TRACE] WebSocket handler started - session_id: {}",
-        session_id
+        websocket_session_id
     );
 
     // Channel for sending output to WebSocket
@@ -340,7 +421,7 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
     // Store session in state
     {
         let mut sessions = state.active_sessions.lock().await;
-        sessions.insert(session_id.clone(), tx);
+        sessions.insert(websocket_session_id.clone(), tx);
         println!(
             "[TRACE] Session stored in state - active sessions count: {}",
             sessions.len()
@@ -348,7 +429,7 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
     }
 
     // Task to forward channel messages to WebSocket
-    let session_id_for_forward = session_id.clone();
+    let session_id_for_forward = websocket_session_id.clone();
     let forward_task = tokio::spawn(async move {
         println!(
             "[TRACE] Forward task started for session {}",
@@ -385,9 +466,26 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
                         println!("[TRACE] Project path: {}", request.project_path);
                         println!("[TRACE] Prompt length: {} chars", request.prompt.len());
 
+                        if request.command_type == "resume" {
+                            if let Some(provider_session_id) = request.session_id.as_deref() {
+                                register_provider_session_alias(
+                                    &state,
+                                    provider_session_id,
+                                    &websocket_session_id,
+                                )
+                                .await;
+                            }
+                        }
+
                         // Execute provider session command based on request type.
-                        let session_id_clone = session_id.clone();
+                        let websocket_session_id_clone = websocket_session_id.clone();
                         let state_clone = state.clone();
+                        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+
+                        {
+                            let mut cancellations = state.active_cancellations.lock().await;
+                            cancellations.insert(websocket_session_id_clone.clone(), cancel_tx);
+                        }
 
                         println!(
                             "[TRACE] Spawning task to execute command: {}",
@@ -402,8 +500,9 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
                                         request.project_path,
                                         request.prompt,
                                         request.model.unwrap_or_default(),
-                                        session_id_clone.clone(),
+                                        websocket_session_id_clone.clone(),
                                         state_clone.clone(),
+                                        cancel_rx.clone(),
                                     )
                                     .await
                                 }
@@ -413,8 +512,9 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
                                         request.project_path,
                                         request.prompt,
                                         request.model.unwrap_or_default(),
-                                        session_id_clone.clone(),
+                                        websocket_session_id_clone.clone(),
                                         state_clone.clone(),
+                                        cancel_rx.clone(),
                                     )
                                     .await
                                 }
@@ -425,8 +525,9 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
                                         request.session_id.unwrap_or_default(),
                                         request.prompt,
                                         request.model.unwrap_or_default(),
-                                        session_id_clone.clone(),
+                                        websocket_session_id_clone.clone(),
                                         state_clone.clone(),
+                                        cancel_rx.clone(),
                                     )
                                     .await
                                 }
@@ -445,12 +546,11 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
                             );
 
                             // Send completion message
-                            if let Some(sender) = state_clone
-                                .active_sessions
-                                .lock()
-                                .await
-                                .get(&session_id_clone)
-                            {
+                            let completion_sender = {
+                                let sessions = state_clone.active_sessions.lock().await;
+                                sessions.get(&websocket_session_id_clone).cloned()
+                            };
+                            if let Some(sender) = completion_sender {
                                 let status = completion_status_for_result(&result).as_str();
                                 let completion_msg = match result {
                                     Ok(_) => json!({
@@ -468,6 +568,9 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
                             } else {
                                 println!("[TRACE] Session not found in active sessions when sending completion");
                             }
+
+                            let mut cancellations = state_clone.active_cancellations.lock().await;
+                            cancellations.remove(&websocket_session_id_clone);
                         });
                     }
                     Err(e) => {
@@ -479,8 +582,11 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
                             "type": "error",
                             "message": format!("Failed to parse request: {}", e)
                         });
-                        if let Some(sender_tx) = state.active_sessions.lock().await.get(&session_id)
-                        {
+                        let sender_tx = {
+                            let sessions = state.active_sessions.lock().await;
+                            sessions.get(&websocket_session_id).cloned()
+                        };
+                        if let Some(sender_tx) = sender_tx {
                             let _ = sender_tx.send(error_msg.to_string()).await;
                         }
                     }
@@ -499,18 +605,27 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
     println!("[TRACE] WebSocket message loop ended");
 
     // Clean up session
+    if let Some(cancellation_sender) = state
+        .active_cancellations
+        .lock()
+        .await
+        .get(&websocket_session_id)
+        .cloned()
     {
-        let mut sessions = state.active_sessions.lock().await;
-        sessions.remove(&session_id);
-        println!(
-            "[TRACE] Session {} removed from state - remaining sessions: {}",
-            session_id,
-            sessions.len()
-        );
+        let _ = cancellation_sender.send(true);
     }
 
+    remove_websocket_session_state(&state, &websocket_session_id).await;
+    println!(
+        "[TRACE] Session {} removed from state",
+        websocket_session_id
+    );
+
     forward_task.abort();
-    println!("[TRACE] WebSocket handler ended for session {}", session_id);
+    println!(
+        "[TRACE] WebSocket handler ended for session {}",
+        websocket_session_id
+    );
 }
 
 // Provider-session command execution functions for WebSocket streaming
@@ -523,24 +638,50 @@ fn append_optional_model_arg(args: &mut Vec<String>, model: &str) {
     args.extend_from_slice(&["--model".to_string(), trimmed.to_string()]);
 }
 
-async fn stream_provider_process_output(
+fn extract_provider_session_id_from_stream_line(line: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(line).ok()?;
+    let message_type = parsed.get("type")?.as_str()?;
+    if message_type != "system" {
+        return None;
+    }
+    let subtype = parsed.get("subtype")?.as_str()?;
+    if subtype != "init" {
+        return None;
+    }
+    parsed
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn spawn_provider_process_output_tasks(
     child: &mut tokio::process::Child,
-    session_id: &str,
+    websocket_session_id: &str,
     state: &AppState,
-) -> Result<(), String> {
+) -> Result<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>), String> {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
 
-    let session_id_stdout = session_id.to_string();
+    let websocket_session_id_stdout = websocket_session_id.to_string();
     let state_stdout = state.clone();
     let stdout_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
+            if let Some(provider_session_id) = extract_provider_session_id_from_stream_line(&line) {
+                register_provider_session_alias(
+                    &state_stdout,
+                    &provider_session_id,
+                    &websocket_session_id_stdout,
+                )
+                .await;
+            }
             send_to_session(
                 &state_stdout,
-                &session_id_stdout,
+                &websocket_session_id_stdout,
                 json!({
                     "type": "output",
                     "content": line
@@ -551,14 +692,14 @@ async fn stream_provider_process_output(
         }
     });
 
-    let session_id_stderr = session_id.to_string();
+    let websocket_session_id_stderr = websocket_session_id.to_string();
     let state_stderr = state.clone();
     let stderr_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             send_to_session(
                 &state_stderr,
-                &session_id_stderr,
+                &websocket_session_id_stderr,
                 json!({
                     "type": "error",
                     "message": line
@@ -569,9 +710,49 @@ async fn stream_provider_process_output(
         }
     });
 
-    let _ = stdout_task.await;
-    let _ = stderr_task.await;
-    Ok(())
+    Ok((stdout_task, stderr_task))
+}
+
+enum ProviderProcessOutcome {
+    Exited(std::process::ExitStatus),
+    Cancelled(std::process::ExitStatus),
+}
+
+async fn wait_for_provider_process_completion(
+    child: &mut tokio::process::Child,
+    cancel_rx: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<ProviderProcessOutcome, String> {
+    loop {
+        tokio::select! {
+            wait_result = child.wait() => {
+                let exit_status = wait_result.map_err(|error| {
+                    format!("Failed to wait for provider process: {}", error)
+                })?;
+                return Ok(ProviderProcessOutcome::Exited(exit_status));
+            }
+            cancel_result = cancel_rx.changed() => {
+                if cancel_result.is_err() {
+                    continue;
+                }
+                if !*cancel_rx.borrow() {
+                    continue;
+                }
+
+                match child.kill().await {
+                    Ok(_) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {}
+                    Err(error) => {
+                        return Err(format!("Failed to cancel provider session: {}", error));
+                    }
+                }
+
+                let exit_status = child.wait().await.map_err(|error| {
+                    format!("Failed waiting for cancelled provider session: {}", error)
+                })?;
+                return Ok(ProviderProcessOutcome::Cancelled(exit_status));
+            }
+        }
+    }
 }
 
 fn map_exit_status_to_result(exit_status: std::process::ExitStatus) -> Result<(), String> {
@@ -594,8 +775,9 @@ async fn execute_provider_session_command(
     project_path: String,
     prompt: String,
     model: String,
-    session_id: String,
+    websocket_session_id: String,
     state: AppState,
+    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), String> {
     use tokio::process::Command;
 
@@ -603,13 +785,13 @@ async fn execute_provider_session_command(
     println!("[TRACE]   project_path: {}", project_path);
     println!("[TRACE]   prompt length: {} chars", prompt.len());
     println!("[TRACE]   model: {}", model);
-    println!("[TRACE]   session_id: {}", session_id);
+    println!("[TRACE]   websocket_session_id: {}", websocket_session_id);
 
     // Send initial message
     println!("[TRACE] Sending initial start message");
     send_to_session(
         &state,
-        &session_id,
+        &websocket_session_id,
         json!({
             "type": "start",
             "message": "Starting provider session..."
@@ -657,23 +839,32 @@ async fn execute_provider_session_command(
     })?;
     println!("[TRACE] Claude process spawned successfully");
 
-    println!("[TRACE] Starting to stream provider session output...");
-    stream_provider_process_output(&mut child, &session_id, &state).await?;
+    let (stdout_task, stderr_task) =
+        spawn_provider_process_output_tasks(&mut child, &websocket_session_id, &state)?;
 
-    // Wait for process to complete
-    println!("[TRACE] Waiting for Claude process to complete...");
-    let exit_status = child.wait().await.map_err(|e| {
-        let error = format!("Failed to wait for Claude: {}", e);
-        println!("[TRACE] Wait error: {}", error);
-        error
-    })?;
+    println!("[TRACE] Waiting for provider process completion or cancellation...");
+    let completion = wait_for_provider_process_completion(&mut child, &mut cancel_rx).await;
+    let _ = stdout_task.await;
+    let _ = stderr_task.await;
+    let completion = completion?;
 
-    println!(
-        "[TRACE] Claude process completed with status: {:?}",
-        exit_status
-    );
+    let result = match completion {
+        ProviderProcessOutcome::Cancelled(exit_status) => {
+            println!(
+                "[TRACE] Provider session cancelled with status: {:?}",
+                exit_status
+            );
+            Err("Provider session cancelled".to_string())
+        }
+        ProviderProcessOutcome::Exited(exit_status) => {
+            println!(
+                "[TRACE] Provider process completed with status: {:?}",
+                exit_status
+            );
+            map_exit_status_to_result(exit_status)
+        }
+    };
 
-    let result = map_exit_status_to_result(exit_status);
     if let Err(error) = &result {
         println!("[TRACE] Provider session execution failed: {}", error);
     }
@@ -685,14 +876,15 @@ async fn continue_provider_session_command(
     project_path: String,
     prompt: String,
     model: String,
-    session_id: String,
+    websocket_session_id: String,
     state: AppState,
+    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), String> {
     use tokio::process::Command;
 
     send_to_session(
         &state,
-        &session_id,
+        &websocket_session_id,
         json!({
             "type": "start",
             "message": "Continuing provider session..."
@@ -728,13 +920,16 @@ async fn continue_provider_session_command(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn Claude: {}", e))?;
-    stream_provider_process_output(&mut child, &session_id, &state).await?;
+    let (stdout_task, stderr_task) =
+        spawn_provider_process_output_tasks(&mut child, &websocket_session_id, &state)?;
+    let completion = wait_for_provider_process_completion(&mut child, &mut cancel_rx).await;
+    let _ = stdout_task.await;
+    let _ = stderr_task.await;
 
-    let exit_status = child
-        .wait()
-        .await
-        .map_err(|e| format!("Failed to wait for Claude: {}", e))?;
-    map_exit_status_to_result(exit_status)
+    match completion? {
+        ProviderProcessOutcome::Cancelled(_) => Err("Provider session cancelled".to_string()),
+        ProviderProcessOutcome::Exited(exit_status) => map_exit_status_to_result(exit_status),
+    }
 }
 
 async fn resume_provider_session_command(
@@ -742,8 +937,9 @@ async fn resume_provider_session_command(
     provider_session_id: String,
     prompt: String,
     model: String,
-    session_id: String,
+    websocket_session_id: String,
     state: AppState,
+    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), String> {
     use tokio::process::Command;
 
@@ -752,7 +948,7 @@ async fn resume_provider_session_command(
 
     send_to_session(
         &state,
-        &session_id,
+        &websocket_session_id,
         json!({
             "type": "start",
             "message": "Resuming provider session..."
@@ -804,35 +1000,42 @@ async fn resume_provider_session_command(
         error
     })?;
     println!("[resume_provider_session_command] Process spawned successfully");
-    stream_provider_process_output(&mut child, &session_id, &state).await?;
+    let (stdout_task, stderr_task) =
+        spawn_provider_process_output_tasks(&mut child, &websocket_session_id, &state)?;
+    let completion = wait_for_provider_process_completion(&mut child, &mut cancel_rx).await;
+    let _ = stdout_task.await;
+    let _ = stderr_task.await;
 
-    let exit_status = child
-        .wait()
-        .await
-        .map_err(|e| format!("Failed to wait for Claude: {}", e))?;
-    map_exit_status_to_result(exit_status)
+    match completion? {
+        ProviderProcessOutcome::Cancelled(_) => Err("Provider session cancelled".to_string()),
+        ProviderProcessOutcome::Exited(exit_status) => map_exit_status_to_result(exit_status),
+    }
 }
 
 async fn send_to_session(state: &AppState, session_id: &str, message: String) {
     println!("[TRACE] send_to_session called for session: {}", session_id);
     println!("[TRACE] Message: {}", message);
 
-    let sessions = state.active_sessions.lock().await;
-    if let Some(sender) = sessions.get(session_id) {
+    let sender = {
+        let sessions = state.active_sessions.lock().await;
+        sessions.get(session_id).cloned()
+    };
+    if let Some(sender) = sender {
         println!("[TRACE] Found session in active sessions, sending message...");
         match sender.send(message).await {
             Ok(_) => println!("[TRACE] Message sent successfully"),
             Err(e) => println!("[TRACE] Failed to send message: {}", e),
         }
     } else {
+        let active_session_ids = {
+            let sessions = state.active_sessions.lock().await;
+            sessions.keys().cloned().collect::<Vec<_>>()
+        };
         println!(
             "[TRACE] Session {} not found in active sessions",
             session_id
         );
-        println!(
-            "[TRACE] Active sessions: {:?}",
-            sessions.keys().collect::<Vec<_>>()
-        );
+        println!("[TRACE] Active sessions: {:?}", active_session_ids);
     }
 }
 
@@ -840,6 +1043,8 @@ async fn send_to_session(state: &AppState, session_id: &str, message: String) {
 pub async fn create_web_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState {
         active_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        active_cancellations: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        session_aliases: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
 
     // CORS layer to allow requests from phone browsers
