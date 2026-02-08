@@ -47,3 +47,13 @@ export interface DetectedProvider {
   version: string | null;
   source: string;
 }
+
+export type ProviderSessionCompletionStatus = "success" | "error" | "cancelled";
+
+export interface ProviderSessionCompletionPayload {
+  status: ProviderSessionCompletionStatus;
+  success: boolean;
+  error?: string;
+  sessionId?: string;
+  providerId?: string;
+}

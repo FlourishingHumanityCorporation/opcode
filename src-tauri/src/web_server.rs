@@ -147,6 +147,22 @@ async fn resolve_websocket_session_id(
     aliases.get(requested_session_id).cloned()
 }
 
+async fn resolve_provider_session_id_for_websocket(
+    state: &AppState,
+    websocket_session_id: &str,
+) -> Option<String> {
+    let aliases = state.session_aliases.lock().await;
+    aliases
+        .iter()
+        .find_map(|(provider_session_id, mapped_websocket_session_id)| {
+            if mapped_websocket_session_id == websocket_session_id {
+                Some(provider_session_id.clone())
+            } else {
+                None
+            }
+        })
+}
+
 async fn remove_websocket_session_state(state: &AppState, websocket_session_id: &str) {
     {
         let mut sessions = state.active_sessions.lock().await;
@@ -493,6 +509,7 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
                         );
                         tokio::spawn(async move {
                             println!("[TRACE] Task started for command execution");
+                            let request_session_id = request.session_id.clone();
                             let result = match request.command_type.as_str() {
                                 "execute" => {
                                     println!("[TRACE] Calling execute_provider_session_command");
@@ -552,15 +569,30 @@ async fn provider_session_websocket_handler(socket: WebSocket, state: AppState) 
                             };
                             if let Some(sender) = completion_sender {
                                 let status = completion_status_for_result(&result).as_str();
+                                let completion_session_id =
+                                    resolve_provider_session_id_for_websocket(
+                                        &state_clone,
+                                        &websocket_session_id_clone,
+                                    )
+                                    .await
+                                    .or_else(|| {
+                                        request_session_id
+                                            .as_deref()
+                                            .map(str::trim)
+                                            .filter(|value| !value.is_empty())
+                                            .map(ToOwned::to_owned)
+                                    });
                                 let completion_msg = match result {
                                     Ok(_) => json!({
                                         "type": "completion",
-                                        "status": status
+                                        "status": status,
+                                        "session_id": completion_session_id
                                     }),
                                     Err(e) => json!({
                                         "type": "completion",
                                         "status": status,
-                                        "error": e
+                                        "error": e,
+                                        "session_id": completion_session_id
                                     }),
                                 };
                                 println!("[TRACE] Sending completion message: {}", completion_msg);

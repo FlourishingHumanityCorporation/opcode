@@ -21,17 +21,20 @@ use commands::agents::{
 };
 use commands::claude::{
     check_auto_checkpoint, check_claude_version, cleanup_old_checkpoints,
-    clear_checkpoint_manager, continue_agent_session, create_checkpoint,
-    create_project, execute_agent_session, find_claude_md_files,
+    clear_checkpoint_manager, create_checkpoint,
+    create_project, find_claude_md_files,
     fork_from_checkpoint, get_checkpoint_diff, get_checkpoint_settings,
     get_checkpoint_state_stats, get_claude_settings,
     get_home_directory, get_hooks_config, get_project_sessions, get_recently_modified_files,
     get_session_timeline, get_system_prompt, list_checkpoints, list_detected_agents,
     list_directory_contents, list_projects, load_session_history,
-    open_new_session, read_claude_md_file, restore_checkpoint, resume_agent_session,
+    open_new_session, read_claude_md_file, restore_checkpoint,
     save_claude_md_file, save_clipboard_image_attachment, save_claude_settings, save_system_prompt,
     search_files, track_checkpoint_message, track_session_messages, update_checkpoint_settings,
     update_hooks_config, validate_hook_command,
+};
+use commands::agent_session::{
+    continue_agent_session, execute_agent_session, resume_agent_session,
 };
 use commands::provider_session::{
     cancel_provider_session, continue_provider_session, execute_provider_session,

@@ -1,5 +1,6 @@
 use std::process::Stdio;
 use std::sync::Arc;
+use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex as TokioMutex;
@@ -15,6 +16,49 @@ impl Default for ProviderSessionProcessState {
             current_process: Arc::new(TokioMutex::new(None)),
         }
     }
+}
+
+fn build_provider_session_completion_payload(
+    status: &str,
+    session_id: Option<&str>,
+    provider_id: Option<&str>,
+    error: Option<&str>,
+) -> serde_json::Value {
+    let mut payload = json!({
+        "status": status,
+        "success": status == "success",
+    });
+
+    if let Some(session_id) = session_id {
+        payload["sessionId"] = json!(session_id);
+    }
+    if let Some(provider_id) = provider_id {
+        payload["providerId"] = json!(provider_id);
+    }
+    if let Some(error) = error {
+        payload["error"] = json!(error);
+    }
+
+    payload
+}
+
+fn completion_status_from_exit_status(exit_status: std::process::ExitStatus) -> (&'static str, Option<String>) {
+    if exit_status.success() {
+        return ("success", None);
+    }
+
+    let code = exit_status.code();
+    if matches!(code, Some(130) | Some(143)) {
+        return ("cancelled", None);
+    }
+
+    (
+        "error",
+        Some(format!(
+            "Provider session process exited with status: {}",
+            exit_status
+        )),
+    )
 }
 
 /// Helper function to create a tokio Command with proper environment variables.
@@ -314,16 +358,31 @@ pub async fn cancel_provider_session(
     }
 
     // Always emit cancellation events for UI consistency
-    if let Some(sid) = session_id {
+    if let Some(sid) = session_id.as_deref() {
+        let scoped_completion_payload = build_provider_session_completion_payload(
+            "cancelled",
+            Some(sid),
+            Some("claude"),
+            None,
+        );
         let _ = app.emit(&format!("provider-session-cancelled:{}", sid), true);
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        let _ = app.emit(&format!("provider-session-complete:{}", sid), false);
+        let _ = app.emit(
+            &format!("provider-session-complete:{}", sid),
+            scoped_completion_payload,
+        );
     }
 
     // Also emit generic events for backward compatibility
+    let generic_completion_payload = build_provider_session_completion_payload(
+        "cancelled",
+        session_id.as_deref(),
+        Some("claude"),
+        None,
+    );
     let _ = app.emit("provider-session-cancelled", true);
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    let _ = app.emit("provider-session-complete", false);
+    let _ = app.emit("provider-session-complete", generic_completion_payload);
 
     if killed {
         log::info!("Provider session cancellation completed successfully");
@@ -496,27 +555,66 @@ async fn spawn_provider_session_process(
             match child.wait().await {
                 Ok(status) => {
                     log::info!("Provider session process exited with status: {}", status);
+                    let (completion_status, completion_error) = completion_status_from_exit_status(status);
                     // Small delay to ensure all messages are processed
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     if let Some(ref session_id) = *session_id_holder_clone3.lock().unwrap() {
+                        let scoped_completion_payload = build_provider_session_completion_payload(
+                            completion_status,
+                            Some(session_id),
+                            Some("claude"),
+                            completion_error.as_deref(),
+                        );
+                        if completion_status == "cancelled" {
+                            let _ = app_handle_wait
+                                .emit(&format!("provider-session-cancelled:{}", session_id), true);
+                        }
                         let _ = app_handle_wait.emit(
                             &format!("provider-session-complete:{}", session_id),
-                            status.success(),
+                            scoped_completion_payload,
                         );
                     }
+                    if completion_status == "cancelled" {
+                        let _ = app_handle_wait.emit("provider-session-cancelled", true);
+                    }
                     // Also emit generic event for compatibility
-                    let _ = app_handle_wait.emit("provider-session-complete", status.success());
+                    let generic_completion_payload = build_provider_session_completion_payload(
+                        completion_status,
+                        session_id_holder_clone3
+                            .lock()
+                            .unwrap()
+                            .as_deref(),
+                        Some("claude"),
+                        completion_error.as_deref(),
+                    );
+                    let _ = app_handle_wait.emit("provider-session-complete", generic_completion_payload);
                 }
                 Err(e) => {
                     log::error!("Failed to wait for provider session process: {}", e);
+                    let error_message = format!("Failed to wait for provider session process: {}", e);
                     // Small delay to ensure all messages are processed
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     if let Some(ref session_id) = *session_id_holder_clone3.lock().unwrap() {
+                        let scoped_completion_payload = build_provider_session_completion_payload(
+                            "error",
+                            Some(session_id),
+                            Some("claude"),
+                            Some(&error_message),
+                        );
                         let _ = app_handle_wait
-                            .emit(&format!("provider-session-complete:{}", session_id), false);
+                            .emit(&format!("provider-session-complete:{}", session_id), scoped_completion_payload);
                     }
                     // Also emit generic event for compatibility
-                    let _ = app_handle_wait.emit("provider-session-complete", false);
+                    let generic_completion_payload = build_provider_session_completion_payload(
+                        "error",
+                        session_id_holder_clone3
+                            .lock()
+                            .unwrap()
+                            .as_deref(),
+                        Some("claude"),
+                        Some(&error_message),
+                    );
+                    let _ = app_handle_wait.emit("provider-session-complete", generic_completion_payload);
                 }
             }
         }

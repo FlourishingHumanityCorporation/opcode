@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod agent_session;
 pub mod claude;
 pub mod provider_session;
 pub mod codex_transform;

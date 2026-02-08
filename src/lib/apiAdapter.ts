@@ -68,6 +68,74 @@ interface ApiResponse<T> {
   error?: string;
 }
 
+type ProviderSessionCompletionStatus = 'success' | 'error' | 'cancelled';
+
+interface ProviderSessionCompletionPayload {
+  status: ProviderSessionCompletionStatus;
+  success: boolean;
+  error?: string;
+  sessionId?: string;
+  providerId?: string;
+}
+
+function normalizeProviderSessionCompletionPayload(detail: unknown): ProviderSessionCompletionPayload {
+  if (typeof detail === 'boolean') {
+    return {
+      status: detail ? 'success' : 'error',
+      success: detail,
+    };
+  }
+
+  if (!detail || typeof detail !== 'object') {
+    return {
+      status: 'error',
+      success: false,
+    };
+  }
+
+  const payload = detail as Record<string, unknown>;
+  const rawStatus = payload.status;
+  const rawSuccess = payload.success;
+  const error = typeof payload.error === 'string'
+    ? payload.error
+    : typeof payload.message === 'string'
+      ? payload.message
+      : undefined;
+
+  let status: ProviderSessionCompletionStatus;
+  if (rawStatus === 'success' || rawStatus === 'error' || rawStatus === 'cancelled') {
+    status = rawStatus;
+  } else if (typeof rawSuccess === 'boolean') {
+    status = rawSuccess ? 'success' : 'error';
+  } else if (typeof error === 'string' && /cancelled|canceled|interrupted/i.test(error)) {
+    status = 'cancelled';
+  } else {
+    status = 'error';
+  }
+
+  const success = status === 'success';
+  const sessionId =
+    typeof payload.sessionId === 'string'
+      ? payload.sessionId
+      : typeof payload.session_id === 'string'
+        ? payload.session_id
+        : undefined;
+  const providerId =
+    typeof payload.providerId === 'string'
+      ? payload.providerId
+      : typeof payload.provider_id === 'string'
+        ? payload.provider_id
+        : undefined;
+
+  return {
+    status,
+    success,
+    ...(error ? { error } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(providerId ? { providerId } : {}),
+  };
+}
+
 /**
  * Make a REST API call to our web server
  */
@@ -409,18 +477,20 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
         } else if (message.type === 'completion') {
           debugLog(`[TRACE] Completion message:`, message);
           maybeUpdateActiveSessionId(message);
-          const completionStatus = message.status === 'cancelled'
-            ? 'cancelled'
-            : message.status === 'success'
-              ? 'success'
-              : 'error';
+          const completion = normalizeProviderSessionCompletionPayload({
+            status: message.status,
+            success: message.status === 'success',
+            error: message.error,
+            session_id: activeSessionId,
+          });
+          const completionStatus = completion.status;
           
           if (completionStatus === 'cancelled') {
             dispatchProviderSessionEvent('provider-session-cancelled', true, activeSessionId);
           }
           dispatchProviderSessionEvent(
             'provider-session-complete',
-            completionStatus === 'success',
+            completion,
             activeSessionId
           );
           
@@ -472,7 +542,16 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
       // If connection closed unexpectedly (not a normal close), dispatch cancelled event
       if (event.code !== 1000 && event.code !== 1001) {
         dispatchProviderSessionEvent('provider-session-cancelled', true, activeSessionId);
-        dispatchProviderSessionEvent('provider-session-complete', false, activeSessionId);
+        dispatchProviderSessionEvent(
+          'provider-session-complete',
+          {
+            status: 'cancelled',
+            success: false,
+            error: 'Execution cancelled: WebSocket connection closed unexpectedly',
+            ...(activeSessionId ? { sessionId: activeSessionId } : {}),
+          } as ProviderSessionCompletionPayload,
+          activeSessionId
+        );
         settleReject(new Error('Execution cancelled: WebSocket connection closed unexpectedly'));
       }
     };

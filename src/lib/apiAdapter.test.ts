@@ -148,8 +148,12 @@ describe("apiAdapter provider-session mappings", () => {
     await expect(callPromise).resolves.toEqual({});
     expect(outputEvents).toEqual([streamMessage]);
     expect(scopedOutputEvents).toEqual([streamMessage]);
-    expect(completeEvents).toEqual([true]);
-    expect(scopedCompleteEvents).toEqual([true]);
+    expect(completeEvents).toEqual([
+      { status: "success", success: true, sessionId: "session-123" },
+    ]);
+    expect(scopedCompleteEvents).toEqual([
+      { status: "success", success: true, sessionId: "session-123" },
+    ]);
     expect(legacyOutputEvents).toHaveLength(0);
   });
 
@@ -207,7 +211,9 @@ describe("apiAdapter provider-session mappings", () => {
     await expect(callPromise).rejects.toThrow("Execution cancelled");
     expect(cancelledEvents).toEqual([true]);
     expect(scopedCancelledEvents).toEqual([true]);
-    expect(completeEvents).toEqual([false]);
+    expect(completeEvents).toEqual([
+      { status: "cancelled", success: false, sessionId: "session-123" },
+    ]);
   });
 
   it("switches scoped events to streamed session_id when it differs from the request", async () => {
@@ -261,7 +267,9 @@ describe("apiAdapter provider-session mappings", () => {
     await expect(callPromise).resolves.toEqual({});
     expect(requestScopedOutputEvents).toHaveLength(0);
     expect(streamedScopedOutputEvents).toHaveLength(2);
-    expect(streamedScopedCompleteEvents).toEqual([true]);
+    expect(streamedScopedCompleteEvents).toEqual([
+      { status: "success", success: true, sessionId: "runtime-session-456" },
+    ]);
   });
 
   it("dispatches provider-session-cancelled on abnormal websocket close", async () => {
@@ -297,6 +305,13 @@ describe("apiAdapter provider-session mappings", () => {
     );
     expect(cancelledEvents).toEqual([true]);
     expect(scopedCancelledEvents).toEqual([true]);
-    expect(completeEvents).toEqual([false]);
+    expect(completeEvents).toEqual([
+      {
+        status: "cancelled",
+        success: false,
+        error: "Execution cancelled: WebSocket connection closed unexpectedly",
+        sessionId: "session-abc",
+      },
+    ]);
   });
 });

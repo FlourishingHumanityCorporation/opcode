@@ -32,8 +32,10 @@ function debugLog(...args: unknown[]) {
 
 import {
   listenToProviderSessionEvent as listen,
+  normalizeProviderSessionCompletion,
   type UnlistenFn,
 } from "./provider-session-pane/sessionEventBus";
+import type { ProviderSessionCompletionPayload } from "./provider-session-pane/types";
 import { StreamMessage } from "./StreamMessage";
 import {
   FloatingPromptInput,
@@ -1551,7 +1553,9 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         }
 
         // Helper to handle completion events (both generic and scoped)
-        const processComplete = async (success: boolean) => {
+        const processComplete = async (detail: boolean | ProviderSessionCompletionPayload) => {
+          const completion = normalizeProviderSessionCompletion(detail);
+          const { status, success } = completion;
           clearStreamWatchdogs();
           setIsLoading(false);
           hasActiveSessionRef.current = false;
@@ -1571,6 +1575,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
             category: 'stream_watchdog',
             action: 'stream_complete',
             payload: {
+              status,
               success,
               providerId: providerToUse,
             },
@@ -1627,8 +1632,8 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
               agent_success: success,
               
               // Stop context
-              stop_source: 'completed',
-              final_state: success ? 'success' : 'failed',
+              stop_source: success ? 'completed' : 'error',
+              final_state: success ? 'success' : status === 'cancelled' ? 'cancelled' : 'failed',
               has_pending_prompts: queuedPrompts.length > 0,
               pending_prompts_count: queuedPrompts.length,
             });
