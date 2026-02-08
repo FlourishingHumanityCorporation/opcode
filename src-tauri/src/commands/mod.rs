@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod claude;
+pub mod provider_session;
 pub mod codex_transform;
 pub mod diagnostics;
 pub mod mcp;

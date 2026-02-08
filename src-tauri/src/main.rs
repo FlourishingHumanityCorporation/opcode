@@ -20,18 +20,23 @@ use commands::agents::{
     stream_session_output, update_agent, AgentDb,
 };
 use commands::claude::{
-    cancel_provider_session, check_auto_checkpoint, check_claude_version, cleanup_old_checkpoints,
-    clear_checkpoint_manager, continue_agent_session, continue_provider_session, create_checkpoint,
-    create_project, execute_agent_session, execute_provider_session, find_claude_md_files,
+    check_auto_checkpoint, check_claude_version, cleanup_old_checkpoints,
+    clear_checkpoint_manager, continue_agent_session, create_checkpoint,
+    create_project, execute_agent_session, find_claude_md_files,
     fork_from_checkpoint, get_checkpoint_diff, get_checkpoint_settings,
-    get_checkpoint_state_stats, get_provider_session_output, get_claude_settings,
+    get_checkpoint_state_stats, get_claude_settings,
     get_home_directory, get_hooks_config, get_project_sessions, get_recently_modified_files,
     get_session_timeline, get_system_prompt, list_checkpoints, list_detected_agents,
-    list_directory_contents, list_projects, list_running_provider_sessions, load_session_history,
+    list_directory_contents, list_projects, load_session_history,
     open_new_session, read_claude_md_file, restore_checkpoint, resume_agent_session,
-    resume_provider_session, save_claude_md_file, save_clipboard_image_attachment, save_claude_settings, save_system_prompt,
+    save_claude_md_file, save_clipboard_image_attachment, save_claude_settings, save_system_prompt,
     search_files, track_checkpoint_message, track_session_messages, update_checkpoint_settings,
-    update_hooks_config, validate_hook_command, ClaudeProcessState,
+    update_hooks_config, validate_hook_command,
+};
+use commands::provider_session::{
+    cancel_provider_session, continue_provider_session, execute_provider_session,
+    get_provider_session_output, list_running_provider_sessions, resume_provider_session,
+    ProviderSessionProcessState,
 };
 use commands::diagnostics::{open_external_terminal, run_session_startup_probe};
 use commands::mcp::{
@@ -158,8 +163,8 @@ fn main() {
             app.manage(ProcessRegistryState::default());
             app.manage(EmbeddedTerminalState::default());
 
-            // Initialize Claude process state
-            app.manage(ClaudeProcessState::default());
+            // Initialize provider session process state
+            app.manage(ProviderSessionProcessState::default());
             app.manage(UsageIndexState::default());
 
             // Apply window vibrancy with rounded corners on macOS
