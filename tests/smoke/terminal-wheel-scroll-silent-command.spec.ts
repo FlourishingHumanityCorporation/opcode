@@ -185,6 +185,46 @@ async function moveMouseToScreen(page: Page, screen: Locator, verticalRatio = 0.
   await page.mouse.move(x, y);
 }
 
+async function clearTerminalFrontendEvents(page: Page) {
+  await page.evaluate(async () => {
+    const diagnostics = await import("/src/services/terminalHangDiagnostics.ts");
+    diagnostics.clearTerminalEventSnapshot();
+  });
+}
+
+async function getTerminalFrontendEventNames(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const diagnostics = await import("/src/services/terminalHangDiagnostics.ts");
+    return diagnostics.getTerminalEventSnapshot().map((event) => event.event);
+  });
+}
+
+async function installScreenWheelBlocker(screen: Locator) {
+  await screen.evaluate((screenNode) => {
+    const blocker = (event: WheelEvent) => {
+      event.stopPropagation();
+      event.preventDefault();
+    };
+    (screenNode as any).__opcodeSmokeWheelBlocker = blocker;
+    screenNode.addEventListener("wheel", blocker, {
+      capture: true,
+      passive: false,
+    });
+  });
+}
+
+async function removeScreenWheelBlocker(screen: Locator) {
+  await screen.evaluate((screenNode) => {
+    const blocker = (screenNode as any).__opcodeSmokeWheelBlocker as
+      | ((event: WheelEvent) => void)
+      | undefined;
+    if (blocker) {
+      screenNode.removeEventListener("wheel", blocker, true);
+      delete (screenNode as any).__opcodeSmokeWheelBlocker;
+    }
+  });
+}
+
 async function assertWheelScrollWorksWhileSilentCommand(params: {
   page: Page;
   paneRoot: Locator;
@@ -321,5 +361,51 @@ test.describe("Terminal wheel scroll smoke", () => {
       screen,
       telemetry,
     });
+  });
+
+  test("single-pane: emits fallback telemetry when native wheel handling is blocked", async ({
+    page,
+  }) => {
+    const telemetry: TerminalTelemetry = {
+      startedTerminalIds: [],
+      writes: [],
+    };
+
+    await setupTerminalApiMock(page, telemetry);
+    await page.addInitScript(() => {
+      localStorage.removeItem("opcode_workspace_v3");
+      localStorage.removeItem("opcode_tabs_v2");
+      localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+      localStorage.setItem("native_terminal_mode", "true");
+      localStorage.setItem("app_setting:native_terminal_mode", "true");
+    });
+
+    await bootstrapWorkspaceWithNativeTerminal(page);
+    await expect.poll(() => telemetry.startedTerminalIds.length).toBeGreaterThan(0);
+    const terminalId = telemetry.startedTerminalIds[telemetry.startedTerminalIds.length - 1];
+
+    await seedTerminalOutput(page, terminalId);
+
+    const pane = page.locator('[data-testid^="workspace-pane-"]:visible').first();
+    const screen = pane.locator(".xterm-screen").first();
+    await expect(screen).toBeVisible();
+
+    await clearTerminalFrontendEvents(page);
+    await installScreenWheelBlocker(screen);
+
+    try {
+      await moveMouseToScreen(page, screen, 0.5);
+      await page.mouse.wheel(0, -900);
+      await page.mouse.wheel(0, -900);
+
+      await expect
+        .poll(async () => {
+          const events = await getTerminalFrontendEventNames(page);
+          return events.filter((event) => event === "wheel_fallback_scroll").length;
+        })
+        .toBeGreaterThan(0);
+    } finally {
+      await removeScreenWheelBlocker(screen);
+    }
   });
 });

@@ -24,6 +24,7 @@ import {
   encodeTerminalKeyInput,
   focusTerminalIfInteractive,
   getTerminalTextarea,
+  normalizeWheelDeltaToScrollLines,
   shouldRouteKeyboardFallbackInput,
 } from "@/components/embedded-terminal/input";
 import {
@@ -68,6 +69,7 @@ const WRITE_FAILURE_SIGNAL_WINDOW_MS = 12_000;
 const STALE_RECOVERY_STAGE2_GRACE_MS = 900;
 const RECOVERY_NOTICE_AUTO_CLEAR_MS = 2_400;
 const WHEEL_OBSERVATION_THROTTLE_MS = 1_000;
+const VIEWPORT_SCROLL_EPSILON_PX = 0.5;
 
 export interface StaleRecoveryFailureSignals {
   windowStartedAt: number;
@@ -116,20 +118,126 @@ export type WheelEventTargetClassification =
   | "xterm-helper-textarea"
   | "other";
 
+interface TerminalBufferScrollState {
+  ybase: number | null;
+  ydisp: number | null;
+}
+
+interface WheelFallbackDecisionInput {
+  eventTarget: WheelEventTargetClassification;
+  isInteractive: boolean;
+  isRunning: boolean;
+  viewportBeforeTop: number | null;
+  viewportAfterTop: number | null;
+  bufferBefore: TerminalBufferScrollState;
+  bufferAfter: TerminalBufferScrollState;
+}
+
+export function shouldApplyWheelScrollFallback({
+  eventTarget,
+  isInteractive,
+  isRunning,
+  viewportBeforeTop,
+  viewportAfterTop,
+  bufferBefore,
+  bufferAfter,
+}: WheelFallbackDecisionInput): boolean {
+  if (!isInteractive || !isRunning || eventTarget === "other") {
+    return false;
+  }
+
+  const hasViewportMeasurement = viewportBeforeTop !== null && viewportAfterTop !== null;
+  const hasBufferMeasurement = bufferBefore.ydisp !== null && bufferAfter.ydisp !== null;
+  if (!hasViewportMeasurement && !hasBufferMeasurement) {
+    return false;
+  }
+
+  const viewportMoved =
+    hasViewportMeasurement &&
+    Math.abs((viewportAfterTop as number) - (viewportBeforeTop as number)) >=
+      VIEWPORT_SCROLL_EPSILON_PX;
+  const bufferMoved =
+    hasBufferMeasurement && (bufferBefore.ydisp as number) !== (bufferAfter.ydisp as number);
+
+  return !viewportMoved && !bufferMoved;
+}
+
+export function clampWheelScrollLinesToBuffer(
+  lines: number,
+  bufferState: TerminalBufferScrollState
+): number {
+  if (!Number.isFinite(lines) || lines === 0) {
+    return 0;
+  }
+
+  const roundedLines = lines < 0 ? Math.ceil(lines) : Math.floor(lines);
+  if (roundedLines === 0) {
+    return 0;
+  }
+
+  if (bufferState.ybase === null || bufferState.ydisp === null) {
+    return roundedLines;
+  }
+
+  const ybase = Math.max(0, bufferState.ybase);
+  const ydisp = Math.max(0, Math.min(ybase, bufferState.ydisp));
+
+  if (roundedLines < 0) {
+    const maxScrollUp = ydisp;
+    if (maxScrollUp <= 0) {
+      return 0;
+    }
+    return -Math.min(Math.abs(roundedLines), maxScrollUp);
+  }
+
+  const maxScrollDown = Math.max(0, ybase - ydisp);
+  if (maxScrollDown <= 0) {
+    return 0;
+  }
+  return Math.min(roundedLines, maxScrollDown);
+}
+
+function getViewportScrollTop(container: Element | null): number | null {
+  if (!container) {
+    return null;
+  }
+  const viewport = container.querySelector(".xterm-viewport");
+  return viewport instanceof HTMLElement ? viewport.scrollTop : null;
+}
+
+function getTerminalBufferScrollState(terminal: XTerm | null): TerminalBufferScrollState {
+  const activeBuffer = (terminal as unknown as { buffer?: { active?: { ybase?: unknown; ydisp?: unknown } } })
+    ?.buffer?.active;
+  const ybase = typeof activeBuffer?.ybase === "number" ? activeBuffer.ybase : null;
+  const ydisp = typeof activeBuffer?.ydisp === "number" ? activeBuffer.ydisp : null;
+  return { ybase, ydisp };
+}
+
+function resolveWheelTargetElement(target: EventTarget | null): Element | null {
+  if (target instanceof Element) {
+    return target;
+  }
+  if (target instanceof Node) {
+    return target.parentElement;
+  }
+  return null;
+}
+
 export function classifyWheelEventTarget(target: EventTarget | null): WheelEventTargetClassification {
-  if (!(target instanceof Element)) {
+  const element = resolveWheelTargetElement(target);
+  if (!element) {
     return "other";
   }
-  if (target.closest(".xterm-screen")) {
+  if (element.closest(".xterm-screen, .xterm-rows")) {
     return "xterm-screen";
   }
-  if (target.closest(".xterm-viewport")) {
+  if (element.closest(".xterm-viewport")) {
     return "xterm-viewport";
   }
-  if (target.closest(".xterm-scrollable-element")) {
+  if (element.closest(".xterm-scrollable-element")) {
     return "xterm-scrollable";
   }
-  if (target.classList.contains("xterm-helper-textarea")) {
+  if (element.classList.contains("xterm-helper-textarea")) {
     return "xterm-helper-textarea";
   }
   return "other";
@@ -201,6 +309,7 @@ export function useEmbeddedTerminalController({
   const isRunningRef = useRef(false);
   const staleRecoveryPendingRef = useRef(false);
   const softReattachPendingRef = useRef(false);
+  const wheelScrollRemainderRef = useRef(0);
   const lastInputAttemptAtRef = useRef<number | null>(null);
   const lastOutputAtRef = useRef<number | null>(Date.now());
   const lastStaleRecoveryAtRef = useRef(0);
@@ -653,6 +762,15 @@ export function useEmbeddedTerminalController({
       return true;
     };
 
+    const waitForAnimationFrame = async (): Promise<void> =>
+      new Promise((resolve) => {
+        if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+          window.requestAnimationFrame(() => resolve());
+          return;
+        }
+        setTimeout(() => resolve(), 0);
+      });
+
     const start = async () => {
       setIsStarting(true);
       setError(null);
@@ -686,20 +804,87 @@ export function useEmbeddedTerminalController({
       term.open(containerRef.current);
       const wheelObservationContainer = containerRef.current;
       const observeWheel = (event: WheelEvent) => {
+        const eventTarget = classifyWheelEventTarget(event.target);
         const now = Date.now();
         if (now - lastWheelObservationAt < WHEEL_OBSERVATION_THROTTLE_MS) {
+          // Continue to fallback logic; only telemetry emit is throttled.
+        } else {
+          lastWheelObservationAt = now;
+          emitTerminalEvent("wheel_observed", {
+            deltaY: event.deltaY,
+            deltaMode: event.deltaMode,
+            isInteractive: isInteractiveRef.current,
+            eventTarget,
+          });
+        }
+
+        if (eventTarget === "other" || !isInteractiveRef.current || !isRunningRef.current) {
           return;
         }
-        lastWheelObservationAt = now;
-        emitTerminalEvent("wheel_observed", {
-          deltaY: event.deltaY,
-          deltaMode: event.deltaMode,
-          isInteractive: isInteractiveRef.current,
-          eventTarget: classifyWheelEventTarget(event.target),
+        if (event.cancelable) {
+          event.preventDefault();
+        }
+
+        const terminalForWheel = terminalInstance;
+        if (!terminalForWheel) {
+          return;
+        }
+
+        const viewportBeforeTop = getViewportScrollTop(wheelObservationContainer);
+        const bufferBefore = getTerminalBufferScrollState(terminalForWheel);
+
+        window.requestAnimationFrame(() => {
+          if (!isCurrentStartup()) {
+            return;
+          }
+          const activeTerminal = terminalInstance;
+          if (!activeTerminal || !isInteractiveRef.current || !isRunningRef.current) {
+            return;
+          }
+
+          const viewportAfterTop = getViewportScrollTop(wheelObservationContainer);
+          const bufferAfter = getTerminalBufferScrollState(activeTerminal);
+          const shouldFallback = shouldApplyWheelScrollFallback({
+            eventTarget,
+            isInteractive: isInteractiveRef.current,
+            isRunning: isRunningRef.current,
+            viewportBeforeTop,
+            viewportAfterTop,
+            bufferBefore,
+            bufferAfter,
+          });
+          if (!shouldFallback) {
+            return;
+          }
+
+          const { lines, remainder } = normalizeWheelDeltaToScrollLines({
+            deltaMode: event.deltaMode,
+            deltaY: event.deltaY,
+            rows: activeTerminal.rows,
+            remainder: wheelScrollRemainderRef.current,
+          });
+          wheelScrollRemainderRef.current = remainder;
+
+          if (lines === 0) {
+            return;
+          }
+
+          const clampedLines = clampWheelScrollLinesToBuffer(lines, bufferAfter);
+          if (clampedLines === 0) {
+            return;
+          }
+
+          activeTerminal.scrollLines(clampedLines);
+          emitTerminalEvent("wheel_fallback_scroll", {
+            deltaY: event.deltaY,
+            deltaMode: event.deltaMode,
+            eventTarget,
+            lines: clampedLines,
+          });
         });
       };
       wheelObservationContainer.addEventListener("wheel", observeWheel, {
-        passive: true,
+        passive: false,
         capture: true,
       });
       wheelObservationCleanup = () => {
@@ -707,11 +892,20 @@ export function useEmbeddedTerminalController({
       };
 
       fitAddon.fit();
+      await waitForAnimationFrame();
+      if (isCurrentStartup()) {
+        fitAddon.fit();
+      }
+      await waitForAnimationFrame();
+      if (isCurrentStartup()) {
+        fitAddon.fit();
+      }
       applyTerminalInteractivity(term as unknown as InteractiveTerminal, isInteractiveRef.current);
 
       terminalRef.current = term;
       fitAddonRef.current = fitAddon;
       terminalInstance = term;
+      wheelScrollRemainderRef.current = 0;
 
       try {
         const previousTerminalId = existingTerminalIdRef.current;
@@ -814,6 +1008,7 @@ export function useEmbeddedTerminalController({
       }
       terminalRef.current = null;
       fitAddonRef.current = null;
+      wheelScrollRemainderRef.current = 0;
     };
   }, [
     projectPath,
@@ -998,6 +1193,7 @@ export function useEmbeddedTerminalController({
 
   useEffect(() => {
     if (!isRunning || !isInteractive) {
+      wheelScrollRemainderRef.current = 0;
       return;
     }
 

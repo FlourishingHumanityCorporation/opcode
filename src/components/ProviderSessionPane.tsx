@@ -2500,18 +2500,20 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     }
 
     return (
-      <EmbeddedTerminal
-        projectPath={projectPath}
-        autoRunCommand={nativeTerminalCommand}
-        existingTerminalId={embeddedTerminalId}
-        persistentSessionId={persistentTerminalSessionId}
-        onTerminalIdChange={onEmbeddedTerminalIdChange}
-        isInteractive={isPaneVisible && isPaneActive}
-        workspaceId={workspaceId}
-        terminalTabId={terminalTabId}
-        paneId={paneId}
-        className="min-h-0 flex-1"
-      />
+      <div className="min-h-0 flex-1 pb-12">
+        <EmbeddedTerminal
+          projectPath={projectPath}
+          autoRunCommand={nativeTerminalCommand}
+          existingTerminalId={embeddedTerminalId}
+          persistentSessionId={persistentTerminalSessionId}
+          onTerminalIdChange={onEmbeddedTerminalIdChange}
+          isInteractive={isPaneVisible && isPaneActive}
+          workspaceId={workspaceId}
+          terminalTabId={terminalTabId}
+          paneId={paneId}
+          className="h-full min-h-0"
+        />
+      </div>
     );
   })();
 
@@ -2647,7 +2649,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
             // Split pane layout when preview is active
             <SplitPane
               left={
-                <div className="h-full flex flex-col">
+                <div className="h-full min-h-0 flex flex-col">
                   {projectPathInput}
                   {nativeTerminalMode
                     ? nativeTerminalPanel
@@ -2673,7 +2675,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
             />
           ) : (
             // Original layout when no preview
-            <div className={cn("h-full flex flex-col", embedded ? "workspace-chrome-row" : "max-w-6xl mx-auto px-6")}>
+            <div className={cn("h-full min-h-0 flex flex-col", embedded ? "workspace-chrome-row" : "max-w-6xl mx-auto px-6")}>
               {projectPathInput}
               {nativeTerminalMode
                 ? nativeTerminalPanel
