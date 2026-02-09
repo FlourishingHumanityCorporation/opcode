@@ -1,22 +1,41 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
+import type { ActionUiRecord } from '../actions/actionExecution';
 import type { MirrorState } from '../store/syncStore';
+import { resolveWorkspaceActionDisabledReason } from './actionGuards';
 
 interface WorkspaceScreenProps {
+  connected: boolean;
+  isActionPending: boolean;
+  lastActionRecord: ActionUiRecord | null;
   mirror: MirrorState | null;
-  onActivateWorkspace: (workspaceId: string) => Promise<void>;
-  onActivateTerminal: (workspaceId: string, terminalTabId: string) => Promise<void>;
+  onActivateWorkspace: (workspaceId: string, workspaceTitle?: string) => Promise<void>;
+  onActivateTerminal: (
+    workspaceId: string,
+    terminalTabId: string,
+    terminalTitle?: string
+  ) => Promise<void>;
 }
 
 export function WorkspaceScreen({
+  connected,
+  isActionPending,
+  lastActionRecord,
   mirror,
   onActivateWorkspace,
   onActivateTerminal,
 }: WorkspaceScreenProps) {
+  const [error, setError] = useState<string | null>(null);
+
   if (!mirror || mirror.tabs.length === 0) {
     return <Text style={{ color: '#9BA4AE' }}>No workspaces mirrored yet.</Text>;
   }
+
+  const actionDisabledReason = resolveWorkspaceActionDisabledReason({
+    connected,
+    isActionPending,
+  });
 
   return (
     <ScrollView contentContainerStyle={{ gap: 12, paddingBottom: 40 }}>
@@ -40,10 +59,16 @@ export function WorkspaceScreen({
         <Text style={{ color: '#9BA4AE' }}>
           Session ID: {mirror.activeContext.activeSessionId || 'N/A'}
         </Text>
+        <Text style={{ color: '#9BA4AE' }}>
+          Action target: {lastActionRecord?.targetLabel || 'N/A'}
+        </Text>
       </View>
+      {actionDisabledReason ? <Text style={{ color: '#9BA4AE' }}>{actionDisabledReason}</Text> : null}
+      {error ? <Text style={{ color: '#ff7b72' }}>{error}</Text> : null}
 
       {mirror.tabs.map((workspace) => {
         const isActiveWorkspace = workspace.id === mirror.activeTabId;
+        const canActivateWorkspace = !isActiveWorkspace && !actionDisabledReason;
 
         return (
           <View
@@ -66,10 +91,18 @@ export function WorkspaceScreen({
               </View>
               <Pressable
                 onPress={() => {
-                  void onActivateWorkspace(workspace.id);
+                  setError(null);
+                  void onActivateWorkspace(workspace.id, workspace.title).catch((activateError) => {
+                    setError(
+                      activateError instanceof Error
+                        ? activateError.message
+                        : 'Failed to activate workspace'
+                    );
+                  });
                 }}
+                disabled={!canActivateWorkspace}
                 style={{
-                  backgroundColor: isActiveWorkspace ? '#1f6feb' : '#30363D',
+                  backgroundColor: canActivateWorkspace ? '#1f6feb' : '#30363D',
                   paddingHorizontal: 10,
                   paddingVertical: 6,
                   borderRadius: 8,
@@ -88,8 +121,16 @@ export function WorkspaceScreen({
                 <Pressable
                   key={terminal.id}
                   onPress={() => {
-                    void onActivateTerminal(workspace.id, terminal.id);
+                    setError(null);
+                    void onActivateTerminal(workspace.id, terminal.id, terminal.title).catch((activateError) => {
+                      setError(
+                        activateError instanceof Error
+                          ? activateError.message
+                          : 'Failed to activate terminal'
+                      );
+                    });
                   }}
+                  disabled={Boolean(actionDisabledReason)}
                   style={{
                     borderWidth: 1,
                     borderColor: isActiveTerminal ? '#2f81f7' : '#30363D',
@@ -102,6 +143,9 @@ export function WorkspaceScreen({
                   <Text style={{ color: '#fff', fontWeight: '600' }}>{terminal.title}</Text>
                   <Text style={{ color: '#9BA4AE', fontSize: 12 }}>
                     {terminal.kind} {terminal.status ? `• ${terminal.status}` : ''}
+                  </Text>
+                  <Text style={{ color: '#9BA4AE', fontSize: 12 }}>
+                    Action target: {workspace.title} ({workspace.id}) → {terminal.title} ({terminal.id})
                   </Text>
                 </Pressable>
               );

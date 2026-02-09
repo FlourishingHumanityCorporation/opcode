@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import {
+  completeActionRecord,
+  createActionRecord,
+  evaluateActionGuard,
+} from './actions/actionExecution';
 import { MobileSyncRequestError } from './protocol/client';
 import {
   computeReconnectDelayMs,
@@ -55,5 +60,33 @@ describe('reconnect helpers', () => {
     expect(deps.resetRuntimeState).toHaveBeenCalledTimes(1);
     expect(deps.setConnectionError).toHaveBeenCalledWith('Authentication failed');
     expect(deps.setPairError).toHaveBeenCalledWith('Authentication failed');
+  });
+
+  it('returns disconnected guard reason for action rejection path', () => {
+    const guard = evaluateActionGuard('terminal.write', {
+      connected: false,
+      hasClient: false,
+      hasWorkspacePath: true,
+      hasSessionId: true,
+      hasEmbeddedTerminalId: true,
+      hasInput: true,
+      actionInFlight: false,
+    });
+
+    expect(guard.allowed).toBe(false);
+    expect(guard.reason).toBe('Disconnected');
+  });
+
+  it('supports action record transitions from pending to succeeded/failed', () => {
+    const pending = createActionRecord('provider_session.execute', '/tmp/repo');
+    expect(pending.status).toBe('pending');
+
+    const success = completeActionRecord(pending, 'succeeded', 'Action completed');
+    expect(success.status).toBe('succeeded');
+    expect(success.message).toBe('Action completed');
+
+    const failed = completeActionRecord(pending, 'failed', 'No active workspace project path');
+    expect(failed.status).toBe('failed');
+    expect(failed.message).toBe('No active workspace project path');
   });
 });

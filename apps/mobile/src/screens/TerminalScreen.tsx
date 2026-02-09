@@ -2,9 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import type { EventEnvelopeV1 } from '../../../../packages/mobile-sync-protocol/src';
+import type { ActionUiRecord } from '../actions/actionExecution';
 import type { MirrorTerminal, MirrorWorkspace } from '../store/syncStore';
+import { resolveTerminalInputDisabledReason } from './actionGuards';
 
 interface TerminalScreenProps {
+  connected: boolean;
+  isActionPending: boolean;
+  lastActionRecord: ActionUiRecord | null;
   activeWorkspace: MirrorWorkspace | null;
   activeTerminal: MirrorTerminal | null;
   activeEmbeddedTerminalId: string | null;
@@ -13,6 +18,9 @@ interface TerminalScreenProps {
 }
 
 export function TerminalScreen({
+  connected,
+  isActionPending,
+  lastActionRecord,
   activeWorkspace,
   activeTerminal,
   activeEmbeddedTerminalId,
@@ -20,10 +28,19 @@ export function TerminalScreen({
   onSendTerminalInput,
 }: TerminalScreenProps) {
   const [terminalInput, setTerminalInput] = useState('');
-  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSend = Boolean(activeEmbeddedTerminalId && terminalInput.trim().length > 0 && !sending);
+  const guardReason = resolveTerminalInputDisabledReason({
+    connected,
+    isActionPending,
+    hasEmbeddedTerminalId: Boolean(activeEmbeddedTerminalId),
+    hasInput: terminalInput.trim().length > 0,
+  });
+  const canSend = !guardReason;
+  const actionTarget = activeTerminal
+    ? `${activeTerminal.title} (${activeTerminal.id})${activeEmbeddedTerminalId ? ` / ${activeEmbeddedTerminalId}` : ''}`
+    : 'N/A';
+  const sending = isActionPending && lastActionRecord?.kind === 'terminal.write' && lastActionRecord.status === 'pending';
 
   const recentTerminalEvents = useMemo(
     () =>
@@ -37,15 +54,12 @@ export function TerminalScreen({
   const submitInput = async () => {
     if (!canSend) return;
 
-    setSending(true);
     try {
       setError(null);
       await onSendTerminalInput(terminalInput);
       setTerminalInput('');
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : 'Failed to send terminal input');
-    } finally {
-      setSending(false);
     }
   };
 
@@ -73,6 +87,9 @@ export function TerminalScreen({
         </Text>
         <Text style={{ color: '#9BA4AE' }} numberOfLines={1}>
           Embedded ID: {activeEmbeddedTerminalId || 'Not available (terminal not attached yet)'}
+        </Text>
+        <Text style={{ color: '#9BA4AE' }} numberOfLines={1}>
+          Action target: {actionTarget}
         </Text>
       </View>
 
@@ -106,6 +123,7 @@ export function TerminalScreen({
         >
           <Text style={{ color: '#fff', fontWeight: '600' }}>{sending ? 'Sending...' : 'Send Input'}</Text>
         </Pressable>
+        {guardReason ? <Text style={{ color: '#9BA4AE' }}>{guardReason}</Text> : null}
         {error ? <Text style={{ color: '#ff7b72' }}>{error}</Text> : null}
       </View>
 
