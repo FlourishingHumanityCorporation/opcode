@@ -4,7 +4,6 @@ import {
   Copy,
   ChevronDown,
   GitBranch,
-  ChevronUp,
   X,
   Hash,
   Wrench,
@@ -36,7 +35,6 @@ import {
   type UnlistenFn,
 } from "./provider-session-pane/sessionEventBus";
 import type { ProviderSessionCompletionPayload } from "./provider-session-pane/types";
-import { StreamMessage } from "./StreamMessage";
 import {
   FloatingPromptInput,
   type FloatingPromptInputRef,
@@ -65,8 +63,6 @@ import { shouldEmitNeedsInputAttention as shouldEmitNeedsInputAttentionFromMessa
 import { createStreamWatchdog } from "@/lib/streamWatchdog";
 import {
   getDefaultModelForProvider,
-  getModelDisplayName,
-  getProviderDisplayName,
 } from "@/lib/providerModels";
 import {
   NATIVE_TERMINAL_START_COMMAND_EVENT,
@@ -264,85 +260,19 @@ interface ProviderSessionPaneProps {
 }
 
 export function shouldShowProjectPathHeader(
-  hideProjectBar: boolean,
-  nativeTerminalMode: boolean,
-  detectedProviderCount: number,
-  projectPath: string
+  hideProjectBar: boolean
 ): boolean {
-  return !hideProjectBar && (nativeTerminalMode || detectedProviderCount > 0 || Boolean(projectPath));
+  return !hideProjectBar;
 }
 
-export function shouldShowProviderSelectorInHeader(
-  nativeTerminalMode: boolean,
-  detectedProviderCount: number
-): boolean {
-  return !nativeTerminalMode && detectedProviderCount > 0;
+export function shouldShowProviderSelectorInHeader(): boolean {
+  return false;
 }
 
 export function shouldEmitNeedsInputAttention(
   message: ProviderSessionMessage
 ): boolean {
   return shouldEmitNeedsInputAttentionFromMessage(message);
-}
-
-function toPlainTextValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    return value.map((entry) => toPlainTextValue(entry)).filter(Boolean).join("\n");
-  }
-  if (typeof value === "object") {
-    const objectValue = value as Record<string, unknown>;
-    if (typeof objectValue.text === "string") {
-      return objectValue.text;
-    }
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-  return String(value);
-}
-
-function getPlainRoleLabel(message: ProviderSessionMessage): string {
-  const base = (message.type || "message").toUpperCase();
-  const subtype = typeof message.subtype === "string" && message.subtype.trim() ? `:${message.subtype}` : "";
-  return `${base}${subtype}`;
-}
-
-function getPlainMessageBody(message: ProviderSessionMessage): string {
-  if (message.type === "assistant" || message.type === "user") {
-    const content = message.message?.content;
-    if (Array.isArray(content)) {
-      const chunks = content
-        .map((chunk: any) => {
-          if (!chunk || typeof chunk !== "object") return toPlainTextValue(chunk);
-          if (chunk.type === "text") return toPlainTextValue(chunk.text);
-          if (chunk.type === "tool_use") {
-            return `[tool:${chunk.name || "unknown"}]\n${toPlainTextValue(chunk.input)}`;
-          }
-          if (chunk.type === "tool_result") {
-            return `[tool_result]\n${toPlainTextValue(chunk.content)}`;
-          }
-          return toPlainTextValue(chunk);
-        })
-        .filter((entry) => entry.trim().length > 0);
-
-      if (chunks.length > 0) {
-        return chunks.join("\n\n");
-      }
-    }
-  }
-
-  if (typeof message.result === "string" && message.result.trim()) {
-    return message.result;
-  }
-  if (typeof message.error === "string" && message.error.trim()) {
-    return message.error;
-  }
-  return toPlainTextValue(message).trim();
 }
 
 /**
@@ -412,12 +342,8 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   // New state for preview feature
   const [showPreview, setShowPreview] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
-  const [showPreviewPrompt, setShowPreviewPrompt] = useState(false);
   const [splitPosition, setSplitPosition] = useState(50);
   const [isPreviewMaximized, setIsPreviewMaximized] = useState(false);
-  
-  // Add collapsed state for queued prompts
-  const [queuedPromptsCollapsed, setQueuedPromptsCollapsed] = useState(false);
 
   // Provider state
   const {
@@ -433,7 +359,6 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     DEFAULT_PROVIDER_CAPABILITIES
   );
   const [showProviderMenu, setShowProviderMenu] = useState(false);
-  const plainTerminalMode = false;
   const nativeTerminalMode = true;
   const [hasBootedNativeTerminal, setHasBootedNativeTerminal] = useState<boolean>(
     () => Boolean(embeddedTerminalId)
@@ -2154,14 +2079,6 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     }
   };
 
-  // Handle URL detection from terminal output
-  const handleLinkDetected = (url: string) => {
-    if (!showPreview && !showPreviewPrompt) {
-      setPreviewUrl(url);
-      setShowPreviewPrompt(true);
-    }
-  };
-
   const handleClosePreview = () => {
     setShowPreview(false);
     setIsPreviewMaximized(false);
@@ -2234,107 +2151,6 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
       }
     };
   }, [effectiveSession, projectPath]);
-
-  const messagesList = (
-    <div
-      ref={parentRef}
-      className="flex-1 overflow-y-auto relative pb-20"
-      style={{
-        contain: 'strict',
-      }}
-    >
-      <div
-        className="relative w-full max-w-6xl mx-auto px-4 pt-8 pb-4"
-        style={{
-          height: `${Math.max(rowVirtualizer.getTotalSize(), 100)}px`,
-          minHeight: '100px',
-        }}
-      >
-        <AnimatePresence>
-          {rowVirtualizer.getVirtualItems().map((virtualItem) => {
-            const message = displayableMessages[virtualItem.index];
-            return (
-              <motion.div
-                key={virtualItem.key}
-                data-index={virtualItem.index}
-                ref={(el) => el && rowVirtualizer.measureElement(el)}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.3 }}
-                className="absolute inset-x-4 pb-4"
-                style={{
-                  top: virtualItem.start,
-                }}
-              >
-                <StreamMessage 
-                  message={message} 
-                  streamMessages={messages}
-                  onLinkDetected={handleLinkDetected}
-                />
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
-      </div>
-
-      {/* Loading indicator under the latest message */}
-      {isLoading && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.15 }}
-          className="flex items-center justify-center py-4 mb-20"
-        >
-          <div className="rotating-symbol text-primary" />
-        </motion.div>
-      )}
-
-      {/* Error indicator */}
-      {error && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.15 }}
-          className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive mb-20 w-full max-w-6xl mx-auto"
-        >
-          {error}
-        </motion.div>
-      )}
-    </div>
-  );
-
-  const plainMessagesList = (
-    <div ref={parentRef} className="flex-1 overflow-y-auto pb-20">
-      <div className={cn("mx-auto w-full px-4 py-3", embedded ? "" : "max-w-6xl")}>
-        {displayableMessages.map((message, index) => {
-          const roleLabel = getPlainRoleLabel(message);
-          const body = getPlainMessageBody(message);
-          return (
-            <div
-              key={`${roleLabel}-${index}-${(message as any).timestamp || index}`}
-              className="border-b border-border/40 py-2 font-mono text-[12px] leading-5"
-            >
-              <div className="mb-1 text-[10px] uppercase tracking-[0.06em] text-muted-foreground">{roleLabel}</div>
-              <pre className="m-0 whitespace-pre-wrap break-words text-foreground">{body || "[empty]"}</pre>
-            </div>
-          );
-        })}
-
-        {isLoading && (
-          <div className="py-3 font-mono text-[12px] text-muted-foreground">
-            [running]
-          </div>
-        )}
-
-        {error && (
-          <div className="py-3 font-mono text-[12px] text-destructive">
-            [error] {error}
-          </div>
-        )}
-      </div>
-    </div>
-  );
 
   // Provider names for display
   const providerNames: Record<string, string> = {
@@ -2473,16 +2289,8 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     );
   })();
 
-  const showProjectPathHeader = shouldShowProjectPathHeader(
-    hideProjectBar,
-    nativeTerminalMode,
-    detectedProviders.length,
-    projectPath
-  );
-  const showProviderSelector = shouldShowProviderSelectorInHeader(
-    nativeTerminalMode,
-    detectedProviders.length
-  );
+  const showProjectPathHeader = shouldShowProjectPathHeader(hideProjectBar);
+  const showProviderSelector = shouldShowProviderSelectorInHeader();
 
   // Provider selector bar and path/toggles row.
   const projectPathInput = showProjectPathHeader ? (
@@ -2581,11 +2389,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
               left={
                 <div className="h-full min-h-0 flex flex-col">
                   {projectPathInput}
-                  {nativeTerminalMode
-                    ? nativeTerminalPanel
-                    : plainTerminalMode
-                      ? plainMessagesList
-                      : messagesList}
+                  {nativeTerminalPanel}
                 </div>
               }
               right={
@@ -2607,11 +2411,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
             // Original layout when no preview
             <div className={cn("h-full min-h-0 flex flex-col", embedded ? "workspace-chrome-row" : "max-w-6xl mx-auto px-6")}>
               {projectPathInput}
-              {nativeTerminalMode
-                ? nativeTerminalPanel
-                : plainTerminalMode
-                  ? plainMessagesList
-                  : messagesList}
+              {nativeTerminalPanel}
               
               {isLoading && messages.length === 0 && (
                 <div className="flex items-center justify-center h-full">
@@ -2652,159 +2452,6 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
 
         {/* Floating Prompt Input - Always visible */}
         <ErrorBoundary>
-          {/* Queued Prompts Display */}
-          <AnimatePresence>
-            {queuedPrompts.length > 0 && !hideFloatingGlobalControls && !plainTerminalMode && !nativeTerminalMode && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 20 }}
-                className={cn(
-                  embedded
-                    ? "absolute bottom-20 left-1/2 -translate-x-1/2 z-30 w-full max-w-3xl px-4"
-                    : "fixed bottom-24 left-1/2 -translate-x-1/2 z-30 w-full max-w-3xl px-4"
-                )}
-              >
-                <div className="bg-background/95 backdrop-blur-md border rounded-lg shadow-lg p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs font-medium text-muted-foreground mb-1">
-                      Queued Prompts ({queuedPrompts.length})
-                    </div>
-                    <TooltipSimple content={queuedPromptsCollapsed ? "Expand queue" : "Collapse queue"} side="top">
-                      <motion.div
-                        whileTap={{ scale: 0.97 }}
-                        transition={{ duration: 0.15 }}
-                      >
-                        <Button variant="ghost" size="icon" onClick={() => setQueuedPromptsCollapsed(prev => !prev)}>
-                          {queuedPromptsCollapsed ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                        </Button>
-                      </motion.div>
-                    </TooltipSimple>
-                  </div>
-                  {!queuedPromptsCollapsed && queuedPrompts.map((queuedPrompt, index) => (
-                    <motion.div
-                      key={queuedPrompt.id}
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -4 }}
-                      transition={{ duration: 0.15, delay: index * 0.02 }}
-                      className="flex items-start gap-2 bg-muted/50 rounded-md p-2"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-medium text-muted-foreground">#{index + 1}</span>
-                          <span className="text-xs px-1.5 py-0.5 bg-primary/10 text-primary rounded">
-                            {getProviderDisplayName(queuedPrompt.providerId)} · {getModelDisplayName(queuedPrompt.providerId, queuedPrompt.model)}
-                          </span>
-                        </div>
-                        <p className="text-sm line-clamp-2 break-words">{queuedPrompt.prompt}</p>
-                      </div>
-                      <motion.div
-                        whileTap={{ scale: 0.97 }}
-                        transition={{ duration: 0.15 }}
-                      >
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 flex-shrink-0"
-                          onClick={() => setQueuedPrompts(prev => prev.filter(p => p.id !== queuedPrompt.id))}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </motion.div>
-                    </motion.div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Navigation Arrows - positioned above prompt bar with spacing */}
-          {displayableMessages.length > 5 && !hideFloatingGlobalControls && !plainTerminalMode && !nativeTerminalMode && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              transition={{ delay: 0.5 }}
-              className={cn(
-                embedded ? "absolute bottom-28 right-4 z-40" : "fixed bottom-32 right-6 z-50"
-              )}
-            >
-              <div className="flex items-center bg-background border border-[var(--color-chrome-border)] rounded-md shadow-sm overflow-hidden">
-                <TooltipSimple content="Scroll to top" side="top">
-                  <motion.div
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                      // Use virtualizer to scroll to the first item
-                      if (displayableMessages.length > 0) {
-                        // Scroll to top of the container
-                        parentRef.current?.scrollTo({
-                          top: 0,
-                          behavior: 'smooth'
-                        });
-                        
-                        // After smooth scroll completes, trigger a small scroll to ensure rendering
-                        setTimeout(() => {
-                          if (parentRef.current) {
-                            // Scroll down 1px then back to 0 to trigger virtualizer update
-                            parentRef.current.scrollTop = 1;
-                            requestAnimationFrame(() => {
-                              if (parentRef.current) {
-                                parentRef.current.scrollTop = 0;
-                              }
-                            });
-                          }
-                        }, 500); // Wait for smooth scroll to complete
-                      }
-                    }}
-                      className="px-2.5 py-1.5 hover:bg-accent rounded-none"
-                    >
-                      <ChevronUp className="h-3.5 w-3.5" />
-                    </Button>
-                  </motion.div>
-                </TooltipSimple>
-                <div className="w-px h-3.5 bg-border" />
-                <TooltipSimple content="Scroll to bottom" side="top">
-                  <motion.div
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        // Use the improved scrolling method for manual scroll to bottom
-                        if (displayableMessages.length > 0) {
-                          const scrollElement = parentRef.current;
-                          if (scrollElement) {
-                            // First, scroll using virtualizer to get close to the bottom
-                            rowVirtualizer.scrollToIndex(displayableMessages.length - 1, { align: 'end', behavior: 'auto' });
-
-                            // Then use direct scroll to ensure we reach the absolute bottom
-                            requestAnimationFrame(() => {
-                              scrollElement.scrollTo({
-                                top: scrollElement.scrollHeight,
-                                behavior: 'smooth'
-                              });
-                            });
-                          }
-                        }
-                      }}
-                      className="px-2.5 py-1.5 hover:bg-accent rounded-none"
-                    >
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </Button>
-                  </motion.div>
-                </TooltipSimple>
-              </div>
-            </motion.div>
-          )}
-
           <div className={cn(
             embedded
               ? "absolute bottom-0 left-0 right-0 transition-all duration-300 z-40"
@@ -2815,7 +2462,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
               <div className="pointer-events-none border-t border-border bg-background/95 px-4 py-2">
                 <div className={cn("mx-auto flex w-full items-center justify-between", embedded ? "" : "max-w-6xl")}>
                   <div className="text-xs text-muted-foreground">
-                    {nativeRestoreNotice || 'In-app terminal mode is active'}
+                    {error || nativeRestoreNotice || 'In-app terminal mode is active'}
                   </div>
                   {!projectPath && (
                     <Button size="sm" onClick={handleSelectTerminalProject} className="pointer-events-auto">

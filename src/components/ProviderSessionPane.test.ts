@@ -11,26 +11,16 @@ import {
 import { normalizeProviderSessionCompletion } from "@/components/provider-session-pane/sessionEventBus";
 
 describe("ProviderSessionPane header behavior", () => {
-  it("shows header in native mode even without detected providers", () => {
-    expect(shouldShowProjectPathHeader(false, true, 0, "")).toBe(true);
+  it("shows header when the project bar is visible", () => {
+    expect(shouldShowProjectPathHeader(false)).toBe(true);
   });
 
-  it("hides provider selector in native mode", () => {
-    expect(shouldShowProviderSelectorInHeader(true, 3)).toBe(false);
+  it("hides provider selector in terminal-only mode", () => {
+    expect(shouldShowProviderSelectorInHeader()).toBe(false);
   });
 
-  it("shows provider selector in non-native mode when providers are detected", () => {
-    expect(shouldShowProviderSelectorInHeader(false, 2)).toBe(true);
-  });
-
-  it("shows header in non-native mode when project path exists", () => {
-    expect(shouldShowProjectPathHeader(false, false, 0, "/Users/paulrohde/CodeProjects/apps/ProjectPulse")).toBe(
-      true
-    );
-  });
-
-  it("hides header only when hidden explicitly and no fallback conditions apply", () => {
-    expect(shouldShowProjectPathHeader(true, false, 0, "")).toBe(false);
+  it("hides header when the project bar is hidden", () => {
+    expect(shouldShowProjectPathHeader(true)).toBe(false);
   });
 
   it("normalizes legacy boolean completion payloads", () => {

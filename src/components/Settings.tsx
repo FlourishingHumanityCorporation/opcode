@@ -42,6 +42,10 @@ import {
   saveHotRefreshWatchPathsPreference,
   type HotRefreshScope,
 } from "@/lib/hotRefreshPreferences";
+import {
+  loadNativeTerminalStartCommandPreference,
+  saveNativeTerminalStartCommandPreference,
+} from "@/lib/uiPreferences";
 
 interface SettingsProps {
   /**
@@ -109,6 +113,8 @@ export const Settings: React.FC<SettingsProps> = ({
   const [hotRefreshEnabled, setHotRefreshEnabled] = useState(true);
   const [hotRefreshScope, setHotRefreshScope] = useState<HotRefreshScope>("all");
   const [hotRefreshWatchPathsInput, setHotRefreshWatchPathsInput] = useState("");
+  const [nativeTerminalStartCommand, setNativeTerminalStartCommand] = useState("");
+  const [savingNativeTerminalStartCommand, setSavingNativeTerminalStartCommand] = useState(false);
 
   // Provider detection state
   const [detectedAgents, setDetectedAgents] = useState<Array<{ provider_id: string; binary_path: string; version: string | null; source: string }>>([]);
@@ -128,6 +134,7 @@ export const Settings: React.FC<SettingsProps> = ({
     loadDetectedAgents();
     loadMobileSyncStatus();
     void loadHotRefreshSettings();
+    loadNativeTerminalStartCommandPreference().then(setNativeTerminalStartCommand);
     // Load tab persistence setting
     setTabPersistenceEnabled(TabPersistenceService.isEnabled());
   }, []);
@@ -150,6 +157,20 @@ export const Settings: React.FC<SettingsProps> = ({
       setHotRefreshWatchPathsInput(formatWatchPathsInput(preferences.watchPaths));
     } catch (error) {
       console.error("Failed to load hot refresh settings:", error);
+    }
+  };
+
+  const persistNativeTerminalStartCommand = async () => {
+    try {
+      setSavingNativeTerminalStartCommand(true);
+      await saveNativeTerminalStartCommandPreference(nativeTerminalStartCommand);
+      trackEvent.settingsChanged('native_terminal_start_command', nativeTerminalStartCommand);
+      setToast({ message: "In-app terminal startup command saved", type: "success" });
+    } catch (error) {
+      console.error("Failed to save in-app terminal startup command:", error);
+      setToast({ message: "Failed to save startup command", type: "error" });
+    } finally {
+      setSavingNativeTerminalStartCommand(false);
     }
   };
 
@@ -999,6 +1020,43 @@ export const Settings: React.FC<SettingsProps> = ({
                       <p className="text-xs text-muted-foreground">
                         In-app terminal mode is always enabled.
                       </p>
+                    </div>
+
+                    {/* In-app terminal startup command */}
+                    <div className="space-y-2">
+                      <Label htmlFor="native-terminal-start-command">In-App Terminal Startup Command</Label>
+                      <p className="text-caption text-muted-foreground">
+                        Command to auto-run when a fresh in-app terminal starts. Leave empty for shell prompt.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id="native-terminal-start-command"
+                          value={nativeTerminalStartCommand}
+                          onChange={(event) => setNativeTerminalStartCommand(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              void persistNativeTerminalStartCommand();
+                            }
+                          }}
+                          placeholder="claude"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void persistNativeTerminalStartCommand()}
+                          disabled={savingNativeTerminalStartCommand}
+                        >
+                          {savingNativeTerminalStartCommand ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              Saving
+                            </>
+                          ) : (
+                            "Save"
+                          )}
+                        </Button>
+                      </div>
                     </div>
 
                   </div>
