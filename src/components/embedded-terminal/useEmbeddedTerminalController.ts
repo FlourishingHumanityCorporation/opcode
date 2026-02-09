@@ -69,7 +69,7 @@ interface UseEmbeddedTerminalControllerResult {
 }
 
 const WRITE_FAILURE_SIGNAL_WINDOW_MS = 12_000;
-const STREAM_ACTIVITY_IDLE_MS = 1_600;
+const STREAM_ACTIVITY_IDLE_MS = 7_000;
 const STALE_RECOVERY_STAGE2_GRACE_MS = 900;
 const RECOVERY_NOTICE_AUTO_CLEAR_MS = 2_400;
 const WHEEL_OBSERVATION_THROTTLE_MS = 1_000;
@@ -733,6 +733,9 @@ export function useEmbeddedTerminalController({
 
       onDataDisposable = terminalInstance.onData((data) => {
         if (!terminalIdRef.current) return;
+        if (data.includes("\r") || data.includes("\n")) {
+          markStreamingActivity();
+        }
         lastInputAttemptAtRef.current = Date.now();
         api.writeEmbeddedTerminalInput(terminalIdRef.current, data).catch((writeError) => {
           const errorCode = classifyTerminalErrorCode(writeError, "ERR_WRITE_FAILED");
@@ -1121,6 +1124,7 @@ export function useEmbeddedTerminalController({
     clearAutoFocusRetryTimers,
     clearStreamingActivity,
     clearWriteFailureSignals,
+    markStreamingActivity,
     recordWriteFailureSignal,
     emitTerminalEvent,
     persistentSessionId,
