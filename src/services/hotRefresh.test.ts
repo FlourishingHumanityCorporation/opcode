@@ -111,6 +111,7 @@ describe("hotRefresh service", () => {
     setupDefaultSettingMocks();
     MockBroadcastChannel.reset();
     (globalThis as any).BroadcastChannel = MockBroadcastChannel;
+    delete (window as any).__TAURI__;
     delete (window as any).__TAURI_INTERNALS__;
     delete (globalThis as any).__OPCODE_HOT_RUNTIME__;
   });
@@ -125,6 +126,7 @@ describe("hotRefresh service", () => {
     MockBroadcastChannel.reset();
     delete (globalThis as any).BroadcastChannel;
     delete (globalThis as any).__OPCODE_HOT_RUNTIME__;
+    delete (window as any).__TAURI__;
     delete (window as any).__TAURI_INTERNALS__;
   });
 
@@ -183,6 +185,41 @@ describe("hotRefresh service", () => {
 
     expect(reloadSpy).toHaveBeenCalledTimes(1);
 
+    teardown();
+  });
+
+  it("ignores web-mode __TAURI__ shim when real desktop internals are absent", async () => {
+    (window as any).__TAURI__ = {
+      event: {
+        listen: vi.fn(),
+        emit: vi.fn(),
+      },
+    };
+
+    const module = await import("@/services/hotRefresh");
+    const diagnostics: string[] = [];
+    const onDiagnostic = (event: Event) => {
+      diagnostics.push((event as CustomEvent<{ message: string }>).detail?.message ?? "");
+    };
+    window.addEventListener(
+      module.OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+      onDiagnostic as EventListener
+    );
+
+    const teardown = await module.initHotRefresh();
+
+    expect(tauriEventMocks.listen).not.toHaveBeenCalled();
+    expect(apiMocks.hotRefreshStart).not.toHaveBeenCalled();
+    expect(
+      diagnostics.some((message) =>
+        message.includes("Hot refresh could not attach Tauri event listeners.")
+      )
+    ).toBe(false);
+
+    window.removeEventListener(
+      module.OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+      onDiagnostic as EventListener
+    );
     teardown();
   });
 

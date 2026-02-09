@@ -1,0 +1,47 @@
+name: Attention Nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 9 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: attention-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+
+      - name: Run synthetic + real-flow attention smoke
+        run: npm run smoke:attention:all
+
+      - name: Upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: attention-nightly-artifacts-${{ github.run_id }}
+          path: |
+            test-results/**
+            playwright-report/**
+          retention-days: 14

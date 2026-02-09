@@ -18,6 +18,7 @@
     "build:dmg": "tauri build --bundles dmg",
     "check": "tsc --noEmit && cd src-tauri && cargo check",
     "test:unit": "vitest run",
+    "test:attention": "vitest run src/services/agentAttention.test.ts src/services/agentAttention.notifications.test.ts src/services/agentAttentionStreamBridge.test.ts src/services/agentAttention.fallbackToast.test.ts src/components/TabContent.test.ts src/components/ProviderSessionPane.test.ts src/components/AgentExecution.attention.test.ts src/components/AgentRunOutputViewer.attention.test.ts src/components/provider-session-pane/sessionEventBus.test.ts src/components/TerminalPaneSurface.test.ts src/components/ProjectWorkspaceView.test.ts src/components/TabManager.test.ts",
     "test:unit:watch": "vitest",
     "test:mobile-sync": "vitest run src/services/mobileSyncProtocol.test.ts",
     "test:remote-access:contracts": "vitest run -c vitest.remote.config.ts",
@@ -29,6 +30,8 @@
     "debug:assistant-benchmark:json": "node scripts/measure-session-startup.mjs --benchmark-kind assistant --json",
     "debug:assistant-benchmark:gate": "node scripts/measure-session-startup.mjs --runs 3 --benchmark-kind assistant --fail-on-assistant-slow-ms 50000",
     "smoke:attention": "playwright test tests/smoke/agent-attention.spec.ts",
+    "smoke:attention:real-flow": "playwright test tests/smoke/agent-attention-real-flow.spec.ts",
+    "smoke:attention:all": "playwright test tests/smoke/agent-attention.spec.ts tests/smoke/agent-attention-real-flow.spec.ts",
     "smoke:ui": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts tests/smoke/agent-attention.spec.ts tests/smoke/native-auto-rename.spec.ts tests/smoke/explorer-interaction.spec.ts",
     "smoke:ui:headed": "playwright test tests/smoke/agents-multiprovider.spec.ts tests/smoke/workspace-persistence.spec.ts tests/smoke/terminal-immediate-typing.spec.ts tests/smoke/agent-attention.spec.ts tests/smoke/native-auto-rename.spec.ts tests/smoke/explorer-interaction.spec.ts --headed"
   },

@@ -5,6 +5,10 @@ export const HOT_REFRESH_SCOPE_KEY = "hot_refresh_scope";
 export const HOT_REFRESH_WATCH_PATHS_KEY = "hot_refresh_watch_paths";
 export const HOT_REFRESH_PREFERENCES_CHANGED_EVENT =
   "opcode:hot-refresh-preferences-changed";
+export const HOT_REFRESH_RUNTIME_SCOPE_WARNING =
+  "Hot refresh updates code, but existing windows/tabs may keep previous runtime capability state. For behavior changes, open a new tab/window or restart.";
+export const HOT_REFRESH_STALE_RUNTIME_ACTION =
+  "If behavior seems stale, open a new tab/window.";
 
 export type HotRefreshScope = "dev_only" | "all";
 

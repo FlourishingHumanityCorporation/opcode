@@ -303,6 +303,16 @@ brew install pkg-config
    - Try building with fewer parallel jobs: `cargo build -j 2`
    - Close other applications to free up RAM
 
+#### Feature Works In New Tabs/Windows But Not Old Ones
+
+Changes can apply to newly created runtime instances only; existing windows or tabs may retain prior capability state.
+
+If behavior seems stale:
+
+1. Open a **new terminal tab**.
+2. If it is still stale, open a **new app window**.
+3. If it is still stale, **restart the app**.
+
 #### Verify Your Build
 
 After building, you can verify the application works:

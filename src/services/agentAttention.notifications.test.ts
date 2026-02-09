@@ -81,6 +81,7 @@ describe("agentAttention notifications and badge behavior", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     delete (window as any).__TAURI_INTERNALS__;
   });
 
@@ -239,6 +240,139 @@ describe("agentAttention notifications and badge behavior", () => {
       OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
       onFallback as EventListener
     );
+    cleanup();
+  });
+
+  it("dispatches fallback attention event when desktop notification throws", async () => {
+    mockState.isFocusedValue = false;
+    mockFns.isPermissionGranted.mockResolvedValue(true);
+    mockFns.sendNotification.mockRejectedValue(new Error("notification failure"));
+
+    const {
+      initAgentAttention,
+      emitAgentAttention,
+      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+    } = await loadService();
+    const cleanup = initAgentAttention();
+
+    const fallbackEvents: Array<Record<string, unknown>> = [];
+    const onFallback = (event: Event) => {
+      fallbackEvents.push((event as CustomEvent<Record<string, unknown>>).detail);
+    };
+    window.addEventListener(
+      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      onFallback as EventListener
+    );
+
+    const emitted = await emitAttentionWithDefaults(
+      emitAgentAttention,
+      "Fallback should emit when notification send throws."
+    );
+
+    expect(emitted).toBe(true);
+    expect(mockFns.sendNotification).toHaveBeenCalledTimes(1);
+    expect(fallbackEvents).toHaveLength(1);
+    expect(fallbackEvents[0]).toEqual(
+      expect.objectContaining({
+        kind: "done",
+        source: "provider_session",
+      })
+    );
+
+    window.removeEventListener(
+      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      onFallback as EventListener
+    );
+    cleanup();
+  });
+
+  it("allows identical deduped events again after dedupe window expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    mockState.isFocusedValue = false;
+
+    const { initAgentAttention, emitAgentAttention } = await loadService();
+    const cleanup = initAgentAttention();
+
+    const first = await emitAttentionWithDefaults(
+      emitAgentAttention,
+      "Build completed.",
+      "done",
+      "terminal-dedupe"
+    );
+    const second = await emitAttentionWithDefaults(
+      emitAgentAttention,
+      "Build completed.",
+      "done",
+      "terminal-dedupe"
+    );
+
+    vi.advanceTimersByTime(4501);
+
+    const third = await emitAttentionWithDefaults(
+      emitAgentAttention,
+      "Build completed.",
+      "done",
+      "terminal-dedupe"
+    );
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(third).toBe(true);
+    cleanup();
+  });
+
+  it("throttles needs_input on same terminal across different bodies", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    mockState.isFocusedValue = false;
+
+    const { initAgentAttention, emitAgentAttention } = await loadService();
+    const cleanup = initAgentAttention();
+
+    const first = await emitAttentionWithDefaults(
+      emitAgentAttention,
+      "Please confirm deployment plan A.",
+      "needs_input",
+      "terminal-throttle"
+    );
+    vi.advanceTimersByTime(5000);
+    const second = await emitAttentionWithDefaults(
+      emitAgentAttention,
+      "Please confirm deployment plan B.",
+      "needs_input",
+      "terminal-throttle"
+    );
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    cleanup();
+  });
+
+  it("does not throttle needs_input across different terminals", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    mockState.isFocusedValue = false;
+
+    const { initAgentAttention, emitAgentAttention } = await loadService();
+    const cleanup = initAgentAttention();
+
+    const first = await emitAttentionWithDefaults(
+      emitAgentAttention,
+      "Approve terminal A action.",
+      "needs_input",
+      "terminal-a"
+    );
+    vi.advanceTimersByTime(1000);
+    const second = await emitAttentionWithDefaults(
+      emitAgentAttention,
+      "Approve terminal B action.",
+      "needs_input",
+      "terminal-b"
+    );
+
+    expect(first).toBe(true);
+    expect(second).toBe(true);
     cleanup();
   });
 

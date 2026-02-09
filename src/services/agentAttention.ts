@@ -29,6 +29,11 @@ export interface AgentAttentionFallbackEventDetail {
   source: AgentAttentionSource;
 }
 
+export interface AgentAttentionFallbackToastDetail {
+  message: string;
+  type: "success" | "info";
+}
+
 export interface EmitAgentAttentionInput {
   kind: AgentAttentionKind;
   workspaceId?: string;
@@ -92,6 +97,17 @@ function defaultBodyForKind(kind: AgentAttentionKind): string {
     return "A run completed successfully.";
   }
   return "The agent is waiting for your approval or decision.";
+}
+
+export function mapAgentAttentionFallbackToToast(
+  detail: AgentAttentionFallbackEventDetail | null | undefined
+): AgentAttentionFallbackToastDetail {
+  const kind: AgentAttentionKind = detail?.kind === "needs_input" ? "needs_input" : "done";
+  const normalizedBody = normalizeWhitespace(typeof detail?.body === "string" ? detail.body : "");
+  return {
+    message: normalizedBody || defaultBodyForKind(kind),
+    type: kind === "needs_input" ? "info" : "success",
+  };
 }
 
 function cleanupDedupeMaps(now: number): void {
@@ -479,6 +495,8 @@ function hasNeedsInputToolSignal(
     objectValue.detail,
     objectValue.arguments,
     objectValue.args,
+    objectValue.tool_uses,
+    objectValue.tools,
     objectValue.questions,
   ];
 

@@ -62,6 +62,7 @@ vi.mock("@/components/ProxySettings", () => ({
 }));
 
 import { Settings } from "@/components/Settings";
+import { HOT_REFRESH_RUNTIME_SCOPE_WARNING } from "@/lib/hotRefreshPreferences";
 
 async function flushEffects(): Promise<void> {
   await act(async () => {
@@ -195,6 +196,20 @@ describe("Settings hot refresh controls", () => {
         "hot_refresh_watch_paths",
         JSON.stringify(["src", "custom/path"])
       );
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("renders runtime capability scope guidance", async () => {
+    const { container, cleanup } = await renderSettings();
+
+    try {
+      const note = container.querySelector(
+        '[data-testid="hot-refresh-runtime-scope-note"]'
+      );
+      expect(note).toBeTruthy();
+      expect(note?.textContent).toContain(HOT_REFRESH_RUNTIME_SCOPE_WARNING);
     } finally {
       await cleanup();
     }

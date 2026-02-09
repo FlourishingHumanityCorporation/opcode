@@ -36,10 +36,11 @@ import { useTrackEvent, useComponentMetrics, useFeatureAdoptionTracking } from "
 import { useTabState } from "@/hooks/useTabState";
 import {
   emitAgentAttention,
-  extractAttentionText,
-  summarizeAttentionBody,
 } from "@/services/agentAttention";
-import { shouldEmitNeedsInputAttention } from "@/components/agentAttentionDetection";
+import {
+  buildDoneAttentionPayload,
+  buildNeedsInputAttentionPayload,
+} from "@/services/agentAttentionStreamBridge";
 import {
   getDefaultModelForProvider,
   getModelDisplayName,
@@ -418,18 +419,13 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
           
           // Parse and display
           const message = JSON.parse(event.payload) as ClaudeStreamMessage;
-
-          const candidateText = extractAttentionText(message);
-          if (shouldEmitNeedsInputAttention(message)) {
-            void emitAgentAttention({
-              kind: "needs_input",
-              workspaceId: workspaceIdForTab,
-              terminalTabId: tabId,
-              source: "agent_execution",
-              body:
-                summarizeAttentionBody(candidateText) ||
-                "The agent is waiting for your input.",
-            });
+          const needsInputAttention = buildNeedsInputAttentionPayload(message, {
+            source: "agent_execution",
+            workspaceId: workspaceIdForTab,
+            terminalTabId: tabId,
+          });
+          if (needsInputAttention) {
+            void emitAgentAttention(needsInputAttention);
           }
 
           setMessages(prev => [...prev, message]);
@@ -474,13 +470,11 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
           if (tabId) {
             updateTabStatus(tabId, 'complete');
           }
-          void emitAgentAttention({
-            kind: "done",
+          void emitAgentAttention(buildDoneAttentionPayload({
+            source: "agent_execution",
             workspaceId: workspaceIdForTab,
             terminalTabId: tabId,
-            source: "agent_execution",
-            body: `${agent.name || "Agent"} completed successfully.`,
-          });
+          }, `${agent.name || "Agent"} completed successfully.`));
           trackEvent.agentExecuted(agent.name || 'custom', true, agent.name, duration);
         }
       });

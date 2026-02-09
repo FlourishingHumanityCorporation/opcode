@@ -86,11 +86,8 @@ function isTauriRuntimeAvailable(): boolean {
     return false;
   }
 
-  return Boolean(
-    (window as any).__TAURI__ ||
-      (window as any).__TAURI_INTERNALS__ ||
-      (window as any).__TAURI_METADATA__
-  );
+  // Web mode installs a lightweight __TAURI__ shim; only treat real Tauri internals/metadata as desktop runtime.
+  return Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI_METADATA__);
 }
 
 function resolveHotRuntime(): HotRuntime | null {

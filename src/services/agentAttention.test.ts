@@ -104,6 +104,44 @@ describe("agentAttention needs-input matcher", () => {
     expect(shouldTriggerNeedsInputFromMessage(message)).toBe(true);
   });
 
+  it("detects needs_input from nested multi-tool payloads", () => {
+    const message = {
+      type: "event",
+      payload: {
+        tool_uses: [
+          {
+            recipient_name: "read_file",
+          },
+          {
+            recipient_name: "request_user_input",
+            input: {
+              questions: [
+                {
+                  question: "Pick one option to continue.",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+
+    expect(shouldTriggerNeedsInputFromMessage(message)).toBe(true);
+  });
+
+  it("handles cyclic payloads without recursion failures", () => {
+    const cyclic: Record<string, unknown> = {
+      type: "event",
+    };
+    cyclic.self = cyclic;
+    cyclic.payload = {
+      nested: cyclic,
+    };
+
+    expect(() => shouldTriggerNeedsInputFromMessage(cyclic)).not.toThrow();
+    expect(shouldTriggerNeedsInputFromMessage(cyclic)).toBe(false);
+  });
+
   it("does not trigger needs_input for unrelated tool usage", () => {
     const message = {
       type: "assistant",
@@ -121,5 +159,11 @@ describe("agentAttention needs-input matcher", () => {
     };
 
     expect(shouldTriggerNeedsInputFromMessage(message)).toBe(false);
+  });
+
+  it("does not trigger for conversational preference prompts", () => {
+    const text = "Would you like a walkthrough of the final diff?";
+    expect(shouldTriggerNeedsInput(text)).toBe(false);
+    expect(shouldTriggerNeedsInputFromMessage({ type: "assistant", text })).toBe(false);
   });
 });

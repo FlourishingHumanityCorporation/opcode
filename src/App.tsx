@@ -28,6 +28,7 @@ import { useAppLifecycle, useTrackEvent } from "@/hooks";
 import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
 import {
   initAgentAttention,
+  mapAgentAttentionFallbackToToast,
   OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
   type AgentAttentionFallbackEventDetail,
 } from "@/services/agentAttention";
@@ -36,6 +37,7 @@ import {
   OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
   type HotRefreshDiagnosticDetail,
 } from "@/services/hotRefresh";
+import { HOT_REFRESH_STALE_RUNTIME_ACTION } from "@/lib/hotRefreshPreferences";
 
 type View = 
   | "welcome" 
@@ -137,15 +139,7 @@ function AppContent() {
       if (!detail) {
         return;
       }
-
-      setToast({
-        message:
-          detail.body ||
-          (detail.kind === "needs_input"
-            ? "The agent is waiting for your input."
-            : "A run completed successfully."),
-        type: detail.kind === "needs_input" ? "info" : "success",
-      });
+      setToast(mapAgentAttentionFallbackToToast(detail));
     };
 
     window.addEventListener(
@@ -168,7 +162,9 @@ function AppContent() {
       }
 
       setToast({
-        message: detail.message,
+        message: detail.message.includes(HOT_REFRESH_STALE_RUNTIME_ACTION)
+          ? detail.message
+          : `${detail.message} ${HOT_REFRESH_STALE_RUNTIME_ACTION}`,
         type: detail.level === "error" ? "error" : "info",
       });
     };

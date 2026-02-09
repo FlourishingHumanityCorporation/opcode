@@ -35,6 +35,7 @@ import { analytics } from "@/lib/analytics";
 import { TabPersistenceService } from "@/services/tabPersistence";
 import {
   formatWatchPathsInput,
+  HOT_REFRESH_RUNTIME_SCOPE_WARNING,
   loadHotRefreshPreferences,
   parseWatchPathsInput,
   saveHotRefreshEnabledPreference,
@@ -969,6 +970,12 @@ export const Settings: React.FC<SettingsProps> = ({
                           onCheckedChange={handleHotRefreshEnabledChange}
                         />
                       </div>
+                      <p
+                        className="text-caption text-muted-foreground"
+                        data-testid="hot-refresh-runtime-scope-note"
+                      >
+                        {HOT_REFRESH_RUNTIME_SCOPE_WARNING}
+                      </p>
 
                       <div className="space-y-1">
                         <Label>Hot Refresh Scope</Label>

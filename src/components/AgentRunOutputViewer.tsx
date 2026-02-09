@@ -30,10 +30,11 @@ import { useTabState } from '@/hooks/useTabState';
 import { getModelDisplayName } from '@/lib/providerModels';
 import {
   emitAgentAttention,
-  extractAttentionText,
-  summarizeAttentionBody,
 } from '@/services/agentAttention';
-import { shouldEmitNeedsInputAttention } from '@/components/agentAttentionDetection';
+import {
+  buildDoneAttentionPayload,
+  buildNeedsInputAttentionPayload,
+} from '@/services/agentAttentionStreamBridge';
 
 interface AgentRunOutputViewerProps {
   /**
@@ -48,6 +49,36 @@ interface AgentRunOutputViewerProps {
    * Optional className for styling
    */
   className?: string;
+}
+
+function normalizeRawOutputPayload(payload: string): string {
+  return payload.trim();
+}
+
+export function buildKnownOutputPayloads(lines: string[]): Set<string> {
+  const known = new Set<string>();
+  lines.forEach((line) => {
+    const normalized = normalizeRawOutputPayload(line);
+    if (normalized) {
+      known.add(normalized);
+    }
+  });
+  return known;
+}
+
+export function shouldProcessLiveOutputPayload(
+  knownPayloads: Set<string>,
+  payload: string
+): boolean {
+  const normalized = normalizeRawOutputPayload(payload);
+  if (!normalized) {
+    return false;
+  }
+  if (knownPayloads.has(normalized)) {
+    return false;
+  }
+  knownPayloads.add(normalized);
+  return true;
 }
 
 /**
@@ -76,8 +107,8 @@ export function AgentRunOutputViewer({
   const [hasUserScrolled, setHasUserScrolled] = useState(false);
   
   // Track whether we're in the initial load phase
-  const isInitialLoadRef = useRef(true);
   const hasSetupListenersRef = useRef(false);
+  const knownOutputPayloadsRef = useRef<Set<string>>(new Set());
   
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const outputEndRef = useRef<HTMLDivElement>(null);
@@ -169,6 +200,7 @@ export function AgentRunOutputViewer({
           console.log('[AgentRunOutputViewer] Found cached output');
           const cachedJsonlLines = cached.output.split('\n').filter(line => line.trim());
           setRawJsonlOutput(cachedJsonlLines);
+          knownOutputPayloadsRef.current = buildKnownOutputPayloads(cachedJsonlLines);
           setMessages(cached.messages);
           // If cache is recent (less than 5 seconds old) and session isn't running, use cache only
           if (Date.now() - cached.lastUpdated < 5000 && run.status !== 'running') {
@@ -194,7 +226,9 @@ export function AgentRunOutputViewer({
           }));
           
           setMessages(loadedMessages);
-          setRawJsonlOutput(history.map(h => JSON.stringify(h)));
+          const historyLines = history.map(h => JSON.stringify(h));
+          setRawJsonlOutput(historyLines);
+          knownOutputPayloadsRef.current = buildKnownOutputPayloads(historyLines);
           
           // Update cache
           setCachedOutput(run.id, {
@@ -233,6 +267,7 @@ export function AgentRunOutputViewer({
       // Parse JSONL output into messages
       const jsonlLines = rawOutput.split('\n').filter(line => line.trim());
       setRawJsonlOutput(jsonlLines);
+      knownOutputPayloadsRef.current = buildKnownOutputPayloads(jsonlLines);
       
       const parsedMessages: ClaudeStreamMessage[] = [];
       for (const line of jsonlLines) {
@@ -284,38 +319,26 @@ export function AgentRunOutputViewer({
 
       // Mark that we've set up listeners
       hasSetupListenersRef.current = true;
-      
-      // After setup, we're no longer in initial load
-      // Small delay to ensure any pending messages are processed
-      setTimeout(() => {
-        isInitialLoadRef.current = false;
-      }, 100);
 
       // Set up live event listeners with run ID isolation
       const outputUnlisten = await listen<string>(`agent-output:${run!.id}`, (event) => {
         try {
-          // Skip messages during initial load phase
-          if (isInitialLoadRef.current) {
-            console.log('[AgentRunOutputViewer] Skipping message during initial load');
+          if (!shouldProcessLiveOutputPayload(knownOutputPayloadsRef.current, event.payload)) {
             return;
           }
-          
+
           // Store raw JSONL
           setRawJsonlOutput(prev => [...prev, event.payload]);
           
           // Parse and display
           const message = JSON.parse(event.payload) as ClaudeStreamMessage;
-          const candidateText = extractAttentionText(message);
-          if (shouldEmitNeedsInputAttention(message)) {
-            void emitAgentAttention({
-              kind: "needs_input",
-              workspaceId: workspaceIdForTab,
-              terminalTabId: tabId,
-              source: "agent_run_output",
-              body:
-                summarizeAttentionBody(candidateText) ||
-                "The agent is waiting for your input.",
-            });
+          const needsInputAttention = buildNeedsInputAttentionPayload(message, {
+            source: "agent_run_output",
+            workspaceId: workspaceIdForTab,
+            terminalTabId: tabId,
+          });
+          if (needsInputAttention) {
+            void emitAgentAttention(needsInputAttention);
           }
           setMessages(prev => [...prev, message]);
         } catch (err) {
@@ -331,13 +354,11 @@ export function AgentRunOutputViewer({
       const completeUnlisten = await listen<boolean>(`agent-complete:${run!.id}`, (event) => {
         setToast({ message: 'Agent execution completed', type: 'success' });
         if (event.payload) {
-          void emitAgentAttention({
-            kind: "done",
+          void emitAgentAttention(buildDoneAttentionPayload({
+            source: "agent_run_output",
             workspaceId: workspaceIdForTab,
             terminalTabId: tabId,
-            source: "agent_run_output",
-            body: `${run?.agent_name || "Agent"} completed successfully.`,
-          });
+          }, `${run?.agent_name || "Agent"} completed successfully.`));
         }
       });
 
@@ -490,6 +511,7 @@ export function AgentRunOutputViewer({
     if (cached) {
       const cachedJsonlLines = cached.output.split('\n').filter(line => line.trim());
       setRawJsonlOutput(cachedJsonlLines);
+      knownOutputPayloadsRef.current = buildKnownOutputPayloads(cachedJsonlLines);
       setMessages(cached.messages);
     }
     

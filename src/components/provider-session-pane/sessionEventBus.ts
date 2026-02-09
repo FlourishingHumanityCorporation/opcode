@@ -15,13 +15,13 @@ export const PROVIDER_SESSION_EVENT_NAMES = {
 let tauriListenPromise: Promise<any> | null = null;
 
 async function getTauriListen(): Promise<any> {
-  const hasTauriBridge =
+  // Web mode installs a lightweight __TAURI__ shim; only treat internals/metadata as real desktop runtime.
+  const hasDesktopTauriBridge =
     typeof window !== "undefined" &&
-    (Boolean((window as any).__TAURI__) ||
-      Boolean((window as any).__TAURI_INTERNALS__) ||
+    (Boolean((window as any).__TAURI_INTERNALS__) ||
       Boolean((window as any).__TAURI_METADATA__));
 
-  if (!hasTauriBridge) {
+  if (!hasDesktopTauriBridge) {
     return null;
   }
 

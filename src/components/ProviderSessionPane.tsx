@@ -56,10 +56,11 @@ import { SessionPersistenceService } from "@/services/sessionPersistence";
 import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
 import {
   emitAgentAttention,
-  extractAttentionText,
-  summarizeAttentionBody,
 } from "@/services/agentAttention";
-import { shouldEmitNeedsInputAttention as shouldEmitNeedsInputAttentionFromMessage } from "@/components/agentAttentionDetection";
+import {
+  buildDoneAttentionPayload,
+  buildNeedsInputAttentionPayload,
+} from "@/services/agentAttentionStreamBridge";
 import { createStreamWatchdog } from "@/lib/streamWatchdog";
 import {
   getDefaultModelForProvider,
@@ -288,7 +289,11 @@ export function resolveCanClosePane(canClosePane: boolean | undefined): boolean 
 export function shouldEmitNeedsInputAttention(
   message: ProviderSessionMessage
 ): boolean {
-  return shouldEmitNeedsInputAttentionFromMessage(message);
+  return (
+    buildNeedsInputAttentionPayload(message, {
+      source: "provider_session",
+    }) !== null
+  );
 }
 
 export function resolveStreamingState(params: {
@@ -1128,12 +1133,26 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         debugLog('[ProviderSessionPane] Received provider-session-output on reconnect:', event.payload);
         
         if (!isMountedRef.current) return;
+        markFirstStreamSeen(activeProviderId);
         
         // Store raw JSONL
         setRawJsonlOutput(prev => [...prev, event.payload]);
         
         // Parse and display
-        const message = JSON.parse(event.payload) as ProviderSessionMessage;
+        const message =
+          typeof event.payload === "string"
+            ? (JSON.parse(event.payload) as ProviderSessionMessage)
+            : (event.payload as ProviderSessionMessage);
+
+        const needsInputAttention = buildNeedsInputAttentionPayload(message, {
+          source: "provider_session",
+          workspaceId,
+          terminalTabId,
+        });
+        if (needsInputAttention) {
+          void emitAgentAttention(needsInputAttention);
+        }
+
         setMessages(prev => [...prev, message]);
       } catch (err) {
         console.error("Failed to parse message:", err, event.payload);
@@ -1154,9 +1173,23 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     const completeUnlisten = await listen(`provider-session-complete:${sessionId}`, async (event: any) => {
       debugLog('[ProviderSessionPane] Received provider-session-complete on reconnect:', event.payload);
       if (isMountedRef.current) {
+        const completion = normalizeProviderSessionCompletion(event.payload);
+        if (completion.success) {
+          void emitAgentAttention(
+            buildDoneAttentionPayload(
+              {
+                source: "provider_session",
+                workspaceId,
+                terminalTabId,
+              },
+              `Run completed for ${projectPath || "the current workspace"}.`
+            )
+          );
+        }
         clearStreamWatchdogs();
         setIsLoading(false);
         hasActiveSessionRef.current = false;
+        isListeningRef.current = false;
       }
     });
 
@@ -1488,17 +1521,13 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
             
             debugLog('[ProviderSessionPane] handleStreamMessage - message type:', message.type);
 
-            const candidateText = extractAttentionText(message);
-            if (shouldEmitNeedsInputAttention(message)) {
-              void emitAgentAttention({
-                kind: "needs_input",
-                workspaceId,
-                terminalTabId,
-                source: "provider_session",
-                body:
-                  summarizeAttentionBody(candidateText) ||
-                  "The agent is waiting for your input.",
-              });
+            const needsInputAttention = buildNeedsInputAttentionPayload(message, {
+              source: "provider_session",
+              workspaceId,
+              terminalTabId,
+            });
+            if (needsInputAttention) {
+              void emitAgentAttention(needsInputAttention);
             }
 
             // Store raw JSONL
@@ -1587,13 +1616,16 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           isListeningRef.current = false; // Reset listening state
 
           if (success) {
-            void emitAgentAttention({
-              kind: "done",
-              workspaceId,
-              terminalTabId,
-              source: "provider_session",
-              body: `Run completed for ${runProjectPath || "the current workspace"}.`,
-            });
+            void emitAgentAttention(
+              buildDoneAttentionPayload(
+                {
+                  source: "provider_session",
+                  workspaceId,
+                  terminalTabId,
+                },
+                `Run completed for ${runProjectPath || "the current workspace"}.`
+              )
+            );
           }
 
           logWorkspaceEvent({

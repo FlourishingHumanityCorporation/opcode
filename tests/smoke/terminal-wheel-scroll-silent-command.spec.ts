@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page, type Route } from "@playwright/t
 interface TerminalTelemetry {
   startedTerminalIds: string[];
   writes: Array<{ terminalId: string; data: string }>;
+  closeTerminalIds: string[];
 }
 
 function successPayload<T>(data: T) {
@@ -62,6 +63,9 @@ async function setupTerminalApiMock(page: Page, telemetry: TerminalTelemetry) {
     }
 
     if (path === "/api/terminal/resize" || path === "/api/terminal/close") {
+      if (path === "/api/terminal/close") {
+        telemetry.closeTerminalIds.push(url.searchParams.get("terminalId") || "");
+      }
       await fulfillSuccess(route, null);
       return;
     }
@@ -291,6 +295,7 @@ test.describe("Terminal wheel scroll smoke", () => {
     const telemetry: TerminalTelemetry = {
       startedTerminalIds: [],
       writes: [],
+      closeTerminalIds: [],
     };
 
     await setupTerminalApiMock(page, telemetry);
@@ -326,6 +331,7 @@ test.describe("Terminal wheel scroll smoke", () => {
     const telemetry: TerminalTelemetry = {
       startedTerminalIds: [],
       writes: [],
+      closeTerminalIds: [],
     };
 
     await setupTerminalApiMock(page, telemetry);
@@ -369,6 +375,7 @@ test.describe("Terminal wheel scroll smoke", () => {
     const telemetry: TerminalTelemetry = {
       startedTerminalIds: [],
       writes: [],
+      closeTerminalIds: [],
     };
 
     await setupTerminalApiMock(page, telemetry);
@@ -407,5 +414,56 @@ test.describe("Terminal wheel scroll smoke", () => {
     } finally {
       await removeScreenWheelBlocker(screen);
     }
+  });
+
+  test("header controls are clickable and pane-close behavior is correct", async ({ page }) => {
+    const telemetry: TerminalTelemetry = {
+      startedTerminalIds: [],
+      writes: [],
+      closeTerminalIds: [],
+    };
+
+    await setupTerminalApiMock(page, telemetry);
+    await page.addInitScript(() => {
+      localStorage.removeItem("opcode_workspace_v3");
+      localStorage.removeItem("opcode_tabs_v2");
+      localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+      localStorage.setItem("native_terminal_mode", "true");
+      localStorage.setItem("app_setting:native_terminal_mode", "true");
+    });
+
+    await bootstrapWorkspaceWithNativeTerminal(page);
+    await expect.poll(() => telemetry.startedTerminalIds.length).toBeGreaterThan(0);
+
+    await expect(page.getByTitle("Close Pane")).toHaveCount(0);
+
+    const writesBeforeRun = telemetry.writes.length;
+    await page.getByTitle("Run claude").first().click();
+    await expect
+      .poll(() => telemetry.writes.slice(writesBeforeRun).some((entry) => entry.data.includes("claude")))
+      .toBe(true);
+
+    const startsBeforeRestart = telemetry.startedTerminalIds.length;
+    await page.getByTitle("Restart terminal").first().click();
+    await expect
+      .poll(() => telemetry.startedTerminalIds.length, { timeout: 15_000 })
+      .toBeGreaterThan(startsBeforeRestart);
+
+    const startsBeforeSplit = telemetry.startedTerminalIds.length;
+    await page.getByTitle("Split Right").first().click({ force: true });
+    await expect(page.locator('[data-testid^="workspace-pane-"]:visible')).toHaveCount(2);
+    await expect
+      .poll(() => telemetry.startedTerminalIds.length, { timeout: 15_000 })
+      .toBeGreaterThan(startsBeforeSplit);
+
+    await expect(page.getByTitle("Close Pane")).toHaveCount(2);
+
+    const closesBeforeCloseClick = telemetry.closeTerminalIds.length;
+    await page.getByTitle("Close Pane").first().click({ force: true });
+    await expect(page.locator('[data-testid^="workspace-pane-"]:visible')).toHaveCount(1);
+    await expect(page.getByTitle("Close Pane")).toHaveCount(0);
+    await expect
+      .poll(() => telemetry.closeTerminalIds.length, { timeout: 15_000 })
+      .toBeGreaterThan(closesBeforeCloseClick);
   });
 });
