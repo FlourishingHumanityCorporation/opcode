@@ -12,7 +12,12 @@ import { TabPersistenceService } from '@/services/tabPersistence';
 import { SessionPersistenceService } from '@/services/sessionPersistence';
 import { hashWorkspaceState, logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 import { setTerminalWorkspaceSnapshotProvider } from '@/services/terminalHangDiagnostics';
-import { mobileSyncBridge } from '@/services/mobileSyncBridge';
+import {
+  buildProviderSessionStateSummaryPayload,
+  buildTerminalStateSummaryPayload,
+  buildWorkspaceStateChangedPayload,
+  mobileSyncBridge,
+} from '@/services/mobileSyncBridge';
 import { api } from '@/lib/api';
 
 export type UtilityOverlayType =
@@ -671,6 +676,8 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isInitialized, setIsInitialized] = useState(false);
   const stateRef = useRef(state);
   const lastPublishedSnapshotRef = useRef<string>('');
+  const lastPublishedTerminalSummaryRef = useRef<string>('');
+  const lastPublishedProviderSummaryRef = useRef<string>('');
 
   useEffect(() => {
     stateRef.current = state;
@@ -780,16 +787,36 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     lastPublishedSnapshotRef.current = snapshotHash;
     void mobileSyncBridge.publishSnapshot(serializableState);
-    void mobileSyncBridge.publishEvents([
+    const workspacePayload = buildWorkspaceStateChangedPayload(serializableState);
+    const terminalSummaryPayload = buildTerminalStateSummaryPayload(serializableState);
+    const providerSummaryPayload = buildProviderSessionStateSummaryPayload(serializableState);
+
+    const events: Array<{ eventType: string; payload: unknown }> = [
       {
         eventType: 'workspace.state_changed',
-        payload: {
-          activeTabId: state.activeTabId,
-          tabCount: state.tabs.length,
-          utilityOverlay: state.utilityOverlay,
-        },
+        payload: workspacePayload,
       },
-    ]);
+    ];
+
+    const terminalSummaryKey = stableSerializeWorkspace(terminalSummaryPayload);
+    if (terminalSummaryKey !== lastPublishedTerminalSummaryRef.current) {
+      lastPublishedTerminalSummaryRef.current = terminalSummaryKey;
+      events.push({
+        eventType: 'terminal.state_summary',
+        payload: terminalSummaryPayload,
+      });
+    }
+
+    const providerSummaryKey = stableSerializeWorkspace(providerSummaryPayload);
+    if (providerSummaryKey !== lastPublishedProviderSummaryRef.current) {
+      lastPublishedProviderSummaryRef.current = providerSummaryKey;
+      events.push({
+        eventType: 'provider_session.state_summary',
+        payload: providerSummaryPayload,
+      });
+    }
+
+    void mobileSyncBridge.publishEvents(events);
   }, [
     state.tabs,
     state.activeTabId,

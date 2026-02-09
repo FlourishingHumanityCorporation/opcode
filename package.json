@@ -21,6 +21,7 @@
     "test:unit:watch": "vitest",
     "test:mobile-sync": "vitest run src/services/mobileSyncProtocol.test.ts",
     "test:remote-access:contracts": "vitest run -c vitest.remote.config.ts",
+    "test:interactive:window-size:macos": "node scripts/test-window-size-persistence.macos.mjs",
     "smoke:remote-web": "playwright test -c playwright.remote.config.ts tests/smoke/remote-access-webmode.spec.ts",
     "debug:session-start": "node scripts/measure-session-startup.mjs",
     "debug:session-start:json": "node scripts/measure-session-startup.mjs --json",

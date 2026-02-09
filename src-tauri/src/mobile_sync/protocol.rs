@@ -83,6 +83,7 @@ pub struct DeviceRevokeRequest {
 #[serde(rename_all = "camelCase")]
 pub struct WsQuery {
     pub since: Option<u64>,
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

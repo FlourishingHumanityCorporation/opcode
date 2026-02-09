@@ -142,68 +142,50 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            let mut persisted_window_size: Option<(f64, f64)> = None;
-
             // Initialize agents database
             let conn = init_database(&app.handle()).expect("Failed to initialize agents database");
 
             // Load and apply proxy settings from the database
-            {
-                let db = AgentDb(Mutex::new(conn));
-                let proxy_settings = match db.0.lock() {
-                    Ok(conn) => {
-                        // Directly query proxy settings from the database
-                        let mut settings = commands::proxy::ProxySettings::default();
+            let (proxy_settings, persisted_window_size) = {
+                // Directly query proxy settings from the database
+                let mut settings = commands::proxy::ProxySettings::default();
+                let keys = [
+                    ("proxy_enabled", "enabled"),
+                    ("proxy_http", "http_proxy"),
+                    ("proxy_https", "https_proxy"),
+                    ("proxy_no", "no_proxy"),
+                    ("proxy_all", "all_proxy"),
+                ];
 
-                        let keys = vec![
-                            ("proxy_enabled", "enabled"),
-                            ("proxy_http", "http_proxy"),
-                            ("proxy_https", "https_proxy"),
-                            ("proxy_no", "no_proxy"),
-                            ("proxy_all", "all_proxy"),
-                        ];
-
-                        for (db_key, field) in keys {
-                            if let Ok(value) = conn.query_row(
-                                "SELECT value FROM app_settings WHERE key = ?1",
-                                rusqlite::params![db_key],
-                                |row| row.get::<_, String>(0),
-                            ) {
-                                match field {
-                                    "enabled" => settings.enabled = value == "true",
-                                    "http_proxy" => {
-                                        settings.http_proxy = Some(value).filter(|s| !s.is_empty())
-                                    }
-                                    "https_proxy" => {
-                                        settings.https_proxy = Some(value).filter(|s| !s.is_empty())
-                                    }
-                                    "no_proxy" => {
-                                        settings.no_proxy = Some(value).filter(|s| !s.is_empty())
-                                    }
-                                    "all_proxy" => {
-                                        settings.all_proxy = Some(value).filter(|s| !s.is_empty())
-                                    }
-                                    _ => {}
-                                }
+                for (db_key, field) in keys {
+                    if let Ok(value) = conn.query_row(
+                        "SELECT value FROM app_settings WHERE key = ?1",
+                        rusqlite::params![db_key],
+                        |row| row.get::<_, String>(0),
+                    ) {
+                        match field {
+                            "enabled" => settings.enabled = value == "true",
+                            "http_proxy" => {
+                                settings.http_proxy = Some(value).filter(|s| !s.is_empty())
                             }
+                            "https_proxy" => {
+                                settings.https_proxy = Some(value).filter(|s| !s.is_empty())
+                            }
+                            "no_proxy" => {
+                                settings.no_proxy = Some(value).filter(|s| !s.is_empty())
+                            }
+                            "all_proxy" => settings.all_proxy = Some(value).filter(|s| !s.is_empty()),
+                            _ => {}
                         }
-
-                        log::info!("Loaded proxy settings: enabled={}", settings.enabled);
-                        persisted_window_size = load_persisted_window_size(&conn);
-                        settings
                     }
-                    Err(e) => {
-                        log::warn!("Failed to lock database for proxy settings: {}", e);
-                        commands::proxy::ProxySettings::default()
-                    }
-                };
+                }
 
-                // Apply the proxy settings
-                apply_proxy_settings(&proxy_settings);
-            }
+                log::info!("Loaded proxy settings: enabled={}", settings.enabled);
+                (settings, load_persisted_window_size(&conn))
+            };
 
-            // Re-open the connection for the app to manage
-            let conn = init_database(&app.handle()).expect("Failed to initialize agents database");
+            // Apply the proxy settings
+            apply_proxy_settings(&proxy_settings);
             app.manage(AgentDb(Mutex::new(conn)));
 
             // Initialize checkpoint state

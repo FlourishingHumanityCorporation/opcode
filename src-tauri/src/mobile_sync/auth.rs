@@ -107,3 +107,37 @@ pub fn parse_expiration(expiration_raw: &str) -> Result<DateTime<Utc>, String> {
         .map_err(|error| format!("Invalid expiration timestamp: {}", error))?;
     Ok(parsed.with_timezone(&Utc))
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::http::HeaderValue;
+
+    use super::*;
+
+    #[test]
+    fn extract_bearer_token_handles_valid_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", HeaderValue::from_static("Bearer token-value"));
+
+        let token = extract_bearer_token(&headers).expect("token should be parsed");
+        assert_eq!(token, "token-value");
+    }
+
+    #[test]
+    fn extract_bearer_token_rejects_empty_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", HeaderValue::from_static("Bearer   "));
+
+        assert!(extract_bearer_token(&headers).is_none());
+    }
+
+    #[test]
+    fn hash_token_is_deterministic() {
+        let hash_a = hash_token("token-123");
+        let hash_b = hash_token("token-123");
+        let hash_c = hash_token("token-456");
+
+        assert_eq!(hash_a, hash_b);
+        assert_ne!(hash_a, hash_c);
+    }
+}

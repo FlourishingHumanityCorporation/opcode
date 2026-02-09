@@ -30,6 +30,18 @@ struct MobileServerAppState {
     service: MobileSyncServiceState,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WsAuthTokenSource {
+    Header,
+    Query,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WsAuthTokenSelection {
+    token: String,
+    source: WsAuthTokenSource,
+}
+
 pub async fn run_mobile_sync_server(
     app: AppHandle,
     service: MobileSyncServiceState,
@@ -90,6 +102,56 @@ fn authenticate_request(
         .ok_or_else(|| api_error(StatusCode::UNAUTHORIZED, "Missing bearer token"))?;
 
     authenticate_token(app, &token).map_err(|error| api_error(StatusCode::UNAUTHORIZED, error))
+}
+
+fn authenticate_ws_request(
+    app: &AppHandle,
+    headers: &HeaderMap,
+    query: &WsQuery,
+) -> Result<super::auth::AuthenticatedDevice, (StatusCode, Json<serde_json::Value>)> {
+    authenticate_ws_request_with(headers, query, |token| authenticate_token(app, token))
+}
+
+fn select_ws_auth_token(
+    headers: &HeaderMap,
+    query: &WsQuery,
+) -> Result<WsAuthTokenSelection, (StatusCode, Json<serde_json::Value>)> {
+    if let Some(token) = extract_bearer_token(headers) {
+        verify_version(headers)?;
+        return Ok(WsAuthTokenSelection {
+            token,
+            source: WsAuthTokenSource::Header,
+        });
+    }
+
+    if let Some(query_token) = query
+        .token
+        .as_ref()
+        .map(|token| token.trim())
+        .filter(|token| !token.is_empty())
+    {
+        return Ok(WsAuthTokenSelection {
+            token: query_token.to_string(),
+            source: WsAuthTokenSource::Query,
+        });
+    }
+
+    Err(api_error(
+        StatusCode::UNAUTHORIZED,
+        "Missing websocket auth token",
+    ))
+}
+
+fn authenticate_ws_request_with<F>(
+    headers: &HeaderMap,
+    query: &WsQuery,
+    mut authenticate_fn: F,
+) -> Result<super::auth::AuthenticatedDevice, (StatusCode, Json<serde_json::Value>)>
+where
+    F: FnMut(&str) -> Result<super::auth::AuthenticatedDevice, String>,
+{
+    let selection = select_ws_auth_token(headers, query)?;
+    authenticate_fn(&selection.token).map_err(|error| api_error(StatusCode::UNAUTHORIZED, error))
 }
 
 async fn health_handler(
@@ -318,7 +380,7 @@ async fn websocket_handler(
         return error.into_response();
     }
 
-    if let Err(error) = authenticate_request(&state.app, &headers) {
+    if let Err(error) = authenticate_ws_request(&state.app, &headers, &query) {
         return error.into_response();
     }
 
@@ -405,4 +467,95 @@ async fn websocket_loop(socket: WebSocket, state: MobileServerAppState, since: u
     }
 
     service.cache.decrement_clients();
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::HeaderValue;
+
+    use super::*;
+    use crate::mobile_sync::auth::AuthenticatedDevice;
+
+    fn ws_query(token: Option<&str>) -> WsQuery {
+        WsQuery {
+            since: None,
+            token: token.map(ToOwned::to_owned),
+        }
+    }
+
+    fn authenticated_device() -> AuthenticatedDevice {
+        AuthenticatedDevice {
+            device_id: "device-1".to_string(),
+            device_name: "iPhone".to_string(),
+        }
+    }
+
+    #[test]
+    fn select_ws_auth_token_prefers_header_token() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", HeaderValue::from_static("Bearer header-token"));
+        headers.insert("x-opcode-sync-version", HeaderValue::from_static("1"));
+        let query = ws_query(Some("query-token"));
+
+        let selection = select_ws_auth_token(&headers, &query).expect("selection should succeed");
+
+        assert_eq!(selection.token, "header-token");
+        assert_eq!(selection.source, WsAuthTokenSource::Header);
+    }
+
+    #[test]
+    fn select_ws_auth_token_uses_query_when_header_missing() {
+        let headers = HeaderMap::new();
+        let query = ws_query(Some("query-token"));
+
+        let selection = select_ws_auth_token(&headers, &query).expect("selection should succeed");
+
+        assert_eq!(selection.token, "query-token");
+        assert_eq!(selection.source, WsAuthTokenSource::Query);
+    }
+
+    #[test]
+    fn select_ws_auth_token_rejects_empty_query_token() {
+        let headers = HeaderMap::new();
+        let query = ws_query(Some("   "));
+
+        let error = select_ws_auth_token(&headers, &query).expect_err("selection should fail");
+        assert_eq!(error.0, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn select_ws_auth_token_rejects_missing_token() {
+        let headers = HeaderMap::new();
+        let query = ws_query(None);
+
+        let error = select_ws_auth_token(&headers, &query).expect_err("selection should fail");
+        assert_eq!(error.0, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn authenticate_ws_request_maps_revoked_device_to_unauthorized() {
+        let headers = HeaderMap::new();
+        let query = ws_query(Some("query-token"));
+
+        let error = authenticate_ws_request_with(&headers, &query, |_token| {
+            Err("Device has been revoked".to_string())
+        })
+        .expect_err("auth should fail");
+
+        assert_eq!(error.0, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn authenticate_ws_request_with_valid_token_succeeds() {
+        let headers = HeaderMap::new();
+        let query = ws_query(Some("query-token"));
+
+        let device = authenticate_ws_request_with(&headers, &query, |token| {
+            assert_eq!(token, "query-token");
+            Ok(authenticated_device())
+        })
+        .expect("auth should succeed");
+
+        assert_eq!(device.device_id, "device-1");
+    }
 }

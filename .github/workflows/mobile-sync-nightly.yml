@@ -20,6 +20,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install mobile app dependencies
+        run: |
+          cd apps/mobile
+          npm install
+
+      - name: Mobile app typecheck
+        run: |
+          cd apps/mobile
+          npx tsc --noEmit
+
+      - name: Mobile app tests
+        run: |
+          cd apps/mobile
+          npm test
+
       - name: Run unit tests
         run: npm run test:unit
 
@@ -37,5 +52,6 @@ jobs:
         with:
           name: mobile-sync-nightly-logs
           path: |
+            apps/mobile/test-results/**
             test-results/**
             src-tauri/target/**/deps/*.d

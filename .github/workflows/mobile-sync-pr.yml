@@ -28,6 +28,11 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
+      - name: Install mobile app dependencies
+        run: |
+          cd apps/mobile
+          npm install
+
       - name: Run protocol parity/unit tests
         run: npm run test:unit -- src/services/mobileSyncProtocol.test.ts
 
@@ -35,3 +40,18 @@ jobs:
         run: |
           cd src-tauri
           cargo test mobile_sync::protocol::tests::fixture_parity_event_envelope_v1
+
+      - name: Rust auth matrix tests (mobile_sync)
+        run: |
+          cd src-tauri
+          cargo test mobile_sync::server::tests
+
+      - name: Mobile app typecheck
+        run: |
+          cd apps/mobile
+          npx tsc --noEmit
+
+      - name: Mobile app tests
+        run: |
+          cd apps/mobile
+          npm test

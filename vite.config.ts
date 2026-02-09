@@ -24,7 +24,9 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
+    // Force IPv4 by default to avoid localhost resolving to 127.0.0.1
+    // while Vite is bound only to ::1 (blank Tauri webview on some macOS setups).
+    host: host || "127.0.0.1",
     hmr: host
       ? {
           protocol: "ws",
