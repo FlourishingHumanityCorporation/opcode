@@ -20,6 +20,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build frontend artifacts
+        run: npm run build
+
       - name: Install mobile app dependencies
         run: |
           cd apps/mobile
