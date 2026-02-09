@@ -4,6 +4,11 @@ import { Folder, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTabState } from '@/hooks/useTabState';
 import type { Tab, WorkspaceStatus } from '@/contexts/TabContext';
+import {
+  getStatusIndicator,
+  renderTabStatusMarker,
+  type TabStatusIndicator,
+} from '@/components/tabStatusIndicator';
 
 interface TabManagerProps {
   className?: string;
@@ -17,26 +22,10 @@ interface ProjectTabItemProps {
   onClose: (id: string) => void;
 }
 
-interface WorkspaceStatusMeta {
-  label: string;
-  className: string;
-}
-
 export function getWorkspaceStatusMeta(
   status: WorkspaceStatus
-): WorkspaceStatusMeta | null {
-  switch (status) {
-    case 'attention':
-      return { label: 'Needs input', className: 'bg-amber-500' };
-    case 'error':
-      return { label: 'Error', className: 'bg-rose-500' };
-    case 'running':
-      return { label: 'Running', className: 'bg-emerald-500' };
-    case 'complete':
-      return { label: 'Complete', className: 'bg-sky-500' };
-    default:
-      return null;
-  }
+): TabStatusIndicator | null {
+  return getStatusIndicator(status);
 }
 
 export function getWorkspaceAggregateStatus(tab: Tab): WorkspaceStatus {
@@ -54,7 +43,7 @@ export function getWorkspaceAggregateStatus(tab: Tab): WorkspaceStatus {
 }
 
 const ProjectTabItem: React.FC<ProjectTabItemProps> = ({ tab, aggregateStatus, isActive, onClick, onClose }) => {
-  const statusMeta = getWorkspaceStatusMeta(aggregateStatus);
+  const statusIndicator = getWorkspaceStatusMeta(aggregateStatus);
   return (
     <Reorder.Item
       value={tab}
@@ -70,13 +59,9 @@ const ProjectTabItem: React.FC<ProjectTabItemProps> = ({ tab, aggregateStatus, i
       data-testid={`workspace-tab-${tab.id}`}
     >
       <Folder className="h-3.5 w-3.5 shrink-0" />
-      {statusMeta && (
-        <span
-          className={cn('h-1.5 w-1.5 shrink-0 rounded-full', statusMeta.className)}
-          title={statusMeta.label}
-          aria-label={statusMeta.label}
-        />
-      )}
+      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+        {statusIndicator ? renderTabStatusMarker(statusIndicator) : null}
+      </span>
       <span className="min-w-0 flex-1 truncate text-left">{tab.title || 'Project'}</span>
       <button
         className={cn(

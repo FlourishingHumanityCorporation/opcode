@@ -4,6 +4,7 @@ pub mod claude;
 pub mod provider_session;
 pub mod codex_transform;
 pub mod diagnostics;
+pub mod hot_refresh;
 pub mod mcp;
 pub mod proxy;
 pub mod slash_commands;

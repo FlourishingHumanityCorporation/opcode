@@ -34,13 +34,14 @@ import { useTheme, useTrackEvent } from "@/hooks";
 import { analytics } from "@/lib/analytics";
 import { TabPersistenceService } from "@/services/tabPersistence";
 import {
-  loadNativeTerminalStartCommandPreference,
-  loadPlainTerminalModePreference,
-  loadNativeTerminalModePreference,
-  saveNativeTerminalStartCommandPreference,
-  savePlainTerminalModePreference,
-  saveNativeTerminalModePreference,
-} from "@/lib/uiPreferences";
+  formatWatchPathsInput,
+  loadHotRefreshPreferences,
+  parseWatchPathsInput,
+  saveHotRefreshEnabledPreference,
+  saveHotRefreshScopePreference,
+  saveHotRefreshWatchPathsPreference,
+  type HotRefreshScope,
+} from "@/lib/hotRefreshPreferences";
 
 interface SettingsProps {
   /**
@@ -105,10 +106,9 @@ export const Settings: React.FC<SettingsProps> = ({
   
   // Tab persistence state
   const [tabPersistenceEnabled, setTabPersistenceEnabled] = useState(true);
-  const [plainTerminalModeEnabled, setPlainTerminalModeEnabled] = useState(false);
-  const [nativeTerminalModeEnabled, setNativeTerminalModeEnabled] = useState(false);
-  const [nativeTerminalStartCommand, setNativeTerminalStartCommand] = useState("");
-  const [savingNativeTerminalStartCommand, setSavingNativeTerminalStartCommand] = useState(false);
+  const [hotRefreshEnabled, setHotRefreshEnabled] = useState(true);
+  const [hotRefreshScope, setHotRefreshScope] = useState<HotRefreshScope>("all");
+  const [hotRefreshWatchPathsInput, setHotRefreshWatchPathsInput] = useState("");
 
   // Provider detection state
   const [detectedAgents, setDetectedAgents] = useState<Array<{ provider_id: string; binary_path: string; version: string | null; source: string }>>([]);
@@ -127,26 +127,10 @@ export const Settings: React.FC<SettingsProps> = ({
     loadAnalyticsSettings();
     loadDetectedAgents();
     loadMobileSyncStatus();
+    void loadHotRefreshSettings();
     // Load tab persistence setting
     setTabPersistenceEnabled(TabPersistenceService.isEnabled());
-    loadPlainTerminalModePreference().then(setPlainTerminalModeEnabled);
-    loadNativeTerminalModePreference().then(setNativeTerminalModeEnabled);
-    loadNativeTerminalStartCommandPreference().then(setNativeTerminalStartCommand);
   }, []);
-
-  const persistNativeTerminalStartCommand = async () => {
-    try {
-      setSavingNativeTerminalStartCommand(true);
-      await saveNativeTerminalStartCommandPreference(nativeTerminalStartCommand);
-      trackEvent.settingsChanged('native_terminal_start_command', nativeTerminalStartCommand);
-      setToast({ message: "In-app terminal startup command saved", type: "success" });
-    } catch (error) {
-      console.error("Failed to save in-app terminal startup command:", error);
-      setToast({ message: "Failed to save startup command", type: "error" });
-    } finally {
-      setSavingNativeTerminalStartCommand(false);
-    }
-  };
 
   /**
    * Loads analytics settings
@@ -155,6 +139,17 @@ export const Settings: React.FC<SettingsProps> = ({
     const settings = analytics.getSettings();
     if (settings) {
       setAnalyticsEnabled(settings.enabled);
+    }
+  };
+
+  const loadHotRefreshSettings = async () => {
+    try {
+      const preferences = await loadHotRefreshPreferences();
+      setHotRefreshEnabled(preferences.enabled);
+      setHotRefreshScope(preferences.scope);
+      setHotRefreshWatchPathsInput(formatWatchPathsInput(preferences.watchPaths));
+    } catch (error) {
+      console.error("Failed to load hot refresh settings:", error);
     }
   };
 
@@ -456,6 +451,61 @@ export const Settings: React.FC<SettingsProps> = ({
   const handleClaudeInstallationSelect = (installation: ClaudeInstallation) => {
     setSelectedInstallation(installation);
     setBinaryPathChanged(installation.path !== currentBinaryPath);
+  };
+
+  const handleHotRefreshEnabledChange = async (enabled: boolean) => {
+    setHotRefreshEnabled(enabled);
+    try {
+      await saveHotRefreshEnabledPreference(enabled);
+      setToast({
+        message: enabled
+          ? "Automatic hot refresh enabled"
+          : "Automatic hot refresh disabled",
+        type: "success",
+      });
+    } catch (error) {
+      console.error("Failed to save hot refresh toggle:", error);
+      setToast({ message: "Failed to update hot refresh setting", type: "error" });
+    }
+  };
+
+  const handleHotRefreshScopeChange = async (scope: HotRefreshScope) => {
+    setHotRefreshScope(scope);
+    try {
+      await saveHotRefreshScopePreference(scope);
+      setToast({
+        message:
+          scope === "all"
+            ? "Hot refresh scope set to all runtimes"
+            : "Hot refresh scope set to dev only",
+        type: "success",
+      });
+    } catch (error) {
+      console.error("Failed to save hot refresh scope:", error);
+      setToast({ message: "Failed to update hot refresh scope", type: "error" });
+    }
+  };
+
+  const handleHotRefreshWatchPathsBlur = async (rawInput?: string) => {
+    const parsed = parseWatchPathsInput(rawInput ?? hotRefreshWatchPathsInput);
+    if (parsed.length === 0) {
+      setToast({
+        message: "Provide at least one watch path for all-runtime hot refresh.",
+        type: "error",
+      });
+      return;
+    }
+
+    const normalizedInput = formatWatchPathsInput(parsed);
+    setHotRefreshWatchPathsInput(normalizedInput);
+
+    try {
+      await saveHotRefreshWatchPathsPreference(parsed);
+      setToast({ message: "Hot refresh watch paths updated", type: "success" });
+    } catch (error) {
+      console.error("Failed to save hot refresh watch paths:", error);
+      setToast({ message: "Failed to update hot refresh watch paths", type: "error" });
+    }
   };
 
   return (
@@ -884,91 +934,71 @@ export const Settings: React.FC<SettingsProps> = ({
                       />
                     </div>
 
-                    {/* Plain terminal mode toggle */}
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-1">
-                        <Label htmlFor="plain-terminal-mode">Plain Terminal Mode</Label>
-                        <p className="text-caption text-muted-foreground">
-                          Show a compact CLI-like stream view instead of styled message cards
-                        </p>
-                      </div>
-                      <Switch
-                        id="plain-terminal-mode"
-                        checked={plainTerminalModeEnabled}
-                        onCheckedChange={async (checked) => {
-                          setPlainTerminalModeEnabled(checked);
-                          await savePlainTerminalModePreference(checked);
-                          trackEvent.settingsChanged('plain_terminal_mode', checked);
-                          setToast({
-                            message: checked
-                              ? "Plain terminal mode enabled"
-                              : "Plain terminal mode disabled",
-                            type: "success",
-                          });
-                        }}
-                      />
-                    </div>
-
-                    {/* Native terminal mode toggle */}
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-1">
-                        <Label htmlFor="native-terminal-mode">In-App Terminal Mode</Label>
-                        <p className="text-caption text-muted-foreground">
-                          Use an embedded PTY terminal in the pane instead of chat cards
-                        </p>
-                      </div>
-                      <Switch
-                        id="native-terminal-mode"
-                        checked={nativeTerminalModeEnabled}
-                        onCheckedChange={async (checked) => {
-                          setNativeTerminalModeEnabled(checked);
-                          await saveNativeTerminalModePreference(checked);
-                          trackEvent.settingsChanged('native_terminal_mode', checked);
-                          setToast({
-                            message: checked
-                              ? "In-app terminal mode enabled"
-                              : "In-app terminal mode disabled",
-                            type: "success",
-                          });
-                        }}
-                      />
-                    </div>
-
-                    {/* In-app terminal startup command */}
-                    <div className="space-y-2">
-                      <Label htmlFor="native-terminal-start-command">In-App Terminal Startup Command</Label>
-                      <p className="text-caption text-muted-foreground">
-                        Command to auto-run when a fresh in-app terminal starts. Leave empty for shell prompt.
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          id="native-terminal-start-command"
-                          value={nativeTerminalStartCommand}
-                          onChange={(event) => setNativeTerminalStartCommand(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                              event.preventDefault();
-                              void persistNativeTerminalStartCommand();
-                            }
-                          }}
-                          placeholder="claude"
+                    <div className="rounded-lg border border-border bg-muted/50 p-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <Label htmlFor="hot-refresh-enabled">Automatic Hot Refresh</Label>
+                          <p className="text-caption text-muted-foreground">
+                            Reload stale windows automatically when code changes are detected.
+                          </p>
+                        </div>
+                        <Switch
+                          id="hot-refresh-enabled"
+                          checked={hotRefreshEnabled}
+                          onCheckedChange={handleHotRefreshEnabledChange}
                         />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => void persistNativeTerminalStartCommand()}
-                          disabled={savingNativeTerminalStartCommand}
-                        >
-                          {savingNativeTerminalStartCommand ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                              Saving
-                            </>
-                          ) : (
-                            "Save"
-                          )}
-                        </Button>
                       </div>
+
+                      <div className="space-y-1">
+                        <Label>Hot Refresh Scope</Label>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={hotRefreshScope === "dev_only" ? "default" : "outline"}
+                            onClick={() => handleHotRefreshScopeChange("dev_only")}
+                            data-testid="hot-refresh-scope-dev-only"
+                          >
+                            Dev only
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={hotRefreshScope === "all" ? "default" : "outline"}
+                            onClick={() => handleHotRefreshScopeChange("all")}
+                            data-testid="hot-refresh-scope-all"
+                          >
+                            All runtimes
+                          </Button>
+                        </div>
+                      </div>
+
+                      {hotRefreshScope === "all" && (
+                        <div className="space-y-2">
+                          <Label htmlFor="hot-refresh-watch-paths">Watch paths</Label>
+                          <textarea
+                            id="hot-refresh-watch-paths"
+                            className="min-h-[96px] w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
+                            value={hotRefreshWatchPathsInput}
+                            onChange={(event) => setHotRefreshWatchPathsInput(event.target.value)}
+                            onBlur={(event) =>
+                              void handleHotRefreshWatchPathsBlur(event.currentTarget.value)
+                            }
+                            placeholder="src&#10;src-tauri/src&#10;vite.config.ts"
+                            data-testid="hot-refresh-watch-paths"
+                          />
+                          <p className="text-caption text-muted-foreground">
+                            One path per line. Changes are saved when this field loses focus.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border border-border bg-muted/50 p-3">
+                      <p className="text-sm font-medium text-foreground">Terminal mode</p>
+                      <p className="text-xs text-muted-foreground">
+                        In-app terminal mode is always enabled.
+                      </p>
                     </div>
 
                   </div>

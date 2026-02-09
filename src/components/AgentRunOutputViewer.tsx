@@ -31,9 +31,9 @@ import { getModelDisplayName } from '@/lib/providerModels';
 import {
   emitAgentAttention,
   extractAttentionText,
-  shouldTriggerNeedsInput,
   summarizeAttentionBody,
 } from '@/services/agentAttention';
+import { shouldEmitNeedsInputAttention } from '@/components/agentAttentionDetection';
 
 interface AgentRunOutputViewerProps {
   /**
@@ -305,19 +305,17 @@ export function AgentRunOutputViewer({
           
           // Parse and display
           const message = JSON.parse(event.payload) as ClaudeStreamMessage;
-          if (message.type === "assistant") {
-            const candidateText = extractAttentionText(message);
-            if (shouldTriggerNeedsInput(candidateText)) {
-              void emitAgentAttention({
-                kind: "needs_input",
-                workspaceId: workspaceIdForTab,
-                terminalTabId: tabId,
-                source: "agent_run_output",
-                body:
-                  summarizeAttentionBody(candidateText) ||
-                  "The agent is waiting for your input.",
-              });
-            }
+          const candidateText = extractAttentionText(message);
+          if (shouldEmitNeedsInputAttention(message)) {
+            void emitAgentAttention({
+              kind: "needs_input",
+              workspaceId: workspaceIdForTab,
+              terminalTabId: tabId,
+              source: "agent_run_output",
+              body:
+                summarizeAttentionBody(candidateText) ||
+                "The agent is waiting for your input.",
+            });
           }
           setMessages(prev => [...prev, message]);
         } catch (err) {

@@ -143,8 +143,8 @@ test.describe("Agent attention smoke", () => {
       timestamp: Date.now(),
     });
 
-    await expect(terminalTab.locator('[aria-label="Needs input"]')).toBeVisible();
-    await expect(workspaceTab.locator('[aria-label="Needs input"]')).toBeVisible();
+    await expect(terminalTab.locator('[aria-label="Needs response"]')).toBeVisible();
+    await expect(workspaceTab.locator('[aria-label="Needs response"]')).toBeVisible();
 
     await dispatchAgentAttention(page, {
       kind: "done",
@@ -156,8 +156,8 @@ test.describe("Agent attention smoke", () => {
       timestamp: Date.now() + 10,
     });
 
-    await expect(terminalTab.locator('[aria-label="Complete"]')).toBeVisible();
-    await expect(workspaceTab.locator('[aria-label="Complete"]')).toBeVisible();
+    await expect(terminalTab.locator('[aria-label="Needs check"]')).toBeVisible();
+    await expect(workspaceTab.locator('[aria-label="Needs check"]')).toBeVisible();
   });
 
   test("clears terminal status on activate for attention and complete", async ({ page }) => {
@@ -173,9 +173,9 @@ test.describe("Agent attention smoke", () => {
       source: "provider_session",
       timestamp: Date.now(),
     });
-    await expect(terminalTab.locator('[aria-label="Needs input"]')).toBeVisible();
+    await expect(terminalTab.locator('[aria-label="Needs response"]')).toBeVisible();
     await terminalTab.click();
-    await expect(terminalTab.locator('[aria-label="Needs input"]')).toHaveCount(0);
+    await expect(terminalTab.locator('[aria-label="Needs response"]')).toHaveCount(0);
 
     await dispatchAgentAttention(page, {
       kind: "done",
@@ -186,9 +186,9 @@ test.describe("Agent attention smoke", () => {
       source: "provider_session",
       timestamp: Date.now() + 10,
     });
-    await expect(terminalTab.locator('[aria-label="Complete"]')).toBeVisible();
+    await expect(terminalTab.locator('[aria-label="Needs check"]')).toBeVisible();
     await terminalTab.click();
-    await expect(terminalTab.locator('[aria-label="Complete"]')).toHaveCount(0);
+    await expect(terminalTab.locator('[aria-label="Needs check"]')).toHaveCount(0);
   });
 
   test("workspace aggregate prioritizes attention over complete and drops after clear", async ({
@@ -224,10 +224,10 @@ test.describe("Agent attention smoke", () => {
       timestamp: Date.now() + 10,
     });
 
-    await expect(workspaceTab.locator('[aria-label="Needs input"]')).toBeVisible();
+    await expect(workspaceTab.locator('[aria-label="Needs response"]')).toBeVisible();
 
     await secondTerminalTab.click();
-    await expect(secondTerminalTab.locator('[aria-label="Needs input"]')).toHaveCount(0);
-    await expect(workspaceTab.locator('[aria-label="Complete"]')).toBeVisible();
+    await expect(secondTerminalTab.locator('[aria-label="Needs response"]')).toHaveCount(0);
+    await expect(workspaceTab.locator('[aria-label="Needs check"]')).toBeVisible();
   });
 });

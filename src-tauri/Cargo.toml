@@ -66,6 +66,7 @@ futures-util = "0.3"
 portable-pty = "0.8"
 # Pin image to avoid edition2024 requirement
 image = "=0.25.1"
+notify = "6"
 
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -2,7 +2,10 @@ import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Tab, TerminalTab } from "@/contexts/TabContext";
-import { TerminalPaneSurface } from "@/components/TerminalPaneSurface";
+import {
+  TerminalPaneSurface,
+  resolveTerminalStatusFromStreaming,
+} from "@/components/TerminalPaneSurface";
 
 const capturedProviderSessionProps = vi.hoisted(() => ({
   value: null as any,
@@ -89,6 +92,14 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
       updateTab: updateTabSpy,
       updatePaneState: updatePaneStateSpy,
     });
+  });
+
+  it("maps streaming changes to running/idle transitions", () => {
+    expect(resolveTerminalStatusFromStreaming("idle", true)).toBe("running");
+    expect(resolveTerminalStatusFromStreaming("running", true)).toBeNull();
+    expect(resolveTerminalStatusFromStreaming("running", false)).toBe("idle");
+    expect(resolveTerminalStatusFromStreaming("attention", false)).toBeNull();
+    expect(resolveTerminalStatusFromStreaming("complete", false)).toBeNull();
   });
 
   it("passes active pane state to ProviderSessionPane", () => {

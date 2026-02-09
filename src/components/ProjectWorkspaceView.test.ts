@@ -71,20 +71,20 @@ describe("ProjectWorkspaceView title lock", () => {
 
   it("maps terminal statuses to indicator metadata", () => {
     expect(getTerminalStatusMeta("running")).toEqual({
-      label: "Running",
-      className: "bg-emerald-500",
+      kind: "running",
+      label: "In progress",
     });
     expect(getTerminalStatusMeta("complete")).toEqual({
-      label: "Complete",
-      className: "bg-sky-500",
+      kind: "needs_check",
+      label: "Needs check",
     });
     expect(getTerminalStatusMeta("attention")).toEqual({
-      label: "Needs input",
-      className: "bg-amber-500",
+      kind: "needs_response",
+      label: "Needs response",
     });
     expect(getTerminalStatusMeta("error")).toEqual({
+      kind: "error",
       label: "Error",
-      className: "bg-rose-500",
     });
     expect(getTerminalStatusMeta("idle")).toBeNull();
     expect(getTerminalStatusMeta("active")).toBeNull();

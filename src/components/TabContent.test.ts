@@ -3,7 +3,7 @@ import type { Tab, TerminalTab } from "@/contexts/TabContext";
 import {
   applyAgentAttentionStatusUpdate,
   mapAgentAttentionKindToStatus,
-} from "@/components/TabContent";
+} from "@/services/agentAttentionRouting";
 import type { AgentAttentionEventDetail } from "@/services/agentAttention";
 
 function makeTerminal(id: string): TerminalTab {
@@ -48,6 +48,14 @@ function makeWorkspace(terminalId: string): Tab {
     order: 0,
     createdAt: now,
     updatedAt: now,
+  };
+}
+
+function makeWorkspaceWithId(workspaceId: string, terminalId: string): Tab {
+  const workspace = makeWorkspace(terminalId);
+  return {
+    ...workspace,
+    id: workspaceId,
   };
 }
 
@@ -120,6 +128,33 @@ describe("TabContent agent attention event handling", () => {
 
     expect(applied).toBe(false);
     expect(updateTab).not.toHaveBeenCalled();
+  });
+
+  it("routes status updates by terminal id even when workspace id is stale", () => {
+    const updateTab = vi.fn();
+    const detail: AgentAttentionEventDetail = {
+      kind: "needs_input",
+      workspaceId: "workspace-stale",
+      terminalTabId: "terminal-primary",
+      title: "Agent needs input",
+      body: "Please approve.",
+      source: "provider_session",
+      timestamp: Date.now(),
+    };
+
+    const applied = applyAgentAttentionStatusUpdate(
+      [
+        makeWorkspaceWithId("workspace-primary", "terminal-primary"),
+        makeWorkspaceWithId("workspace-stale", "terminal-other"),
+      ],
+      updateTab,
+      detail
+    );
+
+    expect(applied).toBe(true);
+    expect(updateTab).toHaveBeenCalledWith("terminal-primary", {
+      status: "attention",
+    });
   });
 
   it("keeps canonical provider_session source unchanged", () => {

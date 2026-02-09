@@ -4,6 +4,7 @@ vi.mock("@/components/EmbeddedTerminal", () => ({
   EmbeddedTerminal: () => null,
 }));
 import {
+  shouldEmitNeedsInputAttention,
   shouldShowProjectPathHeader,
   shouldShowProviderSelectorInHeader,
 } from "@/components/ProviderSessionPane";
@@ -71,5 +72,26 @@ describe("ProviderSessionPane header behavior", () => {
       success: false,
       error: "Provider session cancelled",
     });
+  });
+
+  it("flags needs_input for request_user_input tool events", () => {
+    expect(
+      shouldEmitNeedsInputAttention({
+        type: "system",
+        subtype: "event",
+        item: {
+          type: "tool_use",
+          name: "request_user_input",
+          input: {
+            questions: [
+              {
+                header: "Approval",
+                question: "Should I continue?",
+              },
+            ],
+          },
+        },
+      } as any)
+    ).toBe(true);
   });
 });

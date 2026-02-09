@@ -59,9 +59,9 @@ import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
 import {
   emitAgentAttention,
   extractAttentionText,
-  shouldTriggerNeedsInput,
   summarizeAttentionBody,
 } from "@/services/agentAttention";
+import { shouldEmitNeedsInputAttention as shouldEmitNeedsInputAttentionFromMessage } from "@/components/agentAttentionDetection";
 import { createStreamWatchdog } from "@/lib/streamWatchdog";
 import {
   getDefaultModelForProvider,
@@ -70,16 +70,8 @@ import {
 } from "@/lib/providerModels";
 import {
   NATIVE_TERMINAL_START_COMMAND_EVENT,
-  NATIVE_TERMINAL_MODE_EVENT,
-  PLAIN_TERMINAL_MODE_EVENT,
   loadNativeTerminalStartCommandPreference,
-  loadNativeTerminalModePreference,
-  loadPlainTerminalModePreference,
   readNativeTerminalStartCommandFromStorage,
-  readNativeTerminalModeFromStorage,
-  readPlainTerminalModeFromStorage,
-  saveNativeTerminalModePreference,
-  savePlainTerminalModePreference,
 } from "@/lib/uiPreferences";
 import { sanitizeProviderSessionId } from "@/services/nativeTerminalRestore";
 import {
@@ -287,6 +279,12 @@ export function shouldShowProviderSelectorInHeader(
   return !nativeTerminalMode && detectedProviderCount > 0;
 }
 
+export function shouldEmitNeedsInputAttention(
+  message: ProviderSessionMessage
+): boolean {
+  return shouldEmitNeedsInputAttentionFromMessage(message);
+}
+
 function toPlainTextValue(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
@@ -435,10 +433,8 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     DEFAULT_PROVIDER_CAPABILITIES
   );
   const [showProviderMenu, setShowProviderMenu] = useState(false);
-  const [plainTerminalMode, setPlainTerminalMode] = useState<boolean>(() => readPlainTerminalModeFromStorage());
-  const [nativeTerminalMode, setNativeTerminalMode] = useState<boolean>(() =>
-    readNativeTerminalModeFromStorage()
-  );
+  const plainTerminalMode = false;
+  const nativeTerminalMode = true;
   const [hasBootedNativeTerminal, setHasBootedNativeTerminal] = useState<boolean>(
     () => Boolean(embeddedTerminalId)
   );
@@ -611,38 +607,12 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
 
   useEffect(() => {
     let isCancelled = false;
-    loadPlainTerminalModePreference().then((enabled) => {
-      if (!isCancelled) {
-        setPlainTerminalMode(enabled);
-      }
-    });
-    loadNativeTerminalModePreference().then((enabled) => {
-      if (!isCancelled) {
-        setNativeTerminalMode(enabled);
-      }
-    });
     loadNativeTerminalStartCommandPreference().then((command) => {
       if (!isCancelled) {
         setNativeTerminalStartupCommand(command);
       }
     });
 
-    const handlePlainModeChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ enabled?: boolean }>).detail;
-      if (typeof detail?.enabled === "boolean") {
-        setPlainTerminalMode(detail.enabled);
-      } else {
-        setPlainTerminalMode(readPlainTerminalModeFromStorage());
-      }
-    };
-    const handleNativeModeChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ enabled?: boolean }>).detail;
-      if (typeof detail?.enabled === "boolean") {
-        setNativeTerminalMode(detail.enabled);
-      } else {
-        setNativeTerminalMode(readNativeTerminalModeFromStorage());
-      }
-    };
     const handleNativeStartCommandChange = (event: Event) => {
       const detail = (event as CustomEvent<{ command?: string }>).detail;
       if (typeof detail?.command === "string") {
@@ -652,16 +622,12 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
       }
     };
 
-    window.addEventListener(PLAIN_TERMINAL_MODE_EVENT, handlePlainModeChange as EventListener);
-    window.addEventListener(NATIVE_TERMINAL_MODE_EVENT, handleNativeModeChange as EventListener);
     window.addEventListener(
       NATIVE_TERMINAL_START_COMMAND_EVENT,
       handleNativeStartCommandChange as EventListener
     );
     return () => {
       isCancelled = true;
-      window.removeEventListener(PLAIN_TERMINAL_MODE_EVENT, handlePlainModeChange as EventListener);
-      window.removeEventListener(NATIVE_TERMINAL_MODE_EVENT, handleNativeModeChange as EventListener);
       window.removeEventListener(
         NATIVE_TERMINAL_START_COMMAND_EVENT,
         handleNativeStartCommandChange as EventListener
@@ -1561,19 +1527,17 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
             
             debugLog('[ProviderSessionPane] handleStreamMessage - message type:', message.type);
 
-            if (message.type === "assistant") {
-              const candidateText = extractAttentionText(message);
-              if (shouldTriggerNeedsInput(candidateText)) {
-                void emitAgentAttention({
-                  kind: "needs_input",
-                  workspaceId,
-                  terminalTabId,
-                  source: "provider_session",
-                  body:
-                    summarizeAttentionBody(candidateText) ||
-                    "The agent is waiting for your input.",
-                });
-              }
+            const candidateText = extractAttentionText(message);
+            if (shouldEmitNeedsInputAttention(message)) {
+              void emitAgentAttention({
+                kind: "needs_input",
+                workspaceId,
+                terminalTabId,
+                source: "provider_session",
+                body:
+                  summarizeAttentionBody(candidateText) ||
+                  "The agent is waiting for your input.",
+              });
             }
 
             // Store raw JSONL
@@ -2397,18 +2361,6 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     onProviderChange?.(newProviderId);
   };
 
-  const handlePlainTerminalToggle = async () => {
-    const next = !plainTerminalMode;
-    setPlainTerminalMode(next);
-    await savePlainTerminalModePreference(next);
-  };
-
-  const handleNativeTerminalToggle = async () => {
-    const next = !nativeTerminalMode;
-    setNativeTerminalMode(next);
-    await saveNativeTerminalModePreference(next);
-  };
-
   async function handleSelectTerminalProject() {
     const resolvedProjectPath = projectPath || (await resolveProjectPathForPrompt());
     if (!resolvedProjectPath) {
@@ -2586,32 +2538,6 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
       {projectPath && (
         <span className="text-muted-foreground truncate">{projectPath.replace(/^\/Users\/[^/]+\//, '~/')}</span>
       )}
-      <div className="ml-auto flex items-center gap-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleNativeTerminalToggle}
-          className={cn(
-            "h-6 px-2 text-[10px] font-medium uppercase tracking-[0.06em]",
-            nativeTerminalMode ? "text-foreground" : "text-muted-foreground"
-          )}
-          title={nativeTerminalMode ? "Disable in-app terminal mode" : "Enable in-app terminal mode"}
-        >
-          Terminal
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handlePlainTerminalToggle}
-          className={cn(
-            "h-6 px-2 text-[10px] font-medium uppercase tracking-[0.06em]",
-            plainTerminalMode ? "text-foreground" : "text-muted-foreground"
-          )}
-          title={plainTerminalMode ? "Switch to styled view" : "Switch to plain terminal view"}
-        >
-          {plainTerminalMode ? "Styled" : "Plain"}
-        </Button>
-      </div>
     </div>
   ) : null;
 

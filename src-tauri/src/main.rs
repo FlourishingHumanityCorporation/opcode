@@ -39,6 +39,9 @@ use commands::agent_session::{
     continue_agent_session, execute_agent_session, list_provider_capabilities,
     resume_agent_session,
 };
+use commands::hot_refresh::{
+    hot_refresh_start, hot_refresh_stop, hot_refresh_update_paths, HotRefreshWatcherState,
+};
 use commands::provider_session::{
     cancel_provider_session, continue_provider_session, execute_provider_session,
     get_provider_session_output, list_running_provider_sessions, resume_provider_session,
@@ -262,6 +265,7 @@ fn main() {
             // Initialize provider session process state
             app.manage(ProviderSessionProcessState::default());
             app.manage(UsageIndexState::default());
+            app.manage(HotRefreshWatcherState::default());
             let mobile_sync_state = mobile_sync::MobileSyncServiceState::new("0.0.0.0", 8091);
             app.manage(mobile_sync_state.clone());
             mobile_sync::bootstrap_mobile_sync(app.handle().clone(), mobile_sync_state);
@@ -470,6 +474,9 @@ fn main() {
             mobile_sync::mobile_sync_start_pairing,
             mobile_sync::mobile_sync_list_devices,
             mobile_sync::mobile_sync_revoke_device,
+            hot_refresh_start,
+            hot_refresh_stop,
+            hot_refresh_update_paths,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

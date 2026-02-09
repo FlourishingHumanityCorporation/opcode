@@ -123,6 +123,27 @@ describe("agentAttention notifications and badge behavior", () => {
     cleanup();
   });
 
+  it("still attempts desktop notifications when bridge globals are absent", async () => {
+    mockState.isFocusedValue = false;
+    delete (window as any).__TAURI_INTERNALS__;
+    delete (window as any).__TAURI__;
+    delete (window as any).__TAURI_METADATA__;
+
+    const { initAgentAttention, emitAgentAttention } = await loadService();
+    const cleanup = initAgentAttention();
+
+    const emitted = await emitAttentionWithDefaults(
+      emitAgentAttention,
+      "No bridge globals should still allow desktop notifications."
+    );
+
+    expect(emitted).toBe(true);
+    expect(mockFns.sendNotification).toHaveBeenCalledTimes(1);
+    expect(mockFns.setBadgeCount).toHaveBeenCalledWith(1);
+
+    cleanup();
+  });
+
   it("requests permission once and only notifies when granted", async () => {
     mockState.isFocusedValue = false;
     mockFns.isPermissionGranted.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
@@ -174,6 +195,50 @@ describe("agentAttention notifications and badge behavior", () => {
     expect(mockFns.sendNotification).toHaveBeenCalledTimes(1);
     expect(mockFns.setBadgeCount).toHaveBeenCalledTimes(1);
 
+    cleanup();
+  });
+
+  it("dispatches fallback attention event when desktop notification is unavailable", async () => {
+    mockState.isFocusedValue = false;
+    mockFns.isPermissionGranted.mockResolvedValue(false);
+    mockFns.requestPermission.mockResolvedValue("denied");
+
+    const {
+      initAgentAttention,
+      emitAgentAttention,
+      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+    } = await loadService();
+    const cleanup = initAgentAttention();
+
+    const fallbackEvents: Array<Record<string, unknown>> = [];
+    const onFallback = (event: Event) => {
+      fallbackEvents.push((event as CustomEvent<Record<string, unknown>>).detail);
+    };
+    window.addEventListener(
+      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      onFallback as EventListener
+    );
+
+    const emitted = await emitAttentionWithDefaults(
+      emitAgentAttention,
+      "Fallback should emit when permission remains denied."
+    );
+
+    expect(emitted).toBe(true);
+    expect(mockFns.sendNotification).not.toHaveBeenCalled();
+    expect(fallbackEvents).toHaveLength(1);
+    expect(fallbackEvents[0]).toEqual(
+      expect.objectContaining({
+        kind: "done",
+        source: "provider_session",
+        terminalTabId: "terminal-1",
+      })
+    );
+
+    window.removeEventListener(
+      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      onFallback as EventListener
+    );
     cleanup();
   });
 

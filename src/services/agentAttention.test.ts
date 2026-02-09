@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractAttentionText,
   shouldTriggerNeedsInput,
+  shouldTriggerNeedsInputFromMessage,
   summarizeAttentionBody,
 } from "@/services/agentAttention";
 
@@ -58,5 +59,67 @@ describe("agentAttention needs-input matcher", () => {
 
     expect(summarized.length).toBeLessThanOrEqual(160);
   });
-});
 
+  it("detects needs_input from request_user_input tool payloads", () => {
+    const message = {
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            name: "request_user_input",
+            input: {
+              questions: [
+                {
+                  header: "Decision",
+                  question: "Should I apply the migration now?",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+
+    expect(shouldTriggerNeedsInputFromMessage(message)).toBe(true);
+  });
+
+  it("detects needs_input from non-assistant tool events", () => {
+    const message = {
+      type: "event",
+      item: {
+        type: "tool_use",
+        recipient_name: "request_user_input",
+        input: {
+          questions: [
+            {
+              header: "Approval",
+              question: "Choose whether to continue.",
+            },
+          ],
+        },
+      },
+    };
+
+    expect(shouldTriggerNeedsInputFromMessage(message)).toBe(true);
+  });
+
+  it("does not trigger needs_input for unrelated tool usage", () => {
+    const message = {
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            name: "read_file",
+            input: {
+              path: "README.md",
+            },
+          },
+        ],
+      },
+    };
+
+    expect(shouldTriggerNeedsInputFromMessage(message)).toBe(false);
+  });
+});

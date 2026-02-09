@@ -10,39 +10,7 @@ import {
   OPCODE_AGENT_ATTENTION_EVENT,
   type AgentAttentionEventDetail,
 } from '@/services/agentAttention';
-import type { Tab, TerminalTab } from '@/contexts/TabContext';
-
-export function mapAgentAttentionKindToStatus(
-  kind: AgentAttentionEventDetail["kind"]
-): TerminalTab["status"] {
-  return kind === "needs_input" ? "attention" : "complete";
-}
-
-export function applyAgentAttentionStatusUpdate(
-  tabs: Tab[],
-  updateTab: (id: string, updates: Partial<Tab> | Partial<TerminalTab>) => void,
-  detail: AgentAttentionEventDetail
-): boolean {
-  if (!detail.terminalTabId) {
-    return false;
-  }
-
-  const matchingWorkspace =
-    (detail.workspaceId
-      ? tabs.find((workspace) => workspace.id === detail.workspaceId)
-      : undefined) ||
-    tabs.find((workspace) =>
-      workspace.terminalTabs.some((terminal) => terminal.id === detail.terminalTabId)
-    );
-
-  if (!matchingWorkspace) {
-    return false;
-  }
-
-  const status = mapAgentAttentionKindToStatus(detail.kind);
-  updateTab(detail.terminalTabId, { status });
-  return true;
-}
+import { applyAgentAttentionStatusUpdate } from '@/services/agentAttentionRouting';
 
 export const TabContent: React.FC = () => {
   const {

@@ -37,9 +37,9 @@ import { useTabState } from "@/hooks/useTabState";
 import {
   emitAgentAttention,
   extractAttentionText,
-  shouldTriggerNeedsInput,
   summarizeAttentionBody,
 } from "@/services/agentAttention";
+import { shouldEmitNeedsInputAttention } from "@/components/agentAttentionDetection";
 import {
   getDefaultModelForProvider,
   getModelDisplayName,
@@ -419,19 +419,17 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
           // Parse and display
           const message = JSON.parse(event.payload) as ClaudeStreamMessage;
 
-          if (message.type === "assistant") {
-            const candidateText = extractAttentionText(message);
-            if (shouldTriggerNeedsInput(candidateText)) {
-              void emitAgentAttention({
-                kind: "needs_input",
-                workspaceId: workspaceIdForTab,
-                terminalTabId: tabId,
-                source: "agent_execution",
-                body:
-                  summarizeAttentionBody(candidateText) ||
-                  "The agent is waiting for your input.",
-              });
-            }
+          const candidateText = extractAttentionText(message);
+          if (shouldEmitNeedsInputAttention(message)) {
+            void emitAgentAttention({
+              kind: "needs_input",
+              workspaceId: workspaceIdForTab,
+              terminalTabId: tabId,
+              source: "agent_execution",
+              body:
+                summarizeAttentionBody(candidateText) ||
+                "The agent is waiting for your input.",
+            });
           }
 
           setMessages(prev => [...prev, message]);

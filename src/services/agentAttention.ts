@@ -1,6 +1,8 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export const OPCODE_AGENT_ATTENTION_EVENT = "opcode-agent-attention";
+export const OPCODE_AGENT_ATTENTION_FALLBACK_EVENT =
+  "opcode-agent-attention-fallback";
 
 export type AgentAttentionKind = "done" | "needs_input";
 export type AgentAttentionSource =
@@ -16,6 +18,15 @@ export interface AgentAttentionEventDetail {
   body: string;
   source: AgentAttentionSource;
   timestamp: number;
+}
+
+export interface AgentAttentionFallbackEventDetail {
+  kind: AgentAttentionKind;
+  workspaceId?: string;
+  terminalTabId?: string;
+  title: string;
+  body: string;
+  source: AgentAttentionSource;
 }
 
 export interface EmitAgentAttentionInput {
@@ -35,19 +46,32 @@ const genericDedupeByKey = new Map<string, number>();
 const needsInputByTerminal = new Map<string, number>();
 
 let focusTrackingReady = false;
+let focusTrackingInFlight = false;
 let focusListenerUnlisten: (() => void) | null = null;
 let focusListenerRefCount = 0;
 let windowFocused = true;
 let unreadBadgeCount = 0;
 let notificationPermissionRequested = false;
 
-function hasTauriBridge(): boolean {
-  if (typeof window === "undefined") return false;
-  return Boolean(
-    (window as any).__TAURI__ ||
-      (window as any).__TAURI_INTERNALS__ ||
-      (window as any).__TAURI_METADATA__
-  );
+interface DesktopNotificationResult {
+  attempted: boolean;
+  delivered: boolean;
+}
+
+interface AgentAttentionDeliveryStatus {
+  desktopAttempted: boolean;
+  desktopDelivered: boolean;
+  fallbackDispatched: boolean;
+}
+
+function inferDocumentFocus(): boolean {
+  if (typeof document === "undefined") {
+    return true;
+  }
+  if (typeof document.hasFocus === "function") {
+    return document.hasFocus();
+  }
+  return true;
 }
 
 function normalizeWhitespace(value: string): string {
@@ -117,7 +141,7 @@ function shouldSuppress(detail: AgentAttentionEventDetail): boolean {
 }
 
 async function setBadgeCountSafely(count: number): Promise<void> {
-  if (!hasTauriBridge()) return;
+  if (typeof window === "undefined") return;
 
   try {
     const appWindow = getCurrentWindow();
@@ -132,11 +156,14 @@ async function setBadgeCountSafely(count: number): Promise<void> {
 }
 
 async function maybeShowDesktopNotification(
-  title: string,
-  body: string
-): Promise<void> {
-  if (!hasTauriBridge() || windowFocused) {
-    return;
+  detail: AgentAttentionEventDetail
+): Promise<DesktopNotificationResult> {
+  if (typeof window === "undefined") {
+    return { attempted: false, delivered: false };
+  }
+
+  if (windowFocused) {
+    return { attempted: false, delivered: false };
   }
 
   try {
@@ -150,21 +177,25 @@ async function maybeShowDesktopNotification(
     }
 
     if (!granted) {
-      return;
+      return { attempted: true, delivered: false };
     }
 
-    notification.sendNotification({ title, body });
+    await Promise.resolve(
+      notification.sendNotification({ title: detail.title, body: detail.body })
+    );
+    return { attempted: true, delivered: true };
   } catch (error) {
     console.warn("[agentAttention] Failed to send desktop notification:", error);
+    return { attempted: true, delivered: false };
   }
 }
 
 async function ensureFocusTracking(): Promise<void> {
-  if (focusTrackingReady || !hasTauriBridge()) {
+  if (focusTrackingReady || focusTrackingInFlight || typeof window === "undefined") {
     return;
   }
 
-  focusTrackingReady = true;
+  focusTrackingInFlight = true;
 
   try {
     const appWindow = getCurrentWindow();
@@ -176,8 +207,12 @@ async function ensureFocusTracking(): Promise<void> {
         void setBadgeCountSafely(0);
       }
     });
+    focusTrackingReady = true;
   } catch (error) {
+    windowFocused = inferDocumentFocus();
     console.warn("[agentAttention] Failed to initialize focus tracking:", error);
+  } finally {
+    focusTrackingInFlight = false;
   }
 }
 
@@ -189,6 +224,30 @@ function dispatchAttentionEvent(detail: AgentAttentionEventDetail): void {
     new CustomEvent<AgentAttentionEventDetail>(OPCODE_AGENT_ATTENTION_EVENT, {
       detail,
     })
+  );
+}
+
+function dispatchAttentionFallbackEvent(detail: AgentAttentionEventDetail): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const fallbackDetail: AgentAttentionFallbackEventDetail = {
+    kind: detail.kind,
+    workspaceId: detail.workspaceId,
+    terminalTabId: detail.terminalTabId,
+    title: detail.title,
+    body: detail.body,
+    source: detail.source,
+  };
+
+  window.dispatchEvent(
+    new CustomEvent<AgentAttentionFallbackEventDetail>(
+      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      {
+        detail: fallbackDetail,
+      }
+    )
   );
 }
 
@@ -207,6 +266,7 @@ export function initAgentAttention(): () => void {
       focusListenerUnlisten = null;
     }
     focusTrackingReady = false;
+    focusTrackingInFlight = false;
     windowFocused = true;
     unreadBadgeCount = 0;
     void setBadgeCountSafely(0);
@@ -244,6 +304,12 @@ export async function emitAgentAttention(
     return false;
   }
 
+  const deliveryStatus: AgentAttentionDeliveryStatus = {
+    desktopAttempted: false,
+    desktopDelivered: false,
+    fallbackDispatched: false,
+  };
+
   dispatchAttentionEvent(detail);
 
   if (!windowFocused) {
@@ -251,7 +317,16 @@ export async function emitAgentAttention(
     await setBadgeCountSafely(unreadBadgeCount);
   }
 
-  await maybeShowDesktopNotification(detail.title, detail.body);
+  const desktopResult = await maybeShowDesktopNotification(detail);
+  deliveryStatus.desktopAttempted = desktopResult.attempted;
+  deliveryStatus.desktopDelivered = desktopResult.delivered;
+
+  if (!windowFocused && !desktopResult.delivered) {
+    dispatchAttentionFallbackEvent(detail);
+    deliveryStatus.fallbackDispatched = true;
+  }
+
+  void deliveryStatus;
   return true;
 }
 
@@ -273,6 +348,30 @@ function extractTextContentFromObject(value: Record<string, unknown>): string[] 
   }
   if (typeof value.error === "string") {
     parts.push(value.error);
+  }
+  if (typeof value.prompt === "string") {
+    parts.push(value.prompt);
+  }
+  if (typeof value.question === "string") {
+    parts.push(value.question);
+  }
+
+  if (Array.isArray(value.questions)) {
+    value.questions.forEach((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return;
+      }
+      const questionRecord = entry as Record<string, unknown>;
+      if (typeof questionRecord.question === "string") {
+        parts.push(questionRecord.question);
+      }
+      if (typeof questionRecord.description === "string") {
+        parts.push(questionRecord.description);
+      }
+      if (typeof questionRecord.header === "string") {
+        parts.push(questionRecord.header);
+      }
+    });
   }
 
   const message = value.message as Record<string, unknown> | undefined;
@@ -334,6 +433,77 @@ export function shouldTriggerNeedsInput(text: string): boolean {
     return false;
   }
   return NEEDS_INPUT_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function hasNeedsInputToolSignal(
+  value: unknown,
+  seen = new Set<object>()
+): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const objectValue = value as Record<string, unknown>;
+  if (seen.has(objectValue)) {
+    return false;
+  }
+  seen.add(objectValue);
+
+  const type =
+    typeof objectValue.type === "string" ? objectValue.type.toLowerCase() : "";
+  const name =
+    typeof objectValue.name === "string" ? objectValue.name.toLowerCase() : "";
+  const recipientName =
+    typeof objectValue.recipient_name === "string"
+      ? objectValue.recipient_name.toLowerCase()
+      : "";
+  const command =
+    typeof objectValue.command === "string"
+      ? objectValue.command.toLowerCase()
+      : "";
+  const tool =
+    typeof objectValue.tool === "string" ? objectValue.tool.toLowerCase() : "";
+
+  const combinedLabels = [type, name, recipientName, command, tool].join(" ");
+  if (combinedLabels.includes("request_user_input")) {
+    return true;
+  }
+
+  const nestedCandidates: unknown[] = [
+    objectValue.content,
+    objectValue.message,
+    objectValue.item,
+    objectValue.input,
+    objectValue.output,
+    objectValue.payload,
+    objectValue.detail,
+    objectValue.arguments,
+    objectValue.args,
+    objectValue.questions,
+  ];
+
+  for (const candidate of nestedCandidates) {
+    if (Array.isArray(candidate)) {
+      for (const entry of candidate) {
+        if (hasNeedsInputToolSignal(entry, seen)) {
+          return true;
+        }
+      }
+      continue;
+    }
+    if (hasNeedsInputToolSignal(candidate, seen)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function shouldTriggerNeedsInputFromMessage(message: unknown): boolean {
+  if (hasNeedsInputToolSignal(message)) {
+    return true;
+  }
+  return shouldTriggerNeedsInput(extractAttentionText(message));
 }
 
 export function summarizeAttentionBody(text: string): string {

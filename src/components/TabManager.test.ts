@@ -77,14 +77,21 @@ describe("TabManager workspace status aggregation", () => {
 
   it("maps workspace status metadata for indicator rendering", () => {
     expect(getWorkspaceStatusMeta("attention")).toEqual({
-      label: "Needs input",
-      className: "bg-amber-500",
+      kind: "needs_response",
+      label: "Needs response",
     });
     expect(getWorkspaceStatusMeta("running")).toEqual({
-      label: "Running",
-      className: "bg-emerald-500",
+      kind: "running",
+      label: "In progress",
+    });
+    expect(getWorkspaceStatusMeta("complete")).toEqual({
+      kind: "needs_check",
+      label: "Needs check",
+    });
+    expect(getWorkspaceStatusMeta("error")).toEqual({
+      kind: "error",
+      label: "Error",
     });
     expect(getWorkspaceStatusMeta("idle")).toBeNull();
   });
 });
-

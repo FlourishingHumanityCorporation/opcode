@@ -1278,6 +1278,27 @@ export const api = {
   },
 
   /**
+   * Starts desktop-side file watcher for automatic hot refresh.
+   */
+  async hotRefreshStart(paths: string[]): Promise<void> {
+    await apiCall("hot_refresh_start", { paths });
+  },
+
+  /**
+   * Stops desktop-side file watcher for automatic hot refresh.
+   */
+  async hotRefreshStop(): Promise<void> {
+    await apiCall("hot_refresh_stop");
+  },
+
+  /**
+   * Updates desktop-side file watcher paths for automatic hot refresh.
+   */
+  async hotRefreshUpdatePaths(paths: string[]): Promise<void> {
+    await apiCall("hot_refresh_update_paths", { paths });
+  },
+
+  /**
    * Runs a real Claude startup probe and returns timing metrics.
    */
   async runSessionStartupProbe(

@@ -26,7 +26,16 @@ import { TabContent } from "@/components/TabContent";
 import { useTabState } from "@/hooks/useTabState";
 import { useAppLifecycle, useTrackEvent } from "@/hooks";
 import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
-import { initAgentAttention } from "@/services/agentAttention";
+import {
+  initAgentAttention,
+  OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+  type AgentAttentionFallbackEventDetail,
+} from "@/services/agentAttention";
+import {
+  initHotRefresh,
+  OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+  type HotRefreshDiagnosticDetail,
+} from "@/services/hotRefresh";
 
 type View = 
   | "welcome" 
@@ -93,6 +102,86 @@ function AppContent() {
     const teardownAttention = initAgentAttention();
     return () => {
       teardownAttention();
+    };
+  }, []);
+
+  useEffect(() => {
+    let teardownHotRefresh: (() => void) | null = null;
+    let isDisposed = false;
+
+    void initHotRefresh()
+      .then((teardown) => {
+        if (isDisposed) {
+          teardown();
+          return;
+        }
+        teardownHotRefresh = teardown;
+      })
+      .catch((error) => {
+        console.error("Failed to initialize hot refresh:", error);
+        setToast({
+          message: "Automatic hot refresh failed to initialize.",
+          type: "error",
+        });
+      });
+
+    return () => {
+      isDisposed = true;
+      teardownHotRefresh?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleAttentionFallback = (event: Event) => {
+      const detail = (event as CustomEvent<AgentAttentionFallbackEventDetail>).detail;
+      if (!detail) {
+        return;
+      }
+
+      setToast({
+        message:
+          detail.body ||
+          (detail.kind === "needs_input"
+            ? "The agent is waiting for your input."
+            : "A run completed successfully."),
+        type: detail.kind === "needs_input" ? "info" : "success",
+      });
+    };
+
+    window.addEventListener(
+      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      handleAttentionFallback as EventListener
+    );
+    return () => {
+      window.removeEventListener(
+        OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+        handleAttentionFallback as EventListener
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleHotRefreshDiagnostic = (event: Event) => {
+      const detail = (event as CustomEvent<HotRefreshDiagnosticDetail>).detail;
+      if (!detail) {
+        return;
+      }
+
+      setToast({
+        message: detail.message,
+        type: detail.level === "error" ? "error" : "info",
+      });
+    };
+
+    window.addEventListener(
+      OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+      handleHotRefreshDiagnostic as EventListener
+    );
+    return () => {
+      window.removeEventListener(
+        OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+        handleHotRefreshDiagnostic as EventListener
+      );
     };
   }, []);
 

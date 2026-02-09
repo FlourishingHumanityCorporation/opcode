@@ -25,6 +25,21 @@ interface TerminalPaneSurfaceProps {
   exposeTestId?: boolean;
 }
 
+export function resolveTerminalStatusFromStreaming(
+  currentStatus: TerminalTab['status'],
+  isStreaming: boolean
+): TerminalTab['status'] | null {
+  if (isStreaming) {
+    return currentStatus === 'running' ? null : 'running';
+  }
+
+  if (currentStatus === 'running') {
+    return 'idle';
+  }
+
+  return null;
+}
+
 export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
   workspace,
   terminal,
@@ -34,6 +49,7 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
   exposeTestId = true,
 }) => {
   const {
+    tabs,
     splitPane,
     closePane,
     activatePane,
@@ -206,6 +222,25 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
     [terminal.id, updateTab]
   );
 
+  const handleStreamingChange = React.useCallback(
+    (isStreaming: boolean) => {
+      const workspaceFromState = tabs.find((item) => item.id === workspace.id);
+      const terminalFromState =
+        workspaceFromState?.terminalTabs.find((item) => item.id === terminal.id) ??
+        terminal;
+      const nextStatus = resolveTerminalStatusFromStreaming(
+        terminalFromState.status,
+        isStreaming
+      );
+      if (!nextStatus) {
+        return;
+      }
+
+      updateTab(terminal.id, { status: nextStatus });
+    },
+    [tabs, terminal, updateTab, workspace.id]
+  );
+
   return (
     <div
       className={cn(
@@ -306,6 +341,7 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
             currentTerminalTitle={terminal.title}
             isTerminalTitleLocked={Boolean(terminal.titleLocked)}
             onAutoRenameTerminalTitle={handleAutoRenameTerminalTitle}
+            onStreamingChange={handleStreamingChange}
             onBack={() => {}}
             className="h-full"
           />

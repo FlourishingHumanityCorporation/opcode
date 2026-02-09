@@ -9,6 +9,11 @@ import { ProjectExplorerPanel } from '@/components/ProjectExplorerPanel';
 import { SplitPane } from '@/components/ui/split-pane';
 import { useTabState } from '@/hooks/useTabState';
 import {
+  getStatusIndicator,
+  renderTabStatusMarker,
+  type TabStatusIndicator,
+} from '@/components/tabStatusIndicator';
+import {
   getExplorerOpen,
   getExplorerWidth,
   setExplorerOpen,
@@ -27,26 +32,10 @@ function getTerminalTitle(terminal: TerminalTab, index: number): string {
   return `Terminal ${index + 1}`;
 }
 
-interface TerminalStatusMeta {
-  label: string;
-  className: string;
-}
-
 export function getTerminalStatusMeta(
   status: TerminalTab["status"]
-): TerminalStatusMeta | null {
-  switch (status) {
-    case "running":
-      return { label: "Running", className: "bg-emerald-500" };
-    case "complete":
-      return { label: "Complete", className: "bg-sky-500" };
-    case "attention":
-      return { label: "Needs input", className: "bg-amber-500" };
-    case "error":
-      return { label: "Error", className: "bg-rose-500" };
-    default:
-      return null;
-  }
+): TabStatusIndicator | null {
+  return getStatusIndicator(status);
 }
 
 export function resolveTerminalStatusOnActivate(
@@ -224,7 +213,7 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
           <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto scrollbar-hide">
             {workspace.terminalTabs.map((terminal, index) => {
               const isActive = terminal.id === activeTerminal.id;
-              const statusMeta = getTerminalStatusMeta(terminal.status);
+              const statusIndicator = getTerminalStatusMeta(terminal.status);
               return (
                 <motion.button
                   key={terminal.id}
@@ -240,13 +229,9 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
                   data-testid={isVisible ? `terminal-tab-${terminal.id}` : `hidden-terminal-tab-${terminal.id}`}
                 >
                   <Terminal className="h-3.5 w-3.5 shrink-0" />
-                  {statusMeta && (
-                    <span
-                      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusMeta.className)}
-                      title={statusMeta.label}
-                      aria-label={statusMeta.label}
-                    />
-                  )}
+                  <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                    {statusIndicator ? renderTabStatusMarker(statusIndicator) : null}
+                  </span>
                   <span className="truncate text-left">{getTerminalTitle(terminal, index)}</span>
                   <Button
                     size="icon"
