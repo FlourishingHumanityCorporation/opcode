@@ -251,6 +251,86 @@ test.describe("Terminal immediate typing smoke", () => {
     });
   });
 
+  test("recovers from stale runtime terminal id when persistent session restore is active", async ({
+    page,
+  }) => {
+    const telemetry: TerminalTelemetry = {
+      startedTerminalIds: [],
+      writes: [],
+    };
+
+    let staleTerminalId: string | null = null;
+    let sessionNotFoundFailures = 0;
+    await setupTerminalApiMock(page, telemetry, {
+      failInput: ({ terminalId }) => {
+        if (
+          staleTerminalId &&
+          terminalId === staleTerminalId &&
+          sessionNotFoundFailures < 4
+        ) {
+          sessionNotFoundFailures += 1;
+          return "ERR_SESSION_NOT_FOUND: Terminal session not found";
+        }
+        return null;
+      },
+    });
+
+    await page.addInitScript(() => {
+      localStorage.removeItem("opcode_workspace_v3");
+      localStorage.removeItem("opcode_tabs_v2");
+      localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+      localStorage.setItem("native_terminal_mode", "true");
+      localStorage.setItem("app_setting:native_terminal_mode", "true");
+    });
+
+    await bootstrapWorkspaceWithNativeTerminal(page);
+    await expect.poll(() => telemetry.startedTerminalIds.length > 0).toBe(true);
+
+    const initialStarts = telemetry.startedTerminalIds.length;
+    staleTerminalId = telemetry.startedTerminalIds[initialStarts - 1];
+
+    await page.getByTitle("Run claude").first().click();
+    await expect.poll(() => {
+      return telemetry.writes.some(
+        (entry) => entry.terminalId === staleTerminalId && entry.data.includes("claude")
+      );
+    }).toBe(true);
+
+    await expect
+      .poll(
+        () => telemetry.startedTerminalIds.length,
+        {
+          timeout: 12_000,
+        }
+      )
+      .toBeGreaterThan(initialStarts);
+
+    const recoveredTerminalId = telemetry.startedTerminalIds[telemetry.startedTerminalIds.length - 1];
+    expect(recoveredTerminalId).not.toBe(staleTerminalId);
+
+    await page.keyboard.type("recovery-ok");
+    await expect.poll(() => {
+      const writesForRecoveredTerminal = telemetry.writes
+        .filter((entry) => entry.terminalId === recoveredTerminalId)
+        .map((entry) => entry.data)
+        .join("");
+      return writesForRecoveredTerminal;
+    }).toContain("recovery-ok");
+
+    const writesForStaleTerminal = telemetry.writes
+      .filter((entry) => entry.terminalId === staleTerminalId)
+      .map((entry) => entry.data)
+      .join("");
+    expect(writesForStaleTerminal).not.toContain("recovery-ok");
+
+    await page.getByTitle("Run claude").first().click();
+    await expect.poll(() => {
+      return telemetry.writes.some(
+        (entry) => entry.terminalId === recoveredTerminalId && entry.data.includes("claude")
+      );
+    }).toBe(true);
+  });
+
   test("staged recovery escalates only after write failures and reattaches terminal", async ({ page }) => {
     const telemetry: TerminalTelemetry = {
       startedTerminalIds: [],
