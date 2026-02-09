@@ -4,6 +4,7 @@ vi.mock("@/components/EmbeddedTerminal", () => ({
   EmbeddedTerminal: () => null,
 }));
 import {
+  resolveStreamingState,
   shouldEmitNeedsInputAttention,
   shouldShowProjectPathHeader,
   shouldShowProviderSelectorInHeader,
@@ -82,6 +83,33 @@ describe("ProviderSessionPane header behavior", () => {
           },
         },
       } as any)
+    ).toBe(true);
+  });
+
+  it("uses native terminal stream activity for streaming state when native mode is enabled", () => {
+    expect(
+      resolveStreamingState({
+        nativeTerminalMode: true,
+        isLoading: false,
+        nativeTerminalStreaming: true,
+      })
+    ).toBe(true);
+    expect(
+      resolveStreamingState({
+        nativeTerminalMode: true,
+        isLoading: true,
+        nativeTerminalStreaming: false,
+      })
+    ).toBe(false);
+  });
+
+  it("falls back to provider loading state when native mode is disabled", () => {
+    expect(
+      resolveStreamingState({
+        nativeTerminalMode: false,
+        isLoading: true,
+        nativeTerminalStreaming: false,
+      })
     ).toBe(true);
   });
 });

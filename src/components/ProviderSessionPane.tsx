@@ -257,6 +257,10 @@ interface ProviderSessionPaneProps {
    * Preview layout mode.
    */
   previewMode?: 'split' | 'slideover';
+  /**
+   * Optional callback to split the current pane (embedded terminal chrome action).
+   */
+  onSplitPane?: () => void;
 }
 
 export function shouldShowProjectPathHeader(
@@ -273,6 +277,17 @@ export function shouldEmitNeedsInputAttention(
   message: ProviderSessionMessage
 ): boolean {
   return shouldEmitNeedsInputAttentionFromMessage(message);
+}
+
+export function resolveStreamingState(params: {
+  nativeTerminalMode: boolean;
+  isLoading: boolean;
+  nativeTerminalStreaming: boolean;
+}): boolean {
+  if (params.nativeTerminalMode) {
+    return params.nativeTerminalStreaming;
+  }
+  return params.isLoading;
 }
 
 /**
@@ -294,6 +309,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   hideProjectBar = false,
   hideFloatingGlobalControls = false,
   previewMode = 'split',
+  onSplitPane,
   paneId,
   workspaceId,
   terminalTabId,
@@ -360,6 +376,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   );
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const nativeTerminalMode = true;
+  const [nativeTerminalStreaming, setNativeTerminalStreaming] = useState(false);
   const [hasBootedNativeTerminal, setHasBootedNativeTerminal] = useState<boolean>(
     () => Boolean(embeddedTerminalId)
   );
@@ -941,8 +958,13 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
 
   // Report streaming state changes
   useEffect(() => {
-    onStreamingChange?.(isLoading, providerSessionId);
-  }, [isLoading, providerSessionId, onStreamingChange]);
+    const isStreaming = resolveStreamingState({
+      nativeTerminalMode,
+      isLoading,
+      nativeTerminalStreaming,
+    });
+    onStreamingChange?.(isStreaming, providerSessionId);
+  }, [isLoading, nativeTerminalMode, nativeTerminalStreaming, onStreamingChange, providerSessionId]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -2271,7 +2293,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     }
 
     return (
-      <div className="min-h-0 flex-1 pb-12">
+      <div className="min-h-0 flex-1">
         <EmbeddedTerminal
           projectPath={projectPath}
           autoRunCommand={nativeTerminalCommand}
@@ -2283,6 +2305,8 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           workspaceId={workspaceId}
           terminalTabId={terminalTabId}
           paneId={paneId}
+          onSplitPane={onSplitPane}
+          onRunningChange={setNativeTerminalStreaming}
           className="h-full min-h-0"
         />
       </div>
@@ -2297,7 +2321,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     <div
       className={cn(
         "flex items-center gap-1.5 px-0 py-1.5 border-b border-border/50 text-xs",
-        embedded && "workspace-chip-icon-align"
+        embedded && "workspace-chip-icon-align pr-[var(--workspace-inline-gutter)]"
       )}
     >
       {showProviderSelector ? (
@@ -2409,7 +2433,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
             />
           ) : (
             // Original layout when no preview
-            <div className={cn("h-full min-h-0 flex flex-col", embedded ? "workspace-chrome-row" : "max-w-6xl mx-auto px-6")}>
+            <div className={cn("h-full min-h-0 flex flex-col", !embedded && "max-w-6xl mx-auto px-6")}>
               {projectPathInput}
               {nativeTerminalPanel}
               

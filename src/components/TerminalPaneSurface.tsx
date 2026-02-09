@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Columns2, Terminal, X } from 'lucide-react';
+import { Bot, Columns2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -250,45 +250,43 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
       onMouseDown={() => activatePane(workspace.id, terminal.id, paneId)}
       data-testid={exposeTestId ? `workspace-pane-${paneId}` : `hidden-workspace-pane-${paneId}`}
     >
-      <div className="workspace-chrome-row flex h-8 items-center justify-between border-b border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-surface)]">
-        <div className="workspace-chip-icon-align flex items-center gap-1.5 text-[12px] leading-none font-medium tracking-[0.01em] text-[var(--color-chrome-text)]">
-          {terminal.kind === 'agent' ? (
+      {terminal.kind === "agent" && (
+        <div className="workspace-chrome-row flex h-8 items-center justify-between border-b border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-surface)]">
+          <div className="workspace-chip-icon-align flex items-center gap-1.5 text-[12px] leading-none font-medium tracking-[0.01em] text-[var(--color-chrome-text)]">
             <Bot className="h-3.5 w-3.5" />
-          ) : (
-            <Terminal className="h-3.5 w-3.5" />
-          )}
-          <span className="truncate">{terminal.title}</span>
-        </div>
+            <span className="truncate">{terminal.title}</span>
+          </div>
 
-        <div className="flex items-center gap-0.5">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-5 w-5 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
-            onClick={(event) => {
-              event.stopPropagation();
-              splitPane(workspace.id, terminal.id, paneId);
-            }}
-            title={exposeTestId ? 'Split Right' : undefined}
-            aria-label={exposeTestId ? 'Split Right' : 'Hidden Split Right'}
-          >
-            <Columns2 className="h-2.5 w-2.5" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-5 w-5 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
-            onClick={(event) => {
-              event.stopPropagation();
-              closePane(workspace.id, terminal.id, paneId);
-            }}
-            title={exposeTestId ? 'Close Pane' : undefined}
-            aria-label={exposeTestId ? 'Close Pane' : 'Hidden Close Pane'}
-          >
-            <X className="h-2.5 w-2.5" />
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
+              onClick={(event) => {
+                event.stopPropagation();
+                splitPane(workspace.id, terminal.id, paneId);
+              }}
+              title={exposeTestId ? "Split Right" : undefined}
+              aria-label={exposeTestId ? "Split Right" : "Hidden Split Right"}
+            >
+              <Columns2 className="h-2.5 w-2.5" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
+              onClick={(event) => {
+                event.stopPropagation();
+                closePane(workspace.id, terminal.id, paneId);
+              }}
+              title={exposeTestId ? "Close Pane" : undefined}
+              aria-label={exposeTestId ? "Close Pane" : "Hidden Close Pane"}
+            >
+              <X className="h-2.5 w-2.5" />
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="relative min-h-0 flex-1">
         {terminal.kind === 'agent' ? (
@@ -320,7 +318,7 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
             paneId={paneId}
             workspaceId={workspace.id}
             terminalTabId={terminal.id}
-            hideProjectBar={false}
+            hideProjectBar
             hideFloatingGlobalControls={false}
             previewMode="slideover"
             session={terminal.sessionState?.sessionData}
@@ -341,6 +339,7 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
             currentTerminalTitle={terminal.title}
             isTerminalTitleLocked={Boolean(terminal.titleLocked)}
             onAutoRenameTerminalTitle={handleAutoRenameTerminalTitle}
+            onSplitPane={() => splitPane(workspace.id, terminal.id, paneId)}
             onStreamingChange={handleStreamingChange}
             onBack={() => {}}
             className="h-full"

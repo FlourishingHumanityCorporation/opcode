@@ -57,6 +57,8 @@ interface UseEmbeddedTerminalControllerParams {
 interface UseEmbeddedTerminalControllerResult {
   containerRef: MutableRefObject<HTMLDivElement | null>;
   statusText: string;
+  isRunning: boolean;
+  isStreamingActivity: boolean;
   error: string | null;
   recoveryNotice: string | null;
   ready: boolean;
@@ -67,6 +69,7 @@ interface UseEmbeddedTerminalControllerResult {
 }
 
 const WRITE_FAILURE_SIGNAL_WINDOW_MS = 12_000;
+const STREAM_ACTIVITY_IDLE_MS = 1_600;
 const STALE_RECOVERY_STAGE2_GRACE_MS = 900;
 const RECOVERY_NOTICE_AUTO_CLEAR_MS = 2_400;
 const WHEEL_OBSERVATION_THROTTLE_MS = 1_000;
@@ -373,8 +376,31 @@ export function useEmbeddedTerminalController({
   const [restartToken, setRestartToken] = useState(0);
   const [isStarting, setIsStarting] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isStreamingActivity, setIsStreamingActivity] = useState(false);
+  const streamingActivityTimerRef = useRef<number | null>(null);
 
   const ready = Boolean(terminalId) && isRunning;
+
+  const clearStreamingActivityTimer = useCallback(() => {
+    if (streamingActivityTimerRef.current !== null) {
+      window.clearTimeout(streamingActivityTimerRef.current);
+      streamingActivityTimerRef.current = null;
+    }
+  }, []);
+
+  const markStreamingActivity = useCallback(() => {
+    setIsStreamingActivity(true);
+    clearStreamingActivityTimer();
+    streamingActivityTimerRef.current = window.setTimeout(() => {
+      streamingActivityTimerRef.current = null;
+      setIsStreamingActivity(false);
+    }, STREAM_ACTIVITY_IDLE_MS);
+  }, [clearStreamingActivityTimer]);
+
+  const clearStreamingActivity = useCallback(() => {
+    clearStreamingActivityTimer();
+    setIsStreamingActivity(false);
+  }, [clearStreamingActivityTimer]);
 
   const clearRecoveryNoticeTimer = useCallback(() => {
     if (recoveryNoticeClearTimeoutRef.current !== null) {
@@ -505,6 +531,7 @@ export function useEmbeddedTerminalController({
         lastInputAttemptAtRef.current = Date.now();
         await api.writeEmbeddedTerminalInput(terminalIdRef.current, `${command}\n`);
         clearWriteFailureSignals();
+        markStreamingActivity();
         setRecoveryNoticeWithTimeout(null);
         emitTerminalEvent("write_input_success", {
           source: "run-command",
@@ -528,6 +555,7 @@ export function useEmbeddedTerminalController({
     [
       clearWriteFailureSignals,
       emitTerminalEvent,
+      markStreamingActivity,
       recordWriteFailureSignal,
       scheduleSoftReattach,
       setRecoveryNoticeWithTimeout,
@@ -699,6 +727,7 @@ export function useEmbeddedTerminalController({
       setTerminalId(id);
       setIsRunning(true);
       isRunningRef.current = true;
+      clearStreamingActivity();
       setError(null);
       lastOutputAtRef.current = Date.now();
 
@@ -739,6 +768,7 @@ export function useEmbeddedTerminalController({
         if (!terminalInstance) return;
         lastOutputAtRef.current = Date.now();
         clearWriteFailureSignals();
+        markStreamingActivity();
         setRecoveryNoticeWithTimeout(null);
         const chunk = String(event.payload ?? "");
         terminalInstance.write(chunk);
@@ -766,6 +796,7 @@ export function useEmbeddedTerminalController({
         emitTerminalEvent("exit_event", { terminalId: id });
         setIsRunning(false);
         isRunningRef.current = false;
+        clearStreamingActivity();
         terminalIdRef.current = null;
         setTerminalId(null);
         setRecoveryNoticeWithTimeout(null);
@@ -822,6 +853,7 @@ export function useEmbeddedTerminalController({
       setError(null);
       setIsRunning(false);
       isRunningRef.current = false;
+      clearStreamingActivity();
       setRecoveryNoticeWithTimeout(null);
 
       const term = new XTerm({
@@ -970,6 +1002,7 @@ export function useEmbeddedTerminalController({
           setTerminalId(null);
           setIsRunning(false);
           isRunningRef.current = false;
+          clearStreamingActivity();
           onTerminalIdChangeRef.current?.(undefined);
         }
 
@@ -994,6 +1027,7 @@ export function useEmbeddedTerminalController({
             setTerminalId(null);
             setIsRunning(false);
             isRunningRef.current = false;
+            clearStreamingActivity();
             onTerminalIdChangeRef.current?.(undefined);
           }
         }
@@ -1050,6 +1084,7 @@ export function useEmbeddedTerminalController({
         setError(message);
         setIsRunning(false);
         isRunningRef.current = false;
+        clearStreamingActivity();
       } finally {
         setIsStarting(false);
       }
@@ -1067,6 +1102,7 @@ export function useEmbeddedTerminalController({
       setTerminalId(null);
       setIsRunning(false);
       isRunningRef.current = false;
+      clearStreamingActivity();
       setRecoveryNoticeWithTimeout(null);
 
       if (terminalInstance) {
@@ -1083,6 +1119,7 @@ export function useEmbeddedTerminalController({
     scheduleSoftReattach,
     scheduleTerminalAutoFocusRetry,
     clearAutoFocusRetryTimers,
+    clearStreamingActivity,
     clearWriteFailureSignals,
     recordWriteFailureSignal,
     emitTerminalEvent,
@@ -1455,9 +1492,15 @@ export function useEmbeddedTerminalController({
       softReattachPendingRef.current = false;
       clearAutoFocusRetryTimers();
       clearRecoveryNoticeTimer();
+      clearStreamingActivityTimer();
       clearWriteFailureSignals();
     };
-  }, [clearAutoFocusRetryTimers, clearRecoveryNoticeTimer, clearWriteFailureSignals]);
+  }, [
+    clearAutoFocusRetryTimers,
+    clearRecoveryNoticeTimer,
+    clearStreamingActivityTimer,
+    clearWriteFailureSignals,
+  ]);
 
   const statusText = useMemo(() => {
     if (isStarting) return "Starting terminal...";
@@ -1468,6 +1511,8 @@ export function useEmbeddedTerminalController({
   return {
     containerRef,
     statusText,
+    isRunning,
+    isStreamingActivity,
     error,
     recoveryNotice,
     ready,

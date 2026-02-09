@@ -1,5 +1,5 @@
 import React from "react";
-import { RotateCcw, Play } from "lucide-react";
+import { Columns2, RotateCcw, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -39,17 +39,22 @@ interface EmbeddedTerminalProps {
   workspaceId?: string;
   terminalTabId?: string;
   paneId?: string;
+  onSplitPane?: () => void;
+  onRunningChange?: (isRunning: boolean) => void;
 }
 
 export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = (props) => {
   const {
     className,
     quickRunCommand = "claude",
+    onSplitPane,
+    onRunningChange,
   } = props;
 
   const {
     containerRef,
     statusText,
+    isStreamingActivity,
     error,
     recoveryNotice,
     ready,
@@ -62,11 +67,33 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = (props) => {
     quickRunCommand,
   });
 
+  React.useEffect(() => {
+    onRunningChange?.(isStreamingActivity);
+  }, [isStreamingActivity, onRunningChange]);
+
+  React.useEffect(
+    () => () => {
+      onRunningChange?.(false);
+    },
+    [onRunningChange]
+  );
+
   return (
     <div className={cn("flex h-full min-h-0 flex-col", className)}>
       <div className="flex h-8 items-center justify-between border-b border-[var(--color-chrome-border)] px-2">
         <div className="font-mono text-[11px] text-muted-foreground">{statusText}</div>
         <div className="flex items-center gap-1">
+          {onSplitPane && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6"
+              onClick={onSplitPane}
+              title="Split Right"
+            >
+              <Columns2 className="h-3.5 w-3.5" />
+            </Button>
+          )}
           <Button
             size="icon"
             variant="ghost"
@@ -91,7 +118,7 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = (props) => {
 
       <div
         ref={containerRef}
-        className="min-h-0 flex-1 bg-[#0b0f14]"
+        className="min-h-0 flex-1 bg-[#0b0f14] pl-1 pr-0.5"
         tabIndex={0}
         onMouseDown={recoverPointerFocus}
         onClick={recoverPointerFocus}
