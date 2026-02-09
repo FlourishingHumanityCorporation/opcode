@@ -4,6 +4,8 @@ use rusqlite::{params, types::ValueRef, Connection, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
 use std::collections::HashMap;
+use std::path::Path;
+use std::time::SystemTime;
 use tauri::{AppHandle, Manager, State};
 
 /// Represents metadata about a database table
@@ -444,6 +446,140 @@ pub async fn storage_execute_sql(
             rows_affected: Some(rows_affected as i64),
             last_insert_rowid: Some(conn.last_insert_rowid()),
         })
+    }
+}
+
+fn decode_local_storage_value(raw: &[u8]) -> Option<String> {
+    if raw.len() % 2 == 0 {
+        let utf16: Vec<u16> = raw
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+
+        if let Ok(decoded) = String::from_utf16(&utf16) {
+            let cleaned = decoded.trim_end_matches('\0').to_string();
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+    }
+
+    String::from_utf8(raw.to_vec())
+        .ok()
+        .map(|decoded| decoded.trim_end_matches('\0').to_string())
+        .filter(|decoded| !decoded.is_empty())
+}
+
+fn parse_non_empty_workspace_payload(payload: &str) -> Option<String> {
+    let parsed = serde_json::from_str::<JsonValue>(payload).ok()?;
+    let tabs = parsed.get("tabs")?.as_array()?;
+    if tabs.is_empty() {
+        return None;
+    }
+    Some(payload.to_string())
+}
+
+fn read_workspace_payload_from_local_storage_db(path: &Path) -> Option<String> {
+    let conn = Connection::open(path).ok()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT key, value
+             FROM ItemTable
+             WHERE key IN ('app_setting:workspace_state_v3', 'opcode_workspace_v3')",
+        )
+        .ok()?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            let key: String = row.get(0)?;
+            let value: Vec<u8> = row.get(1)?;
+            Ok((key, value))
+        })
+        .ok()?;
+
+    let mut app_setting_payload: Option<String> = None;
+    let mut workspace_payload: Option<String> = None;
+
+    for row in rows.flatten() {
+        let (key, value) = row;
+        let Some(decoded) = decode_local_storage_value(&value) else {
+            continue;
+        };
+        let Some(valid_payload) = parse_non_empty_workspace_payload(&decoded) else {
+            continue;
+        };
+
+        match key.as_str() {
+            "app_setting:workspace_state_v3" => app_setting_payload = Some(valid_payload),
+            "opcode_workspace_v3" => workspace_payload = Some(valid_payload),
+            _ => {}
+        }
+    }
+
+    app_setting_payload.or(workspace_payload)
+}
+
+#[tauri::command]
+pub async fn storage_find_legacy_workspace_state(app: AppHandle) -> Result<Option<String>, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        return Ok(None);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let identifier = app.config().identifier.clone();
+        let Some(home_dir) = dirs::home_dir() else {
+            return Ok(None);
+        };
+
+        let webkit_root = home_dir
+            .join("Library")
+            .join("WebKit")
+            .join(identifier)
+            .join("WebsiteData")
+            .join("Default");
+
+        if !webkit_root.exists() {
+            return Ok(None);
+        }
+
+        let mut best: Option<(SystemTime, String)> = None;
+        for entry in walkdir::WalkDir::new(&webkit_root)
+            .max_depth(10)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            let file_name = entry.file_name().to_string_lossy();
+            if !file_name.starts_with("localstorage.sqlite3") {
+                continue;
+            }
+
+            let Some(payload) = read_workspace_payload_from_local_storage_db(entry.path()) else {
+                continue;
+            };
+
+            let modified = entry
+                .metadata()
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+
+            match &best {
+                Some((best_modified, best_payload))
+                    if modified < *best_modified
+                        || (modified == *best_modified
+                            && payload.len() <= best_payload.len()) => {}
+                _ => best = Some((modified, payload)),
+            }
+        }
+
+        Ok(best.map(|(_, payload)| payload))
     }
 }
 

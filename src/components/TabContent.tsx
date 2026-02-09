@@ -49,6 +49,7 @@ export const TabContent: React.FC = () => {
     tabs,
     activeWorkspace,
     activeTabId,
+    isInitialized,
     utilityOverlay,
     utilityPayload,
     createProjectWorkspaceTab,
@@ -188,7 +189,13 @@ export const TabContent: React.FC = () => {
     updateTab,
   ]);
 
-  const content = (!activeWorkspace || !activeTabId) ? (
+  const content = !isInitialized ? (
+    <div className="relative flex h-full items-center justify-center bg-background">
+      <div className="text-center">
+        <p className="text-lg font-medium">Loading workspace...</p>
+      </div>
+    </div>
+  ) : (!activeWorkspace || !activeTabId) ? (
     <div className="relative flex h-full items-center justify-center bg-background">
       <div className="text-center">
         <p className="text-lg font-medium">No projects open</p>

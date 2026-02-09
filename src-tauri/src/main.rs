@@ -54,7 +54,8 @@ use commands::mcp::{
 use commands::proxy::{apply_proxy_settings, get_proxy_settings, save_proxy_settings};
 use commands::storage::{
     storage_delete_row, storage_execute_sql, storage_insert_row, storage_list_tables,
-    storage_read_table, storage_reset_database, storage_update_row,
+    storage_find_legacy_workspace_state, storage_read_table, storage_reset_database,
+    storage_update_row,
 };
 use commands::title::generate_local_terminal_title;
 use commands::terminal::{
@@ -77,6 +78,44 @@ use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
 const WINDOW_WIDTH_KEY: &str = "window_width";
 const WINDOW_HEIGHT_KEY: &str = "window_height";
+
+#[cfg(debug_assertions)]
+fn ensure_dev_server_reachable() -> Result<(), String> {
+    let host = std::env::var("TAURI_DEV_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port = 1420_u16;
+    let max_attempts = 40_u32;
+    let retry_delay = std::time::Duration::from_millis(250);
+
+    for attempt in 1..=max_attempts {
+        match std::net::TcpStream::connect((host.as_str(), port)) {
+            Ok(stream) => {
+                drop(stream);
+                log::info!(
+                    "Dev server reachable at http://{}:{} (attempt {}/{})",
+                    host,
+                    port,
+                    attempt,
+                    max_attempts
+                );
+                return Ok(());
+            }
+            Err(err) => {
+                if attempt == max_attempts {
+                    return Err(format!(
+                        "Dev server not reachable at http://{}:{} after {} attempts: {}",
+                        host, port, max_attempts, err
+                    ));
+                }
+                std::thread::sleep(retry_delay);
+            }
+        }
+    }
+
+    Err(format!(
+        "Dev server not reachable at http://{}:{}",
+        host, port
+    ))
+}
 
 fn load_persisted_window_size(conn: &rusqlite::Connection) -> Option<(f64, f64)> {
     let width = conn
@@ -136,6 +175,13 @@ fn persist_window_size(app: &tauri::AppHandle, width: u32, height: u32) {
 fn main() {
     // Initialize logger
     env_logger::init();
+
+    #[cfg(debug_assertions)]
+    if let Err(err) = ensure_dev_server_reachable() {
+        log::error!("{}", err);
+        eprintln!("{}", err);
+        std::process::exit(1);
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -392,6 +438,7 @@ fn main() {
             storage_delete_row,
             storage_insert_row,
             storage_execute_sql,
+            storage_find_legacy_workspace_state,
             storage_reset_database,
             // Slash Commands
             commands::slash_commands::slash_commands_list,

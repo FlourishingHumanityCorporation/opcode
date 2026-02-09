@@ -37,6 +37,7 @@ interface UseTabStateReturn {
   activeTab: Tab | undefined;
   activeWorkspace: Tab | undefined;
   activeTabId: string | null;
+  isInitialized: boolean;
   utilityOverlay: ReturnType<typeof useTabContext>['utilityOverlay'];
   utilityPayload: ReturnType<typeof useTabContext>['utilityPayload'];
   tabCount: number;
@@ -109,6 +110,7 @@ export const useTabState = (): UseTabStateReturn => {
   const {
     tabs,
     activeTabId,
+    isInitialized,
     utilityOverlay,
     utilityPayload,
     createProjectWorkspaceTab,
@@ -487,6 +489,7 @@ export const useTabState = (): UseTabStateReturn => {
     activeTab,
     activeWorkspace,
     activeTabId,
+    isInitialized,
     utilityOverlay,
     utilityPayload,
     tabCount: tabs.length,

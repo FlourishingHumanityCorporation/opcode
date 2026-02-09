@@ -9,11 +9,14 @@ import type {
   Tab,
   TerminalTab,
 } from '@/contexts/TabContext';
+import { api } from '@/lib/api';
 import { hashWorkspaceState, logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 
 const STORAGE_KEY = 'opcode_workspace_v3';
+const WORKSPACE_DB_MIRROR_KEY = 'workspace_state_v3';
 const PERSISTENCE_ENABLED_KEY = 'opcode_tab_persistence_enabled';
 const EMBEDDED_TERMINAL_RUNTIME_MIGRATION_KEY = 'opcode_embedded_terminal_runtime_migration_v1';
+const DB_MIRROR_DEBOUNCE_MS = 300;
 
 const LEGACY_STORAGE_KEY = 'opcode_tabs_v2';
 const LEGACY_ACTIVE_TAB_KEY = 'opcode_active_tab_v2';
@@ -210,6 +213,22 @@ function countTerminalTabs(tabs: ProjectWorkspaceTab[]): number {
   return tabs.reduce((count, workspace) => count + workspace.terminalTabs.length, 0);
 }
 
+function deserializeWorkspacePayload(
+  parsed: SerializedWorkspace
+): { tabs: ProjectWorkspaceTab[]; activeTabId: string | null } {
+  const tabs = parsed.tabs
+    .map(deserializeWorkspace)
+    .filter((tab) => tab.id && tab.type === 'project')
+    .sort((a, b) => a.order - b.order)
+    .map((tab, index) => ({ ...tab, order: index }));
+
+  const activeTabId = parsed.activeTabId && tabs.some((tab) => tab.id === parsed.activeTabId)
+    ? parsed.activeTabId
+    : tabs[0]?.id ?? null;
+
+  return { tabs, activeTabId };
+}
+
 export function validateWorkspaceGraph(
   tabs: ProjectWorkspaceTab[],
   activeTabId: string | null
@@ -393,6 +412,71 @@ function makeLegacyWorkspaceFromTab(tab: LegacyTabV2, index: number): ProjectWor
 }
 
 export class TabPersistenceService {
+  private static pendingWorkspaceMirrorPayload: string | null = null;
+  private static mirrorFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private static mirrorWriteInFlight = false;
+  private static lastMirroredWorkspacePayload: string | null = null;
+
+  private static queueWorkspaceMirror(serializedPayload: string): void {
+    if (!this.isEnabled()) {
+      return;
+    }
+    if (
+      serializedPayload === this.lastMirroredWorkspacePayload &&
+      this.pendingWorkspaceMirrorPayload === null
+    ) {
+      return;
+    }
+
+    this.pendingWorkspaceMirrorPayload = serializedPayload;
+    if (this.mirrorFlushTimer) {
+      clearTimeout(this.mirrorFlushTimer);
+    }
+    this.mirrorFlushTimer = setTimeout(() => {
+      this.mirrorFlushTimer = null;
+      void this.persistPendingWorkspaceMirror();
+    }, DB_MIRROR_DEBOUNCE_MS);
+  }
+
+  private static async persistPendingWorkspaceMirror(): Promise<void> {
+    if (this.mirrorWriteInFlight) {
+      return;
+    }
+
+    const payload = this.pendingWorkspaceMirrorPayload;
+    if (payload === null || payload === this.lastMirroredWorkspacePayload) {
+      this.pendingWorkspaceMirrorPayload = null;
+      return;
+    }
+
+    this.pendingWorkspaceMirrorPayload = null;
+    this.mirrorWriteInFlight = true;
+    try {
+      await api.saveSetting(WORKSPACE_DB_MIRROR_KEY, payload);
+      this.lastMirroredWorkspacePayload = payload;
+      logWorkspaceEvent({
+        category: 'persist_save',
+        action: 'save_workspace_db_mirror',
+      });
+    } catch (error) {
+      console.warn('Failed to mirror workspace to app settings:', error);
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'save_workspace_db_mirror_failed',
+        message: error instanceof Error ? error.message : 'Unknown db mirror error',
+      });
+    } finally {
+      this.mirrorWriteInFlight = false;
+    }
+
+    if (
+      this.pendingWorkspaceMirrorPayload !== null &&
+      this.pendingWorkspaceMirrorPayload !== this.lastMirroredWorkspacePayload
+    ) {
+      await this.persistPendingWorkspaceMirror();
+    }
+  }
+
   static isEnabled(): boolean {
     const enabled = localStorage.getItem(PERSISTENCE_ENABLED_KEY);
     return enabled === null || enabled === 'true';
@@ -419,7 +503,9 @@ export class TabPersistenceService {
           : orderedTabs[0]?.id ?? null,
       };
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      const serializedPayload = JSON.stringify(payload);
+      localStorage.setItem(STORAGE_KEY, serializedPayload);
+      this.queueWorkspaceMirror(serializedPayload);
       logWorkspaceEvent({
         category: 'persist_save',
         action: 'save_workspace',
@@ -474,15 +560,7 @@ export class TabPersistenceService {
         localStorage.setItem(EMBEDDED_TERMINAL_RUNTIME_MIGRATION_KEY, '1');
       }
 
-      const tabs = parsed.tabs
-        .map(deserializeWorkspace)
-        .filter((tab) => tab.id && tab.type === 'project')
-        .sort((a, b) => a.order - b.order)
-        .map((tab, index) => ({ ...tab, order: index }));
-
-      const activeTabId = parsed.activeTabId && tabs.some((tab) => tab.id === parsed.activeTabId)
-        ? parsed.activeTabId
-        : tabs[0]?.id ?? null;
+      const { tabs, activeTabId } = deserializeWorkspacePayload(parsed);
 
       const validation = validateWorkspaceGraph(tabs, activeTabId);
       if (!validation.valid) {
@@ -510,13 +588,139 @@ export class TabPersistenceService {
           rawSize: raw?.length ?? 0,
         },
       });
-      this.clearWorkspace();
+      localStorage.removeItem(STORAGE_KEY);
       return { tabs: [], activeTabId: null };
     }
   }
 
+  static async loadWorkspaceWithFallback(): Promise<{ tabs: ProjectWorkspaceTab[]; activeTabId: string | null }> {
+    const localResult = this.loadWorkspace();
+    if (!this.isEnabled()) {
+      return localResult;
+    }
+    if (localResult.tabs.length > 0 || localResult.activeTabId !== null) {
+      return localResult;
+    }
+
+    try {
+      const mirroredPayload = await api.getSetting(WORKSPACE_DB_MIRROR_KEY, { fresh: true });
+      if (!mirroredPayload) {
+        const legacyPayload = typeof api.storageFindLegacyWorkspaceState === 'function'
+          ? await api.storageFindLegacyWorkspaceState()
+          : null;
+        if (!legacyPayload) {
+          return localResult;
+        }
+
+        const parsedLegacy = JSON.parse(legacyPayload) as SerializedWorkspace;
+        if (!parsedLegacy || parsedLegacy.version !== 3 || !Array.isArray(parsedLegacy.tabs)) {
+          throw new Error('Invalid legacy workspace schema');
+        }
+
+        localStorage.setItem(STORAGE_KEY, legacyPayload);
+        const restoredFromLegacy = this.loadWorkspace();
+        if (restoredFromLegacy.tabs.length > 0 || restoredFromLegacy.activeTabId !== null) {
+          this.lastMirroredWorkspacePayload = legacyPayload;
+          try {
+            await api.saveSetting(WORKSPACE_DB_MIRROR_KEY, legacyPayload);
+          } catch (persistError) {
+            logWorkspaceEvent({
+              category: 'error',
+              action: 'persist_legacy_workspace_to_db_failed',
+              message: persistError instanceof Error ? persistError.message : 'Unknown legacy persist error',
+            });
+          }
+          logWorkspaceEvent({
+            category: 'persist_migration',
+            action: 'restore_workspace_from_legacy_storage',
+            tabCount: restoredFromLegacy.tabs.length,
+            terminalCount: countTerminalTabs(restoredFromLegacy.tabs),
+            activeWorkspaceId: restoredFromLegacy.activeTabId,
+          });
+        }
+        return restoredFromLegacy;
+      }
+
+      const parsed = JSON.parse(mirroredPayload) as SerializedWorkspace;
+      if (!parsed || parsed.version !== 3 || !Array.isArray(parsed.tabs)) {
+        throw new Error('Invalid mirrored workspace schema');
+      }
+      if (parsed.tabs.length === 0) {
+        const legacyPayload = typeof api.storageFindLegacyWorkspaceState === 'function'
+          ? await api.storageFindLegacyWorkspaceState()
+          : null;
+        if (!legacyPayload) {
+          return localResult;
+        }
+
+        const parsedLegacy = JSON.parse(legacyPayload) as SerializedWorkspace;
+        if (!parsedLegacy || parsedLegacy.version !== 3 || !Array.isArray(parsedLegacy.tabs)) {
+          throw new Error('Invalid legacy workspace schema');
+        }
+
+        localStorage.setItem(STORAGE_KEY, legacyPayload);
+        const restoredFromLegacy = this.loadWorkspace();
+        if (restoredFromLegacy.tabs.length > 0 || restoredFromLegacy.activeTabId !== null) {
+          this.lastMirroredWorkspacePayload = legacyPayload;
+          try {
+            await api.saveSetting(WORKSPACE_DB_MIRROR_KEY, legacyPayload);
+          } catch (persistError) {
+            logWorkspaceEvent({
+              category: 'error',
+              action: 'persist_legacy_workspace_to_db_failed',
+              message: persistError instanceof Error ? persistError.message : 'Unknown legacy persist error',
+            });
+          }
+          logWorkspaceEvent({
+            category: 'persist_migration',
+            action: 'restore_workspace_from_legacy_storage',
+            tabCount: restoredFromLegacy.tabs.length,
+            terminalCount: countTerminalTabs(restoredFromLegacy.tabs),
+            activeWorkspaceId: restoredFromLegacy.activeTabId,
+          });
+        }
+        return restoredFromLegacy;
+      }
+
+      localStorage.setItem(STORAGE_KEY, mirroredPayload);
+      const restored = this.loadWorkspace();
+      if (restored.tabs.length > 0 || restored.activeTabId !== null) {
+        this.lastMirroredWorkspacePayload = mirroredPayload;
+        logWorkspaceEvent({
+          category: 'persist_migration',
+          action: 'restore_workspace_from_db_mirror',
+          tabCount: restored.tabs.length,
+          terminalCount: countTerminalTabs(restored.tabs),
+          activeWorkspaceId: restored.activeTabId,
+        });
+      }
+      return restored;
+    } catch (error) {
+      logWorkspaceEvent({
+        category: 'error',
+        action: 'restore_workspace_from_db_mirror_failed',
+        message: error instanceof Error ? error.message : 'Unknown db mirror restore error',
+      });
+      return localResult;
+    }
+  }
+
+  static async flushPendingWorkspaceMirror(): Promise<void> {
+    if (this.mirrorFlushTimer) {
+      clearTimeout(this.mirrorFlushTimer);
+      this.mirrorFlushTimer = null;
+    }
+    await this.persistPendingWorkspaceMirror();
+  }
+
   static clearWorkspace(): void {
     localStorage.removeItem(STORAGE_KEY);
+    this.pendingWorkspaceMirrorPayload = '';
+    if (this.mirrorFlushTimer) {
+      clearTimeout(this.mirrorFlushTimer);
+      this.mirrorFlushTimer = null;
+    }
+    void this.persistPendingWorkspaceMirror();
   }
 
   static migrateFromOldFormat(): void {
@@ -552,7 +756,9 @@ export class TabPersistenceService {
         activeTabId,
       };
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(migratedWorkspace));
+      const serializedPayload = JSON.stringify(migratedWorkspace);
+      localStorage.setItem(STORAGE_KEY, serializedPayload);
+      this.queueWorkspaceMirror(serializedPayload);
       logWorkspaceEvent({
         category: 'persist_migration',
         action: 'migrate_v2_to_v3',
@@ -594,14 +800,7 @@ export class TabPersistenceService {
 
     try {
       const parsed = JSON.parse(raw) as SerializedWorkspace;
-      const tabs = parsed.tabs
-        .map(deserializeWorkspace)
-        .filter((tab) => tab.id && tab.type === 'project')
-        .sort((a, b) => a.order - b.order)
-        .map((tab, index) => ({ ...tab, order: index }));
-      const activeTabId = parsed.activeTabId && tabs.some((tab) => tab.id === parsed.activeTabId)
-        ? parsed.activeTabId
-        : tabs[0]?.id ?? null;
+      const { tabs, activeTabId } = deserializeWorkspacePayload(parsed);
       const validation = validateWorkspaceGraph(tabs, activeTabId);
       return {
         found: true,

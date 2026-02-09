@@ -1,4 +1,14 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/api', () => ({
+  api: {
+    getSetting: vi.fn(),
+    saveSetting: vi.fn(),
+    storageFindLegacyWorkspaceState: vi.fn(),
+  },
+}));
+
+import { api } from '@/lib/api';
 import {
   sanitizeTerminalForHydration,
   type PaneNode,
@@ -6,6 +16,8 @@ import {
   type TerminalTab,
 } from '@/contexts/TabContext';
 import { TabPersistenceService, validateWorkspaceGraph } from '@/services/tabPersistence';
+
+const apiMock = vi.mocked(api);
 
 function makeLeafPane(id: string): PaneNode {
   return {
@@ -63,8 +75,20 @@ function makeWorkspace(
 }
 
 describe('TabPersistenceService', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.useRealTimers();
+    await TabPersistenceService.flushPendingWorkspaceMirror();
+    apiMock.getSetting.mockReset();
+    apiMock.saveSetting.mockReset();
+    apiMock.storageFindLegacyWorkspaceState.mockReset();
+    apiMock.getSetting.mockResolvedValue(null);
+    apiMock.saveSetting.mockResolvedValue(undefined);
+    apiMock.storageFindLegacyWorkspaceState.mockResolvedValue(null);
     localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('persists workspace array order as canonical ordering', () => {
@@ -270,5 +294,74 @@ describe('TabPersistenceService', () => {
 
     expect(restored.tabs[0].status).toBe('attention');
     expect(restored.tabs[0].terminalTabs[0].status).toBe('attention');
+  });
+
+  it('falls back to mirrored DB workspace when localStorage is empty', async () => {
+    const workspace = makeWorkspace('workspace-db-fallback', 0, [makeTerminal('terminal-db-fallback')]);
+    TabPersistenceService.saveWorkspace([workspace], workspace.id);
+    const mirroredRaw = localStorage.getItem('opcode_workspace_v3');
+    expect(mirroredRaw).toBeTruthy();
+
+    localStorage.clear();
+    apiMock.getSetting.mockResolvedValue(mirroredRaw);
+
+    const restored = await TabPersistenceService.loadWorkspaceWithFallback();
+
+    expect(apiMock.getSetting).toHaveBeenCalledWith('workspace_state_v3', { fresh: true });
+    expect(restored.tabs.map((tab) => tab.id)).toEqual(['workspace-db-fallback']);
+    expect(restored.activeTabId).toBe('workspace-db-fallback');
+    expect(localStorage.getItem('opcode_workspace_v3')).toBeTruthy();
+  });
+
+  it('imports non-empty workspace from legacy storage when local and DB are empty', async () => {
+    const workspace = makeWorkspace('workspace-legacy-fallback', 0, [makeTerminal('terminal-legacy-fallback')]);
+    TabPersistenceService.saveWorkspace([workspace], workspace.id);
+    const legacyRaw = localStorage.getItem('opcode_workspace_v3');
+    expect(legacyRaw).toBeTruthy();
+
+    localStorage.clear();
+    apiMock.getSetting.mockResolvedValue(null);
+    apiMock.storageFindLegacyWorkspaceState.mockResolvedValue(legacyRaw);
+
+    const restored = await TabPersistenceService.loadWorkspaceWithFallback();
+
+    expect(apiMock.getSetting).toHaveBeenCalledWith('workspace_state_v3', { fresh: true });
+    expect(apiMock.storageFindLegacyWorkspaceState).toHaveBeenCalled();
+    expect(apiMock.saveSetting).toHaveBeenCalledWith('workspace_state_v3', legacyRaw);
+    expect(restored.tabs.map((tab) => tab.id)).toEqual(['workspace-legacy-fallback']);
+    expect(restored.activeTabId).toBe('workspace-legacy-fallback');
+    expect(localStorage.getItem('opcode_workspace_v3')).toBeTruthy();
+  });
+
+  it('debounces rapid mirrored DB saves into one write', async () => {
+    vi.useFakeTimers();
+    const workspaceA = makeWorkspace('workspace-db-save-a', 0, [makeTerminal('terminal-db-save-a')]);
+    const workspaceB = makeWorkspace('workspace-db-save-b', 0, [makeTerminal('terminal-db-save-b')]);
+
+    TabPersistenceService.saveWorkspace([workspaceA], workspaceA.id);
+    TabPersistenceService.saveWorkspace([workspaceB], workspaceB.id);
+
+    expect(apiMock.saveSetting).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(299);
+    expect(apiMock.saveSetting).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await TabPersistenceService.flushPendingWorkspaceMirror();
+
+    expect(apiMock.saveSetting).toHaveBeenCalledTimes(1);
+    expect(apiMock.saveSetting).toHaveBeenCalledWith(
+      'workspace_state_v3',
+      expect.stringContaining('workspace-db-save-b')
+    );
+  });
+
+  it('handles invalid mirrored DB payload without crashing', async () => {
+    localStorage.clear();
+    apiMock.getSetting.mockResolvedValue('{');
+
+    const restored = await TabPersistenceService.loadWorkspaceWithFallback();
+
+    expect(restored.tabs).toEqual([]);
+    expect(restored.activeTabId).toBeNull();
+    expect(localStorage.getItem('opcode_workspace_v3')).toBeNull();
   });
 });

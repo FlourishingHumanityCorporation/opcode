@@ -1,164 +1,128 @@
-# Opcode Mobile Companion Roadmap (Updated)
-
-## Date
+# Opcode Mobile Companion Roadmap (Current)
 
 Updated on **February 9, 2026**.
 
 ## Goal
 
-Ship an iOS mobile companion that mirrors live desktop Opcode state and supports core remote control safely over private networking (Tailscale).
+Ship an iOS mobile companion that reliably mirrors live desktop Opcode state and supports safe remote control over private networking (Tailscale).
 
-## Current Status Snapshot
+## Status Summary
 
-### Completed
+- `P0` Stability/Security: **Complete**
+- `P1` Mirror Fidelity: **Complete**
+- `P2` Control UX Completion: **Next**
+- `P3` CI/Test Expansion + Observability: **Next**
+- `P4` TestFlight/Internal Beta: **Pending**
 
-1. Desktop mobile sync service exists in Tauri and runs on port `8091` when enabled.
-2. Sync protocol package exists at `/Users/paulrohde/CodeProjects/external/opcode/packages/mobile-sync-protocol`.
-3. Core sync endpoints exist:
-   1. `GET /mobile/v1/health`
-   2. `GET /mobile/v1/snapshot`
-   3. `GET /mobile/v1/ws`
-   4. `POST /mobile/v1/action`
-   5. `POST /mobile/v1/pair/start`
-   6. `POST /mobile/v1/pair/claim`
-   7. `POST /mobile/v1/device/revoke`
-4. Pairing + device registry tables exist (`mobile_devices`, `mobile_pairing_codes`, `mobile_sync_settings`).
-5. Desktop settings UI includes mobile sync enable/host/pair/revoke controls.
-6. Frontend bridge publishes snapshots/events and consumes `mobile-action-requested`.
-7. iOS app scaffold exists in `/Users/paulrohde/CodeProjects/external/opcode/apps/mobile`.
-8. Mobile app now supports:
-   1. Pair claim (`pairCode + deviceName + host`)
-   2. Secure credential persistence via `expo-secure-store`
-   3. Auto reconnect + backoff
-   4. Snapshot refetch on `sync.resnapshot_required`
-   5. Core actions (workspace/tab activate, terminal input, execute/resume/cancel)
-9. WebSocket auth now supports query token fallback (`?token=...`) for Expo/browser clients while keeping header auth.
-10. Baseline checks pass (`npm run check`, Rust integration test, protocol test).
+## Completed in Current Iteration (P0 + P1)
 
-### In Progress / Partial
+1. WebSocket auth hardening on desktop sync service:
+   - header token preferred, query token fallback supported
+   - missing/invalid/revoked token returns unauthorized
+2. Backend auth regression tests added for token selection and unauthorized mapping.
+3. Mobile auth/reconnect hardening:
+   - bounded exponential backoff with jitter
+   - auth failure reset clears persisted creds and routes back to pairing
+   - stale/out-of-order event rejection
+   - `sync.resnapshot_required` refresh behavior
+4. Desktop-to-mobile mirror payload enrichment:
+   - `workspace.state_changed` includes active context IDs and counts
+   - additive summary events: `terminal.state_summary`, `provider_session.state_summary`
+5. Mobile store/reducer upgrades to consume enriched events and patch active context quickly.
+6. Mobile diagnostics upgrades:
+   - connection status, sequence, event/snapshot age, reconnect count, active target IDs
+7. Mobile tests added:
+   - protocol client tests
+   - reconnect/auth-reset tests
+   - store reducer tests for sequence/resnapshot/summary events
+8. Desktop bridge tests added for enriched payload builders.
+9. CI workflows updated so mobile install, typecheck, and tests run from `apps/mobile` context.
 
-1. Mobile views are functional but still MVP-level (not full desktop UX parity).
-2. Diagnostics are basic and not yet tied to telemetry dashboards.
-3. Action roundtrip works at protocol level, but rich success/failure UX on mobile is minimal.
+## Remaining Work by Phase
 
-### Not Done Yet
+## P2: Control UX Completion (1 week target)
 
-1. Full state fidelity for terminal/session output rendering on mobile.
-2. Conflict policy hardening for simultaneous desktop + mobile edits.
-3. Comprehensive automated coverage for mobile sync flows (especially WS query-token auth and auth failure paths).
-4. TestFlight build/signing/release pipeline.
-5. Beta monitoring and SLO-based rollout gates.
+### Scope
 
-## What We Need Next (Priority Order)
+1. Add per-action status UX (`pending`, `succeeded`, `failed`) for all control actions.
+2. Add guardrails and validation for invalid targets (missing terminal/session/workspace context).
+3. Add disconnect-safe action handling:
+   - reject instantly with user-visible reason, or
+   - queue only explicitly retry-safe actions
+4. Improve active target labeling on action UI and confirmation toasts.
 
-## P0: Stability + Security Hardening (must complete first)
+### Acceptance criteria
 
-1. Add backend tests for WS auth matrix:
-   1. Header bearer token valid
-   2. Query token valid
-   3. Missing token -> `401`
-   4. Invalid/revoked token -> `401`
-2. Add mobile integration tests for:
-   1. Pair claim success/failure
-   2. Persisted reconnect
-   3. Auth failure auto-reset to pairing
-3. Add explicit error payload handling and surfaced user states in mobile UI.
-4. Ensure revoked token behavior is immediate on next snapshot/action/WS reconnect and UI returns to pair flow cleanly.
+1. User can reliably switch workspace/tab, send terminal input, execute/resume/cancel session.
+2. No silent action drops.
+3. Action failure reason is always visible in UI.
 
-### Exit criteria
+## P3: Test + CI Expansion + Baseline Observability (1 week target)
 
-1. No silent auth failures.
-2. Revocation behavior deterministic in test.
-3. Reconnect loops capped and observable.
+### Scope
 
-## P1: Mirror Fidelity (desktop state parity)
+1. Expand Rust sync coverage:
+   - sequence gap/resnapshot behavior
+   - action routing failure paths
+   - revocation enforcement on reconnect
+2. Expand mobile tests:
+   - reducer convergence after mixed snapshot + event replay
+   - reconnect edge cases and auth invalidation
+3. CI tightening:
+   - enforce mobile checks on all sync-impacting PR paths
+   - keep nightly artifacts for mobile and sync failures
+4. Add minimal runtime metrics/logging:
+   - connect success/fail
+   - reconnect attempts
+   - action latency/failure
+   - auth failures/revocations
 
-1. Expand mirrored data model for mobile-visible state:
-   1. Active workspace/tab metadata
-   2. Terminal pane focus and stream summaries
-   3. Provider session status/output summaries
-2. Publish richer incremental events from desktop bridge (not only coarse workspace change markers).
-3. Implement idempotent reducer updates on mobile for event replay.
+### Acceptance criteria
 
-### Exit criteria
+1. PR checks are deterministic and include mobile typecheck + tests + sync backend tests.
+2. Nightly catches regression in pairing/sync/control paths with actionable artifacts.
+3. Baseline telemetry exists for internal beta decisions.
 
-1. Mobile screen state matches desktop active context after connect and during tab/session switches.
-2. Snapshot + event replay converges without manual refresh.
+## P4: TestFlight + Internal Beta (1-2 week target)
 
-## P2: Control UX Completion
+### Scope
 
-1. Add clear command/result feedback for every mobile action.
-2. Add guardrails for invalid actions (no active terminal/session, missing IDs, stale context).
-3. Add “active target” indicators so users know exactly where prompts/input go.
-4. Add action queue UX when temporarily disconnected.
+1. Finalize iOS metadata/signing/release profile.
+2. Build internal TestFlight distribution checklist and release playbook.
+3. Define go/no-go thresholds:
+   - connect success rate
+   - median event lag
+   - action failure rate
+   - auth error rate
+4. Run 1 week of internal dogfooding and collect issues.
 
-### Exit criteria
+### Acceptance criteria
 
-1. User can reliably run: switch tab, send terminal input, execute/resume/cancel session.
-2. Failures are understandable and recoverable in-app.
+1. Internal cohort can pair, reconnect, mirror, and execute core actions without blockers.
+2. Metrics remain within agreed thresholds before expanding testers.
 
-## P3: Test + CI/CD Expansion
+## Execution Order and Gates
 
-1. Add dedicated mobile sync backend tests in Rust (auth, sequencing, resync).
-2. Add mobile client unit tests for:
-   1. Store reducer
-   2. reconnect backoff
-   3. resnapshot logic
-3. Add CI workflow for mobile app typecheck/tests.
-4. Add artifact capture for sync failures (logs + traces).
-
-### Exit criteria
-
-1. PRs touching sync/mobile paths run deterministic coverage.
-2. Nightly runs catch regression in pairing/sync/control loop.
-
-## P4: TestFlight + Internal Beta
-
-1. Finalize iOS app metadata, signing, and bundle config.
-2. Set up internal TestFlight distribution and release checklist.
-3. Add beta telemetry dashboard:
-   1. connect success rate
-   2. median sync lag
-   3. action failure rate
-   4. auth error rate
-4. Define go/no-go thresholds for expanding tester cohort.
-
-### Exit criteria
-
-1. Internal cohort can pair/connect/control for at least one week with no critical blocker.
-2. Reliability metrics meet defined thresholds.
-
-## Proposed Timeline From Today
-
-1. Week 1: P0 stability/security hardening.
-2. Week 2: P1 mirror fidelity.
-3. Week 3: P2 control UX completion.
-4. Week 4: P3 CI/test expansion.
-5. Week 5: P4 TestFlight setup and internal dogfood.
-
-## Acceptance Gates
-
-1. Gate A: Auth + reconnect reliability proven by automated tests.
-2. Gate B: Mobile mirror fidelity validated against live desktop scenarios.
-3. Gate C: Core action loop proven stable in daily use.
-4. Gate D: TestFlight internal release with monitoring in place.
+1. Gate A (already passed): P0 auth/reconnect reliability.
+2. Gate B (already passed): P1 mirror active-context fidelity.
+3. Gate C (next): P2 action UX reliability and error clarity.
+4. Gate D (next): P3 deterministic CI + baseline telemetry.
+5. Gate E (final): P4 TestFlight internal beta readiness.
 
 ## Risks and Mitigations
 
-1. Risk: Event schema drift between desktop and mobile.
-   1. Mitigation: protocol fixtures + parity tests in Rust and TypeScript.
-2. Risk: Reconnect storms or stale sequence loops.
-   1. Mitigation: capped exponential backoff + forced resnapshot rules.
-3. Risk: Mobile UX mismatch with high-volume terminal/session output.
-   1. Mitigation: summarize output for MVP, virtualize rendering in next iteration.
-4. Risk: Security regressions in query-token WS auth.
-   1. Mitigation: strict auth precedence and regression tests for token validation paths.
+1. Risk: terminal/session output volume overwhelms mobile rendering.
+   - Mitigation: keep summarized view as default, add virtualization incrementally.
+2. Risk: drift between snapshot and incremental event semantics.
+   - Mitigation: convergence tests (snapshot replay after event stream).
+3. Risk: query-token auth path regression for Expo/browser clients.
+   - Mitigation: preserve explicit auth matrix tests in CI.
+4. Risk: flaky reconnect behavior on mobile network transitions.
+   - Mitigation: keep capped backoff + auth-reset behavior + diagnostics visibility.
 
-## Immediate Execution Checklist
+## Immediate Checklist (What We Need Now)
 
-1. Add WS auth regression tests (header/query/missing/revoked).
-2. Add mobile auth-failure + reconnect integration tests.
-3. Improve mirrored session/terminal output data shape.
-4. Add action result/error UI polish.
-5. Wire CI workflows for mobile sync + app tests.
-6. Prepare TestFlight build settings and internal release runbook.
+1. Implement action result/error UX and retry-safe disconnect handling (`P2`).
+2. Add reducer convergence and action failure-path tests (`P3`).
+3. Add minimal connect/action/auth telemetry events (`P3`).
+4. Define internal TestFlight release checklist draft (`P4` prep).

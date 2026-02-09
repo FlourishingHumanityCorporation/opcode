@@ -2126,6 +2126,19 @@ export const api = {
     }
   },
 
+  /**
+   * Finds a non-empty legacy workspace payload from prior WebKit localStorage origins.
+   * Returns null when no legacy workspace can be recovered.
+   */
+  async storageFindLegacyWorkspaceState(): Promise<string | null> {
+    try {
+      return await apiCall<string | null>("storage_find_legacy_workspace_state");
+    } catch (error) {
+      console.error("Failed to find legacy workspace state:", error);
+      return null;
+    }
+  },
+
   // Theme settings helpers
 
   /**
@@ -2133,10 +2146,11 @@ export const api = {
    * @param key - The setting key to retrieve
    * @returns Promise resolving to the setting value or null if not found
    */
-  async getSetting(key: string): Promise<string | null> {
+  async getSetting(key: string, options?: { fresh?: boolean }): Promise<string | null> {
     try {
+      const useCache = options?.fresh !== true;
       // Fast path: check localStorage mirror to avoid startup flicker
-      if (typeof window !== 'undefined' && 'localStorage' in window) {
+      if (useCache && typeof window !== 'undefined' && 'localStorage' in window) {
         const cached = window.localStorage.getItem(`app_setting:${key}`);
         if (cached !== null) {
           return cached;
@@ -2144,8 +2158,13 @@ export const api = {
       }
       // Use storageReadTable to safely query the app_settings table
       const result = await this.storageReadTable('app_settings', 1, 1000);
-      const setting = result?.data?.find((row: any) => row.key === key);
-      return setting?.value || null;
+      const rows = Array.isArray(result?.rows) ? result.rows : [];
+      const setting = rows.find((row: any) => row?.key === key);
+      const value = typeof setting?.value === 'string' ? setting.value : null;
+      if (value !== null && typeof window !== 'undefined' && 'localStorage' in window) {
+        window.localStorage.setItem(`app_setting:${key}`, value);
+      }
+      return value;
     } catch (error) {
       console.error(`Failed to get setting ${key}:`, error);
       return null;

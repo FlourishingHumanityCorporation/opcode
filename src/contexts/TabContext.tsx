@@ -121,6 +121,7 @@ interface WorkspaceState {
 interface TabContextType {
   tabs: Tab[];
   activeTabId: string | null;
+  isInitialized: boolean;
   utilityOverlay: UtilityOverlayType;
   utilityPayload: any;
   createProjectWorkspaceTab: (projectPath?: string, title?: string) => string;
@@ -703,7 +704,7 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     const loadWorkspace = async () => {
-      const { tabs: savedTabs, activeTabId } = TabPersistenceService.loadWorkspace();
+      const { tabs: savedTabs, activeTabId } = await TabPersistenceService.loadWorkspaceWithFallback();
 
       const restoredTabs = savedTabs.map((workspace) => ({
         ...workspace,
@@ -829,12 +830,14 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const handleBeforeUnload = () => {
       if (!isInitialized) return;
       TabPersistenceService.saveWorkspace(stateRef.current.tabs, stateRef.current.activeTabId);
+      void TabPersistenceService.flushPendingWorkspaceMirror();
     };
 
     const handleVisibilityChange = () => {
       if (!isInitialized) return;
       if (document.visibilityState !== 'hidden') return;
       TabPersistenceService.saveWorkspace(stateRef.current.tabs, stateRef.current.activeTabId);
+      void TabPersistenceService.flushPendingWorkspaceMirror();
       logWorkspaceEvent({
         category: 'state_action',
         action: 'visibility_flush_workspace',
@@ -850,6 +853,7 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (isInitialized) {
         TabPersistenceService.saveWorkspace(stateRef.current.tabs, stateRef.current.activeTabId);
+        void TabPersistenceService.flushPendingWorkspaceMirror();
       }
     };
   }, [isInitialized]);
@@ -1246,6 +1250,7 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     () => ({
       tabs: state.tabs,
       activeTabId: state.activeTabId,
+      isInitialized,
       utilityOverlay: state.utilityOverlay,
       utilityPayload: state.utilityPayload,
       createProjectWorkspaceTab,
@@ -1269,6 +1274,7 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }),
     [
       state,
+      isInitialized,
       createProjectWorkspaceTab,
       closeProjectWorkspaceTab,
       updateProjectWorkspaceTab,
