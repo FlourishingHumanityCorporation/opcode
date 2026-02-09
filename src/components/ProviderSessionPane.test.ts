@@ -4,6 +4,7 @@ vi.mock("@/components/EmbeddedTerminal", () => ({
   EmbeddedTerminal: () => null,
 }));
 import {
+  resolveCanClosePane,
   resolveStreamingState,
   shouldEmitNeedsInputAttention,
   shouldShowProjectPathHeader,
@@ -22,6 +23,11 @@ describe("ProviderSessionPane header behavior", () => {
 
   it("hides header when the project bar is hidden", () => {
     expect(shouldShowProjectPathHeader(true)).toBe(false);
+  });
+
+  it("keeps pane close control disabled for single-pane mode", () => {
+    expect(resolveCanClosePane(false)).toBe(false);
+    expect(resolveCanClosePane(undefined)).toBe(true);
   });
 
   it("normalizes legacy boolean completion payloads", () => {

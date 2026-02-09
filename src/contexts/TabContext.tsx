@@ -1087,6 +1087,9 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (!leafIds.includes(paneId)) {
           return terminal;
         }
+        if (terminal.activePaneId === paneId) {
+          return terminal;
+        }
         return {
           ...terminal,
           activePaneId: paneId,

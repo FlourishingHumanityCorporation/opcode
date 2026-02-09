@@ -354,6 +354,7 @@ export function useEmbeddedTerminalController({
   const isRunningRef = useRef(false);
   const staleRecoveryPendingRef = useRef(false);
   const softReattachPendingRef = useRef(false);
+  const commandActivityArmedRef = useRef(false);
   const wheelScrollRemainderRef = useRef(0);
   const lastInputAttemptAtRef = useRef<number | null>(null);
   const lastOutputAtRef = useRef<number | null>(Date.now());
@@ -393,12 +394,14 @@ export function useEmbeddedTerminalController({
     clearStreamingActivityTimer();
     streamingActivityTimerRef.current = window.setTimeout(() => {
       streamingActivityTimerRef.current = null;
+      commandActivityArmedRef.current = false;
       setIsStreamingActivity(false);
     }, STREAM_ACTIVITY_IDLE_MS);
   }, [clearStreamingActivityTimer]);
 
   const clearStreamingActivity = useCallback(() => {
     clearStreamingActivityTimer();
+    commandActivityArmedRef.current = false;
     setIsStreamingActivity(false);
   }, [clearStreamingActivityTimer]);
 
@@ -529,6 +532,7 @@ export function useEmbeddedTerminalController({
       if (!terminalIdRef.current) return;
       try {
         lastInputAttemptAtRef.current = Date.now();
+        commandActivityArmedRef.current = true;
         await api.writeEmbeddedTerminalInput(terminalIdRef.current, `${command}\n`);
         clearWriteFailureSignals();
         markStreamingActivity();
@@ -734,6 +738,7 @@ export function useEmbeddedTerminalController({
       onDataDisposable = terminalInstance.onData((data) => {
         if (!terminalIdRef.current) return;
         if (data.includes("\r") || data.includes("\n")) {
+          commandActivityArmedRef.current = true;
           markStreamingActivity();
         }
         lastInputAttemptAtRef.current = Date.now();
@@ -771,7 +776,9 @@ export function useEmbeddedTerminalController({
         if (!terminalInstance) return;
         lastOutputAtRef.current = Date.now();
         clearWriteFailureSignals();
-        markStreamingActivity();
+        if (commandActivityArmedRef.current) {
+          markStreamingActivity();
+        }
         setRecoveryNoticeWithTimeout(null);
         const chunk = String(event.payload ?? "");
         terminalInstance.write(chunk);

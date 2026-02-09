@@ -58,9 +58,12 @@ const ProjectTabItem: React.FC<ProjectTabItemProps> = ({ tab, aggregateStatus, i
       onClick={() => onClick(tab.id)}
       data-testid={`workspace-tab-${tab.id}`}
     >
-      <Folder className="h-3.5 w-3.5 shrink-0" />
       <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-        {statusIndicator ? renderTabStatusMarker(statusIndicator) : null}
+        {statusIndicator ? (
+          renderTabStatusMarker(statusIndicator)
+        ) : (
+          <Folder className="h-3.5 w-3.5" />
+        )}
       </span>
       <span className="min-w-0 flex-1 truncate text-left">{tab.title || 'Project'}</span>
       <button

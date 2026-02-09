@@ -261,6 +261,14 @@ interface ProviderSessionPaneProps {
    * Optional callback to split the current pane (embedded terminal chrome action).
    */
   onSplitPane?: () => void;
+  /**
+   * Optional callback to close the current pane (embedded terminal chrome action).
+   */
+  onClosePane?: () => void;
+  /**
+   * Whether the current pane can be closed.
+   */
+  canClosePane?: boolean;
 }
 
 export function shouldShowProjectPathHeader(
@@ -271,6 +279,10 @@ export function shouldShowProjectPathHeader(
 
 export function shouldShowProviderSelectorInHeader(): boolean {
   return false;
+}
+
+export function resolveCanClosePane(canClosePane: boolean | undefined): boolean {
+  return canClosePane !== false;
 }
 
 export function shouldEmitNeedsInputAttention(
@@ -310,6 +322,8 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   hideFloatingGlobalControls = false,
   previewMode = 'split',
   onSplitPane,
+  onClosePane,
+  canClosePane = true,
   paneId,
   workspaceId,
   terminalTabId,
@@ -2306,6 +2320,8 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           terminalTabId={terminalTabId}
           paneId={paneId}
           onSplitPane={onSplitPane}
+          onClosePane={onClosePane}
+          canClosePane={resolveCanClosePane(canClosePane)}
           onRunningChange={setNativeTerminalStreaming}
           className="h-full min-h-0"
         />

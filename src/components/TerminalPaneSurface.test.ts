@@ -4,6 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Tab, TerminalTab } from "@/contexts/TabContext";
 import {
   TerminalPaneSurface,
+  countLeafPanes,
+  isInteractiveTarget,
   resolveTerminalStatusFromStreaming,
 } from "@/components/TerminalPaneSurface";
 
@@ -94,12 +96,61 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
     });
   });
 
-  it("maps streaming changes to running/idle transitions", () => {
+  it("maps streaming changes to running/complete transitions", () => {
     expect(resolveTerminalStatusFromStreaming("idle", true)).toBe("running");
     expect(resolveTerminalStatusFromStreaming("running", true)).toBeNull();
-    expect(resolveTerminalStatusFromStreaming("running", false)).toBe("idle");
+    expect(resolveTerminalStatusFromStreaming("running", false)).toBe("complete");
     expect(resolveTerminalStatusFromStreaming("attention", false)).toBeNull();
     expect(resolveTerminalStatusFromStreaming("complete", false)).toBeNull();
+  });
+
+  it("counts leaf panes for single and split trees", () => {
+    expect(
+      countLeafPanes({
+        id: "pane-1",
+        type: "leaf",
+        leafSessionId: "pane-1",
+      })
+    ).toBe(1);
+
+    expect(
+      countLeafPanes({
+        id: "split-root",
+        type: "split",
+        direction: "vertical",
+        widthRatio: 0.5,
+        left: {
+          id: "pane-left",
+          type: "leaf",
+          leafSessionId: "pane-left",
+        },
+        right: {
+          id: "pane-right",
+          type: "leaf",
+          leafSessionId: "pane-right",
+        },
+      })
+    ).toBe(2);
+  });
+
+  it("detects interactive targets for pane activation guard", () => {
+    const root = document.createElement("div");
+    const button = document.createElement("button");
+    const plain = document.createElement("div");
+    const roleButton = document.createElement("span");
+    roleButton.setAttribute("role", "button");
+    const noActivate = document.createElement("span");
+    noActivate.setAttribute("data-no-pane-activate", "true");
+    root.appendChild(button);
+    root.appendChild(plain);
+    root.appendChild(roleButton);
+    root.appendChild(noActivate);
+
+    expect(isInteractiveTarget(button)).toBe(true);
+    expect(isInteractiveTarget(roleButton)).toBe(true);
+    expect(isInteractiveTarget(noActivate)).toBe(true);
+    expect(isInteractiveTarget(plain)).toBe(false);
+    expect(isInteractiveTarget(null)).toBe(false);
   });
 
   it("passes active pane state to ProviderSessionPane", () => {
@@ -122,6 +173,7 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
     expect(capturedProviderSessionProps.value.terminalTabId).toBe("terminal-1");
     expect(capturedProviderSessionProps.value.currentTerminalTitle).toBe("Terminal 1");
     expect(capturedProviderSessionProps.value.isTerminalTitleLocked).toBe(false);
+    expect(capturedProviderSessionProps.value.canClosePane).toBe(false);
 
     capturedProviderSessionProps.value.onAutoRenameTerminalTitle("Renamed from test");
     expect(updateTabSpy).toHaveBeenCalledWith("terminal-1", { title: "Renamed from test" });
@@ -164,6 +216,52 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
 
     expect(capturedProviderSessionProps.value).toBeTruthy();
     expect(capturedProviderSessionProps.value.isTerminalTitleLocked).toBe(true);
+  });
+
+  it("enables pane close controls when pane tree has multiple leaves", () => {
+    const { workspace, terminal } = makeWorkspaceAndTerminal();
+    const splitTerminal: TerminalTab = {
+      ...terminal,
+      paneTree: {
+        id: "root",
+        type: "split",
+        direction: "vertical",
+        widthRatio: 0.5,
+        left: {
+          id: "pane-1",
+          type: "leaf",
+          leafSessionId: "pane-1",
+        },
+        right: {
+          id: "pane-2",
+          type: "leaf",
+          leafSessionId: "pane-2",
+        },
+      },
+      paneStates: {
+        "pane-1": {
+          projectPath: "/tmp/project",
+        },
+        "pane-2": {
+          projectPath: "/tmp/project",
+        },
+      },
+      activePaneId: "pane-1",
+    };
+
+    renderToStaticMarkup(
+      React.createElement(TerminalPaneSurface, {
+        workspace,
+        terminal: splitTerminal,
+        paneId: "pane-1",
+        isActive: true,
+        isPaneVisible: true,
+      })
+    );
+
+    expect(capturedProviderSessionProps.value).toBeTruthy();
+    expect(capturedProviderSessionProps.value.canClosePane).toBe(true);
+    expect(typeof capturedProviderSessionProps.value.onClosePane).toBe("function");
   });
 
   it("auto-renames default workspace title on first project path registration", () => {

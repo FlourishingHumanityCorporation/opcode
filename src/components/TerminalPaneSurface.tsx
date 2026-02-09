@@ -10,7 +10,7 @@ import {
   shouldAutoRenameWorkspaceTitle,
 } from '@/lib/terminalPaneState';
 import { api } from '@/lib/api';
-import type { Tab, TerminalTab } from '@/contexts/TabContext';
+import type { PaneNode, Tab, TerminalTab } from '@/contexts/TabContext';
 import { ProviderSessionPane } from '@/components/ProviderSessionPane';
 import { AgentExecution } from '@/components/AgentExecution';
 import { AgentRunOutputViewer } from '@/components/AgentRunOutputViewer';
@@ -40,6 +40,30 @@ export function resolveTerminalStatusFromStreaming(
   return null;
 }
 
+export function countLeafPanes(node: PaneNode): number {
+  if (node.type === 'leaf') {
+    return 1;
+  }
+  return countLeafPanes(node.left) + countLeafPanes(node.right);
+}
+
+const INTERACTIVE_TARGET_SELECTOR = [
+  'button',
+  'a',
+  'input',
+  'textarea',
+  'select',
+  '[role="button"]',
+  '[data-no-pane-activate]',
+].join(',');
+
+export function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  return Boolean(target.closest(INTERACTIVE_TARGET_SELECTOR));
+}
+
 export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
   workspace,
   terminal,
@@ -58,6 +82,8 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
   } = useTabState();
 
   const paneRuntime = terminal.paneStates[paneId] || {};
+  const paneCount = countLeafPanes(terminal.paneTree);
+  const canClosePane = paneCount > 1;
 
   const providerId =
     paneRuntime.providerId ||
@@ -247,8 +273,13 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
         'flex h-full flex-col border bg-background',
         isActive ? 'border-[var(--color-chrome-border)]' : 'border-[var(--color-chrome-border)]/70'
       )}
-      onMouseDown={() => activatePane(workspace.id, terminal.id, paneId)}
       data-testid={exposeTestId ? `workspace-pane-${paneId}` : `hidden-workspace-pane-${paneId}`}
+      onMouseDown={(event) => {
+        if (isInteractiveTarget(event.target)) {
+          return;
+        }
+        activatePane(workspace.id, terminal.id, paneId);
+      }}
     >
       {terminal.kind === "agent" && (
         <div className="workspace-chrome-row flex h-8 items-center justify-between border-b border-[var(--color-chrome-border)]/80 bg-[var(--color-chrome-surface)]">
@@ -266,24 +297,28 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
                 event.stopPropagation();
                 splitPane(workspace.id, terminal.id, paneId);
               }}
+              data-no-pane-activate
               title={exposeTestId ? "Split Right" : undefined}
               aria-label={exposeTestId ? "Split Right" : "Hidden Split Right"}
             >
               <Columns2 className="h-2.5 w-2.5" />
             </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-5 w-5 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
-              onClick={(event) => {
-                event.stopPropagation();
-                closePane(workspace.id, terminal.id, paneId);
-              }}
-              title={exposeTestId ? "Close Pane" : undefined}
-              aria-label={exposeTestId ? "Close Pane" : "Hidden Close Pane"}
-            >
-              <X className="h-2.5 w-2.5" />
-            </Button>
+            {canClosePane && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-5 w-5 text-[var(--color-chrome-text)] hover:bg-[var(--color-chrome-active)] hover:text-[var(--color-chrome-text-active)]"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closePane(workspace.id, terminal.id, paneId);
+                }}
+                data-no-pane-activate
+                title={exposeTestId ? "Close Pane" : undefined}
+                aria-label={exposeTestId ? "Close Pane" : "Hidden Close Pane"}
+              >
+                <X className="h-2.5 w-2.5" />
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -340,6 +375,8 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
             isTerminalTitleLocked={Boolean(terminal.titleLocked)}
             onAutoRenameTerminalTitle={handleAutoRenameTerminalTitle}
             onSplitPane={() => splitPane(workspace.id, terminal.id, paneId)}
+            onClosePane={canClosePane ? () => closePane(workspace.id, terminal.id, paneId) : undefined}
+            canClosePane={canClosePane}
             onStreamingChange={handleStreamingChange}
             onBack={() => {}}
             className="h-full"

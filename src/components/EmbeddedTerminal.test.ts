@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api";
 
 vi.mock("@xterm/xterm", () => ({
@@ -11,7 +13,31 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 
+const embeddedTerminalControllerMocks = vi.hoisted(() => ({
+  runInTerminal: vi.fn(async () => undefined),
+  handleRestart: vi.fn(async () => undefined),
+  recoverPointerFocus: vi.fn(),
+  quickRunCommandRef: { current: "claude" },
+  containerRef: { current: null as HTMLDivElement | null },
+}));
+
+vi.mock("@/components/embedded-terminal", () => ({
+  useEmbeddedTerminalController: () => ({
+    containerRef: embeddedTerminalControllerMocks.containerRef,
+    statusText: "Running",
+    isStreamingActivity: false,
+    error: null,
+    recoveryNotice: null,
+    ready: true,
+    quickRunCommandRef: embeddedTerminalControllerMocks.quickRunCommandRef,
+    runInTerminal: embeddedTerminalControllerMocks.runInTerminal,
+    handleRestart: embeddedTerminalControllerMocks.handleRestart,
+    recoverPointerFocus: embeddedTerminalControllerMocks.recoverPointerFocus,
+  }),
+}));
+
 import {
+  EmbeddedTerminal,
   applyTerminalInteractivity,
   classifyEditableTargetOutsideContainer,
   classifyTerminalErrorCode,
@@ -26,7 +52,124 @@ import {
   shouldTerminatePersistentSessionForClose,
 } from "@/components/EmbeddedTerminal";
 
+async function renderEmbeddedTerminal(
+  props: Partial<React.ComponentProps<typeof EmbeddedTerminal>> = {}
+): Promise<{
+  host: HTMLDivElement;
+  container: HTMLDivElement;
+  root: Root;
+  cleanup: () => Promise<void>;
+}> {
+  const host = document.createElement("div");
+  const container = document.createElement("div");
+  host.appendChild(container);
+  document.body.appendChild(host);
+  const root = createRoot(container);
+
+  await act(async () => {
+    root.render(
+      React.createElement(EmbeddedTerminal, {
+        projectPath: "/tmp/project",
+        onSplitPane: vi.fn(),
+        onClosePane: vi.fn(),
+        ...props,
+      })
+    );
+  });
+
+  return {
+    host,
+    container,
+    root,
+    cleanup: async () => {
+      await act(async () => {
+        root.unmount();
+      });
+      host.remove();
+    },
+  };
+}
+
 describe("EmbeddedTerminal lifecycle close behavior", () => {
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.clearAllMocks();
+  });
+
+  it("invokes header control actions while suppressing mouse event bubbling", async () => {
+    const onSplitPane = vi.fn();
+    const onClosePane = vi.fn();
+    const bubbleClickSpy = vi.fn();
+    const bubbleMouseDownSpy = vi.fn();
+    const { host, container, cleanup } = await renderEmbeddedTerminal({
+      onSplitPane,
+      onClosePane,
+      canClosePane: true,
+    });
+
+    try {
+      host.addEventListener("click", bubbleClickSpy);
+      host.addEventListener("mousedown", bubbleMouseDownSpy);
+
+      const splitButton = container.querySelector('button[title="Split Right"]') as HTMLButtonElement | null;
+      const closeButton = container.querySelector('button[title="Close Pane"]') as HTMLButtonElement | null;
+      const runButton = container.querySelector('button[title="Run claude"]') as HTMLButtonElement | null;
+      const restartButton = container.querySelector(
+        'button[title="Restart terminal"]'
+      ) as HTMLButtonElement | null;
+
+      expect(splitButton).toBeTruthy();
+      expect(closeButton).toBeTruthy();
+      expect(runButton).toBeTruthy();
+      expect(restartButton).toBeTruthy();
+
+      await act(async () => {
+        const splitMouseDown = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        splitButton?.dispatchEvent(splitMouseDown);
+        expect(splitMouseDown.defaultPrevented).toBe(true);
+
+        const splitClick = new MouseEvent("click", { bubbles: true, cancelable: true });
+        splitButton?.dispatchEvent(splitClick);
+        expect(splitClick.defaultPrevented).toBe(true);
+
+        const closeClick = new MouseEvent("click", { bubbles: true, cancelable: true });
+        closeButton?.dispatchEvent(closeClick);
+        expect(closeClick.defaultPrevented).toBe(true);
+
+        const runClick = new MouseEvent("click", { bubbles: true, cancelable: true });
+        runButton?.dispatchEvent(runClick);
+        expect(runClick.defaultPrevented).toBe(true);
+
+        const restartClick = new MouseEvent("click", { bubbles: true, cancelable: true });
+        restartButton?.dispatchEvent(restartClick);
+        expect(restartClick.defaultPrevented).toBe(true);
+      });
+
+      expect(onSplitPane).toHaveBeenCalledTimes(1);
+      expect(onClosePane).toHaveBeenCalledTimes(1);
+      expect(embeddedTerminalControllerMocks.runInTerminal).toHaveBeenCalledWith("claude");
+      expect(embeddedTerminalControllerMocks.handleRestart).toHaveBeenCalledTimes(1);
+      expect(bubbleClickSpy).not.toHaveBeenCalled();
+      expect(bubbleMouseDownSpy).not.toHaveBeenCalled();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("hides close button when pane cannot be closed", async () => {
+    const { container, cleanup } = await renderEmbeddedTerminal({
+      onClosePane: vi.fn(),
+      canClosePane: false,
+    });
+
+    try {
+      const closeButton = container.querySelector('button[title="Close Pane"]');
+      expect(closeButton).toBeNull();
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("maps stale-startup closes to detach semantics", async () => {
     const closeSpy = vi.spyOn(api, "closeEmbeddedTerminal").mockResolvedValue();
 

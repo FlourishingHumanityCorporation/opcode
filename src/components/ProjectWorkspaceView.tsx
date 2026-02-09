@@ -228,9 +228,12 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
                   )}
                   data-testid={isVisible ? `terminal-tab-${terminal.id}` : `hidden-terminal-tab-${terminal.id}`}
                 >
-                  <Terminal className="h-3.5 w-3.5 shrink-0" />
                   <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                    {statusIndicator ? renderTabStatusMarker(statusIndicator) : null}
+                    {statusIndicator ? (
+                      renderTabStatusMarker(statusIndicator)
+                    ) : (
+                      <Terminal className="h-3.5 w-3.5" />
+                    )}
                   </span>
                   <span className="truncate text-left">{getTerminalTitle(terminal, index)}</span>
                   <Button
