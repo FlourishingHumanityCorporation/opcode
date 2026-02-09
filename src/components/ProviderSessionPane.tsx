@@ -321,7 +321,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   const [projectPath, setProjectPath] = useState(initialProjectPath || session?.project_path || "");
   const [messages, setMessages] = useState<ProviderSessionMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
   const [rawJsonlOutput, setRawJsonlOutput] = useState<string[]>([]);
   const [copyPopoverOpen, setCopyPopoverOpen] = useState(false);
   const [isFirstPrompt, setIsFirstPrompt] = useState(!session);
@@ -2291,7 +2291,6 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
 
   const showProjectPathHeader = shouldShowProjectPathHeader(hideProjectBar);
   const showProviderSelector = shouldShowProviderSelectorInHeader();
-  const nativeStatusMessage = error || nativeRestoreNotice;
 
   // Provider selector bar and path/toggles row.
   const projectPathInput = showProjectPathHeader ? (
@@ -2451,28 +2450,15 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           )}
         </div>
 
-        {/* Floating Prompt Input - Always visible */}
+        {/* Floating Prompt Input */}
         <ErrorBoundary>
-          <div className={cn(
-            embedded
-              ? "absolute bottom-0 left-0 right-0 transition-all duration-300 z-40"
-              : "fixed bottom-0 left-0 right-0 transition-all duration-300 z-50",
-            showTimeline && "sm:right-96"
-          )}>
-            {nativeTerminalMode && (nativeStatusMessage || !projectPath) ? (
-              <div className="pointer-events-none border-t border-border bg-background/95 px-4 py-2">
-                <div className={cn("mx-auto flex w-full items-center justify-between", embedded ? "" : "max-w-6xl")}>
-                  {nativeStatusMessage ? (
-                    <div className="text-xs text-muted-foreground">{nativeStatusMessage}</div>
-                  ) : <div />}
-                  {!projectPath && (
-                    <Button size="sm" onClick={handleSelectTerminalProject} className="pointer-events-auto">
-                      Select Project
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ) : (
+          {!nativeTerminalMode && (
+            <div className={cn(
+              embedded
+                ? "absolute bottom-0 left-0 right-0 transition-all duration-300 z-40"
+                : "fixed bottom-0 left-0 right-0 transition-all duration-300 z-50",
+              showTimeline && "sm:right-96"
+            )}>
               <FloatingPromptInput
                 ref={floatingPromptRef}
                 onSend={handleSendPrompt}
@@ -2566,8 +2552,8 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
                   </>
                 }
               />
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Token Counter - positioned under the Send button */}
           {totalTokens > 0 && !hideFloatingGlobalControls && !nativeTerminalMode && (
