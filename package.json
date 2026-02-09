@@ -19,6 +19,7 @@
     "check": "tsc --noEmit && cd src-tauri && cargo check",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
+    "test:mobile-sync": "vitest run src/services/mobileSyncProtocol.test.ts",
     "test:remote-access:contracts": "vitest run -c vitest.remote.config.ts",
     "smoke:remote-web": "playwright test -c playwright.remote.config.ts tests/smoke/remote-access-webmode.spec.ts",
     "debug:session-start": "node scripts/measure-session-startup.mjs",

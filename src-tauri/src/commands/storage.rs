@@ -466,6 +466,12 @@ pub async fn storage_reset_database(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Failed to drop agents table: {}", e))?;
         conn.execute("DROP TABLE IF EXISTS app_settings", [])
             .map_err(|e| format!("Failed to drop app_settings table: {}", e))?;
+        conn.execute("DROP TABLE IF EXISTS mobile_devices", [])
+            .map_err(|e| format!("Failed to drop mobile_devices table: {}", e))?;
+        conn.execute("DROP TABLE IF EXISTS mobile_pairing_codes", [])
+            .map_err(|e| format!("Failed to drop mobile_pairing_codes table: {}", e))?;
+        conn.execute("DROP TABLE IF EXISTS mobile_sync_settings", [])
+            .map_err(|e| format!("Failed to drop mobile_sync_settings table: {}", e))?;
 
         // Re-enable foreign key constraints
         conn.execute("PRAGMA foreign_keys = ON", [])

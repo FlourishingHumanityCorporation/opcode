@@ -12,6 +12,7 @@ import { TabPersistenceService } from '@/services/tabPersistence';
 import { SessionPersistenceService } from '@/services/sessionPersistence';
 import { hashWorkspaceState, logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 import { setTerminalWorkspaceSnapshotProvider } from '@/services/terminalHangDiagnostics';
+import { mobileSyncBridge } from '@/services/mobileSyncBridge';
 import { api } from '@/lib/api';
 
 export type UtilityOverlayType =
@@ -199,6 +200,15 @@ export function sanitizeTerminalForHydration(terminal: TerminalTab): TerminalTab
     ...terminal,
     paneStates: nextPaneStates,
   };
+}
+
+function stableSerializeWorkspace(value: unknown): string {
+  return JSON.stringify(value, (_key, current) => {
+    if (current instanceof Date) {
+      return current.toISOString();
+    }
+    return current;
+  });
 }
 
 function createLeafNode(id?: string): PaneLeafNode {
@@ -660,6 +670,7 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [state, dispatch] = useReducer(tabReducer, initialState);
   const [isInitialized, setIsInitialized] = useState(false);
   const stateRef = useRef(state);
+  const lastPublishedSnapshotRef = useRef<string>('');
 
   useEffect(() => {
     stateRef.current = state;
@@ -673,6 +684,13 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return () => {
       setTerminalWorkspaceSnapshotProvider(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    void mobileSyncBridge.initializeActionBridge();
+    return () => {
+      mobileSyncBridge.teardownActionBridge();
     };
   }, []);
 
@@ -745,6 +763,40 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }),
     });
   }, [state.tabs, state.activeTabId, isInitialized]);
+
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    const serializableState = {
+      tabs: state.tabs,
+      activeTabId: state.activeTabId,
+      utilityOverlay: state.utilityOverlay,
+      utilityPayload: state.utilityPayload,
+    };
+    const snapshotHash = stableSerializeWorkspace(serializableState);
+    if (snapshotHash === lastPublishedSnapshotRef.current) {
+      return;
+    }
+
+    lastPublishedSnapshotRef.current = snapshotHash;
+    void mobileSyncBridge.publishSnapshot(serializableState);
+    void mobileSyncBridge.publishEvents([
+      {
+        eventType: 'workspace.state_changed',
+        payload: {
+          activeTabId: state.activeTabId,
+          tabCount: state.tabs.length,
+          utilityOverlay: state.utilityOverlay,
+        },
+      },
+    ]);
+  }, [
+    state.tabs,
+    state.activeTabId,
+    state.utilityOverlay,
+    state.utilityPayload,
+    isInitialized,
+  ]);
 
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -1063,6 +1115,105 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     dispatch({ type: 'replace-workspaces', tabs: [], activeTabId: null });
     TabPersistenceService.clearWorkspace();
   }, []);
+
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    const handleMobileAction = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        actionId?: string;
+        actionType?: string;
+        payload?: Record<string, any>;
+      }>;
+
+      const actionType = customEvent.detail?.actionType;
+      const payload = customEvent.detail?.payload ?? {};
+      if (!actionType) return;
+
+      void (async () => {
+        try {
+          switch (actionType) {
+            case 'workspace.activate':
+            case 'tab.activate': {
+              if (typeof payload.workspaceId === 'string') {
+                setActiveTab(payload.workspaceId);
+              }
+              break;
+            }
+            case 'workspace.create': {
+              createProjectWorkspaceTab(payload.projectPath || '', payload.title);
+              break;
+            }
+            case 'terminal.activate': {
+              if (typeof payload.workspaceId === 'string' && typeof payload.terminalTabId === 'string') {
+                setActiveTerminalTab(payload.workspaceId, payload.terminalTabId);
+              }
+              break;
+            }
+            case 'provider_session.execute': {
+              if (typeof payload.projectPath === 'string' && typeof payload.prompt === 'string') {
+                await api.executeProviderSession(payload.projectPath, payload.prompt, payload.model || 'default');
+              }
+              break;
+            }
+            case 'provider_session.resume': {
+              if (
+                typeof payload.projectPath === 'string' &&
+                typeof payload.prompt === 'string' &&
+                typeof payload.sessionId === 'string'
+              ) {
+                await api.resumeProviderSession(
+                  payload.projectPath,
+                  payload.sessionId,
+                  payload.prompt,
+                  payload.model || 'default'
+                );
+              }
+              break;
+            }
+            case 'provider_session.cancel': {
+              if (typeof payload.sessionId === 'string') {
+                await api.cancelProviderSession(payload.sessionId);
+              } else {
+                await api.cancelProviderSession();
+              }
+              break;
+            }
+            case 'terminal.write': {
+              if (typeof payload.terminalId === 'string' && typeof payload.data === 'string') {
+                await api.writeEmbeddedTerminalInput(payload.terminalId, payload.data);
+              }
+              break;
+            }
+            case 'terminal.resize_hint': {
+              if (
+                typeof payload.terminalId === 'string' &&
+                typeof payload.cols === 'number' &&
+                typeof payload.rows === 'number'
+              ) {
+                await api.resizeEmbeddedTerminal(payload.terminalId, payload.cols, payload.rows);
+              }
+              break;
+            }
+            default:
+              break;
+          }
+        } catch (error) {
+          console.error('[mobileSync] Failed to execute mobile action', actionType, error);
+        }
+      })();
+    };
+
+    window.addEventListener('mobile-action-requested', handleMobileAction as EventListener);
+    return () => {
+      window.removeEventListener('mobile-action-requested', handleMobileAction as EventListener);
+    };
+  }, [
+    isInitialized,
+    createProjectWorkspaceTab,
+    setActiveTab,
+    setActiveTerminalTab,
+  ]);
 
   const value = useMemo<TabContextType>(
     () => ({

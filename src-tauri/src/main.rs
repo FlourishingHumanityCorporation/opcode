@@ -5,6 +5,7 @@ mod agent_binary;
 mod checkpoint;
 mod claude_binary;
 mod commands;
+mod mobile_sync;
 mod process;
 mod providers;
 mod usage_index;
@@ -66,12 +67,71 @@ use commands::usage::{
     get_usage_index_status, get_usage_stats, start_usage_index_sync,
 };
 use process::ProcessRegistryState;
+use rusqlite::params;
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{LogicalSize, Manager, Size, WindowEvent};
 use usage_index::UsageIndexState;
 
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+
+const WINDOW_WIDTH_KEY: &str = "window_width";
+const WINDOW_HEIGHT_KEY: &str = "window_height";
+
+fn load_persisted_window_size(conn: &rusqlite::Connection) -> Option<(f64, f64)> {
+    let width = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![WINDOW_WIDTH_KEY],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()?
+        .parse::<f64>()
+        .ok()?;
+
+    let height = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![WINDOW_HEIGHT_KEY],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()?
+        .parse::<f64>()
+        .ok()?;
+
+    // Guard against invalid/corrupt values.
+    if width < 100.0 || height < 100.0 {
+        return None;
+    }
+
+    Some((width, height))
+}
+
+fn persist_window_size(app: &tauri::AppHandle, width: u32, height: u32) {
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    let db = app.state::<AgentDb>();
+    let Ok(conn) = db.0.lock() else {
+        log::warn!("Failed to lock database while saving window size");
+        return;
+    };
+
+    if let Err(err) = conn.execute(
+        "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
+        params![WINDOW_WIDTH_KEY, width.to_string()],
+    ) {
+        log::warn!("Failed to persist window width: {}", err);
+    }
+
+    if let Err(err) = conn.execute(
+        "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
+        params![WINDOW_HEIGHT_KEY, height.to_string()],
+    ) {
+        log::warn!("Failed to persist window height: {}", err);
+    }
+}
 
 fn main() {
     // Initialize logger
@@ -82,6 +142,8 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            let mut persisted_window_size: Option<(f64, f64)> = None;
+
             // Initialize agents database
             let conn = init_database(&app.handle()).expect("Failed to initialize agents database");
 
@@ -127,6 +189,7 @@ fn main() {
                         }
 
                         log::info!("Loaded proxy settings: enabled={}", settings.enabled);
+                        persisted_window_size = load_persisted_window_size(&conn);
                         settings
                     }
                     Err(e) => {
@@ -171,6 +234,42 @@ fn main() {
             // Initialize provider session process state
             app.manage(ProviderSessionProcessState::default());
             app.manage(UsageIndexState::default());
+            let mobile_sync_state = mobile_sync::MobileSyncServiceState::new("0.0.0.0", 8091);
+            app.manage(mobile_sync_state.clone());
+            mobile_sync::bootstrap_mobile_sync(app.handle().clone(), mobile_sync_state);
+
+            // Restore previous main window size if available.
+            if let Some((width, height)) = persisted_window_size {
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Err(err) = window.set_size(Size::Logical(LogicalSize::new(width, height)))
+                    {
+                        log::warn!("Failed to restore persisted window size: {}", err);
+                    }
+                }
+            }
+
+            // Persist the current size when the main window is closing.
+            let app_handle = app.handle().clone();
+            if let Some(window) = app.get_webview_window("main") {
+                window.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { .. } = event {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let is_maximized = window.is_maximized().unwrap_or(false);
+                            let is_fullscreen = window.is_fullscreen().unwrap_or(false);
+                            if is_maximized || is_fullscreen {
+                                return;
+                            }
+
+                            match window.inner_size() {
+                                Ok(size) => persist_window_size(&app_handle, size.width, size.height),
+                                Err(err) => {
+                                    log::warn!("Failed to read window size for persistence: {}", err)
+                                }
+                            }
+                        }
+                    }
+                });
+            }
 
             // Apply window vibrancy with rounded corners on macOS
             #[cfg(target_os = "macos")]
@@ -334,6 +433,14 @@ fn main() {
             generate_local_terminal_title,
             get_embedded_terminal_debug_snapshot,
             write_terminal_incident_bundle,
+            mobile_sync::mobile_sync_get_status,
+            mobile_sync::mobile_sync_set_enabled,
+            mobile_sync::mobile_sync_set_public_host,
+            mobile_sync::mobile_sync_publish_snapshot,
+            mobile_sync::mobile_sync_publish_events,
+            mobile_sync::mobile_sync_start_pairing,
+            mobile_sync::mobile_sync_list_devices,
+            mobile_sync::mobile_sync_revoke_device,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

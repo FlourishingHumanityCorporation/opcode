@@ -394,6 +394,59 @@ pub fn init_database(app: &AppHandle) -> SqliteResult<Connection> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS mobile_devices (
+            id TEXT PRIMARY KEY,
+            device_name TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            revoked INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_seen_at TEXT
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS mobile_pairing_codes (
+            code TEXT PRIMARY KEY,
+            expires_at TEXT NOT NULL,
+            claimed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS mobile_sync_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS update_mobile_devices_timestamp
+         AFTER UPDATE ON mobile_devices
+         FOR EACH ROW
+         BEGIN
+             UPDATE mobile_devices SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+         END",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS update_mobile_sync_settings_timestamp
+         AFTER UPDATE ON mobile_sync_settings
+         FOR EACH ROW
+         BEGIN
+             UPDATE mobile_sync_settings SET updated_at = CURRENT_TIMESTAMP WHERE key = NEW.key;
+         END",
+        [],
+    )?;
+
     Ok(conn)
 }
 

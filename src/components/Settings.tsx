@@ -18,7 +18,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { 
   api, 
   type ClaudeSettings,
-  type ClaudeInstallation
+  type ClaudeInstallation,
+  type MobileSyncStatus,
+  type MobileSyncPairingPayload,
+  type MobileSyncDevice,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Toast, ToastContainer } from "@/components/ui/toast";
@@ -110,6 +113,12 @@ export const Settings: React.FC<SettingsProps> = ({
   // Provider detection state
   const [detectedAgents, setDetectedAgents] = useState<Array<{ provider_id: string; binary_path: string; version: string | null; source: string }>>([]);
   const [detectingAgents, setDetectingAgents] = useState(false);
+  const [mobileSyncStatus, setMobileSyncStatus] = useState<MobileSyncStatus | null>(null);
+  const [mobileSyncDevices, setMobileSyncDevices] = useState<MobileSyncDevice[]>([]);
+  const [mobileSyncPairing, setMobileSyncPairing] = useState<MobileSyncPairingPayload | null>(null);
+  const [loadingMobileSync, setLoadingMobileSync] = useState(false);
+  const [startingPairing, setStartingPairing] = useState(false);
+  const [mobileSyncHostInput, setMobileSyncHostInput] = useState("");
   
   // Load settings on mount
   useEffect(() => {
@@ -117,6 +126,7 @@ export const Settings: React.FC<SettingsProps> = ({
     loadClaudeBinaryPath();
     loadAnalyticsSettings();
     loadDetectedAgents();
+    loadMobileSyncStatus();
     // Load tab persistence setting
     setTabPersistenceEnabled(TabPersistenceService.isEnabled());
     loadPlainTerminalModePreference().then(setPlainTerminalModeEnabled);
@@ -172,6 +182,80 @@ export const Settings: React.FC<SettingsProps> = ({
       console.error("Failed to detect agents:", err);
     } finally {
       setDetectingAgents(false);
+    }
+  };
+
+  const loadMobileSyncStatus = async () => {
+    try {
+      setLoadingMobileSync(true);
+      const [status, devices] = await Promise.all([
+        api.mobileSyncGetStatus(),
+        api.mobileSyncListDevices(),
+      ]);
+      setMobileSyncStatus(status);
+      setMobileSyncHostInput(status.publicHost || "");
+      setMobileSyncDevices(devices);
+    } catch (err) {
+      console.error("Failed to load mobile sync status:", err);
+    } finally {
+      setLoadingMobileSync(false);
+    }
+  };
+
+  const toggleMobileSync = async (enabled: boolean) => {
+    try {
+      const status = await api.mobileSyncSetEnabled(enabled);
+      setMobileSyncStatus(status);
+      if (enabled) {
+        setToast({ message: "Mobile sync enabled", type: "success" });
+      } else {
+        setToast({ message: "Mobile sync disabled", type: "success" });
+      }
+    } catch (err) {
+      console.error("Failed to toggle mobile sync:", err);
+      setToast({ message: "Failed to update mobile sync", type: "error" });
+    }
+  };
+
+  const saveMobileSyncHost = async () => {
+    const host = mobileSyncHostInput.trim();
+    if (!host) {
+      setToast({ message: "Host cannot be empty", type: "error" });
+      return;
+    }
+
+    try {
+      const status = await api.mobileSyncSetPublicHost(host);
+      setMobileSyncStatus(status);
+      setToast({ message: "Mobile host updated", type: "success" });
+    } catch (err) {
+      console.error("Failed to set public host:", err);
+      setToast({ message: "Failed to set mobile host", type: "error" });
+    }
+  };
+
+  const startMobilePairing = async () => {
+    try {
+      setStartingPairing(true);
+      const payload = await api.mobileSyncStartPairing();
+      setMobileSyncPairing(payload);
+      setToast({ message: "Pairing code generated", type: "success" });
+    } catch (err) {
+      console.error("Failed to start pairing:", err);
+      setToast({ message: "Failed to create pairing code", type: "error" });
+    } finally {
+      setStartingPairing(false);
+    }
+  };
+
+  const revokeMobileDevice = async (deviceId: string) => {
+    try {
+      await api.mobileSyncRevokeDevice(deviceId);
+      await loadMobileSyncStatus();
+      setToast({ message: "Device revoked", type: "success" });
+    } catch (err) {
+      console.error("Failed to revoke mobile device:", err);
+      setToast({ message: "Failed to revoke device", type: "error" });
     }
   };
 
@@ -443,6 +527,7 @@ export const Settings: React.FC<SettingsProps> = ({
               <TabsTrigger value="advanced" className="py-2.5 px-3">Advanced</TabsTrigger>
               <TabsTrigger value="hooks" className="py-2.5 px-3">Hooks</TabsTrigger>
               <TabsTrigger value="commands" className="py-2.5 px-3">Commands</TabsTrigger>
+              <TabsTrigger value="mobile" className="py-2.5 px-3">Mobile</TabsTrigger>
               <TabsTrigger value="storage" className="py-2.5 px-3">Storage</TabsTrigger>
               <TabsTrigger value="proxy" className="py-2.5 px-3">Proxy</TabsTrigger>
             </TabsList>
@@ -1232,6 +1317,124 @@ export const Settings: React.FC<SettingsProps> = ({
             <TabsContent value="commands">
               <Card className="p-6">
                 <SlashCommandsManager className="p-0" />
+              </Card>
+            </TabsContent>
+
+            {/* Mobile Sync */}
+            <TabsContent value="mobile" className="space-y-6">
+              <Card className="p-6 space-y-6">
+                <div>
+                  <h3 className="text-base font-semibold mb-2">Mobile Companion Sync</h3>
+                  <p className="text-body-small text-muted-foreground">
+                    Mirror your active desktop workspaces and control core actions from mobile.
+                  </p>
+                </div>
+
+                {loadingMobileSync ? (
+                  <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading mobile sync status...
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="mobile-sync-enabled">Enable Mobile Sync</Label>
+                        <p className="text-caption text-muted-foreground mt-1">
+                          Exposes `mobile/v1` endpoints on port {mobileSyncStatus?.port ?? 8091}
+                        </p>
+                      </div>
+                      <Switch
+                        id="mobile-sync-enabled"
+                        checked={mobileSyncStatus?.enabled === true}
+                        onCheckedChange={toggleMobileSync}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="mobile-sync-host">Public Host / Tailscale IP</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="mobile-sync-host"
+                          value={mobileSyncHostInput}
+                          onChange={(e) => setMobileSyncHostInput(e.target.value)}
+                          placeholder="100.x.y.z"
+                        />
+                        <Button onClick={saveMobileSyncHost} variant="outline">Save</Button>
+                      </div>
+                      <p className="text-caption text-muted-foreground">
+                        Base URL: <code>{mobileSyncStatus?.baseUrl ?? 'n/a'}</code>
+                      </p>
+                      {mobileSyncStatus?.tailscaleIp && (
+                        <p className="text-caption text-muted-foreground">
+                          Tailscale IP detected: <code>{mobileSyncStatus.tailscaleIp}</code>
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Button
+                        onClick={startMobilePairing}
+                        disabled={!mobileSyncStatus?.enabled || startingPairing}
+                        variant="outline"
+                      >
+                        {startingPairing ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Creating Pair Code...
+                          </>
+                        ) : (
+                          "Generate Pairing Code"
+                        )}
+                      </Button>
+                      {mobileSyncPairing && (
+                        <div className="rounded-md border p-3 bg-muted/20">
+                          <p className="text-sm font-medium">Pairing Code: <code>{mobileSyncPairing.pairCode}</code></p>
+                          <p className="text-caption text-muted-foreground mt-1">
+                            Expires at: {new Date(mobileSyncPairing.expiresAt).toLocaleString()}
+                          </p>
+                          <p className="text-caption text-muted-foreground">
+                            Connect target: <code>http://{mobileSyncPairing.host}:{mobileSyncPairing.port}</code>
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium">Paired Devices</h4>
+                        <Button variant="outline" size="sm" onClick={loadMobileSyncStatus}>Refresh</Button>
+                      </div>
+                      <div className="space-y-2">
+                        {mobileSyncDevices.length === 0 ? (
+                          <p className="text-caption text-muted-foreground">No paired devices yet.</p>
+                        ) : (
+                          mobileSyncDevices.map((device) => (
+                            <div key={device.id} className="rounded-md border p-3 flex items-center justify-between gap-4">
+                              <div>
+                                <p className="text-sm font-medium">{device.deviceName}</p>
+                                <p className="text-caption text-muted-foreground">
+                                  Last seen: {device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : 'Never'}
+                                </p>
+                                <p className="text-caption text-muted-foreground">
+                                  Status: {device.revoked ? 'Revoked' : 'Active'}
+                                </p>
+                              </div>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                disabled={device.revoked}
+                                onClick={() => revokeMobileDevice(device.id)}
+                              >
+                                Revoke
+                              </Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
               </Card>
             </TabsContent>
             

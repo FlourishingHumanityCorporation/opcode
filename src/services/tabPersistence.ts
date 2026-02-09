@@ -13,6 +13,7 @@ import { hashWorkspaceState, logWorkspaceEvent } from '@/services/workspaceDiagn
 
 const STORAGE_KEY = 'opcode_workspace_v3';
 const PERSISTENCE_ENABLED_KEY = 'opcode_tab_persistence_enabled';
+const EMBEDDED_TERMINAL_RUNTIME_MIGRATION_KEY = 'opcode_embedded_terminal_runtime_migration_v1';
 
 const LEGACY_STORAGE_KEY = 'opcode_tabs_v2';
 const LEGACY_ACTIVE_TAB_KEY = 'opcode_active_tab_v2';
@@ -81,6 +82,51 @@ interface LegacyTabV2 {
   icon?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+function migrateEmbeddedTerminalRuntimeIds(
+  workspace: SerializedWorkspace
+): { workspace: SerializedWorkspace; updated: boolean } {
+  let updated = false;
+
+  const tabs = workspace.tabs.map((tab) => ({
+    ...tab,
+    terminalTabs: tab.terminalTabs.map((terminal) => {
+      const paneStates = Object.entries(terminal.paneStates || {}).reduce<
+        TerminalTab['paneStates']
+      >((acc, [paneId, paneState]) => {
+        if (!paneState || typeof paneState !== 'object') {
+          acc[paneId] = paneState as TerminalTab['paneStates'][string];
+          return acc;
+        }
+
+        const paneRecord = paneState as Record<string, unknown>;
+        if (!('embeddedTerminalId' in paneRecord)) {
+          acc[paneId] = paneState as TerminalTab['paneStates'][string];
+          return acc;
+        }
+
+        const { embeddedTerminalId, ...rest } = paneRecord;
+        void embeddedTerminalId;
+        acc[paneId] = rest as TerminalTab['paneStates'][string];
+        updated = true;
+        return acc;
+      }, {});
+
+      return {
+        ...terminal,
+        paneStates,
+      };
+    }),
+  }));
+
+  return {
+    workspace: {
+      ...workspace,
+      tabs,
+    },
+    updated,
+  };
 }
 
 export interface WorkspaceValidationResult {
@@ -405,9 +451,27 @@ export class TabPersistenceService {
         return { tabs: [], activeTabId: null };
       }
 
-      const parsed = JSON.parse(raw) as SerializedWorkspace;
+      let parsed = JSON.parse(raw) as SerializedWorkspace;
       if (!parsed || parsed.version !== 3 || !Array.isArray(parsed.tabs)) {
         throw new Error('Invalid workspace schema');
+      }
+
+      const runtimeMigrationDone = localStorage.getItem(EMBEDDED_TERMINAL_RUNTIME_MIGRATION_KEY) === '1';
+      if (!runtimeMigrationDone) {
+        const migration = migrateEmbeddedTerminalRuntimeIds(parsed);
+        if (migration.updated) {
+          parsed = migration.workspace;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+          logWorkspaceEvent({
+            category: 'persist_migration',
+            action: 'migrate_clear_embedded_terminal_runtime_ids_v1',
+            workspaceHash: hashWorkspaceState(parsed),
+            activeWorkspaceId: parsed.activeTabId,
+            tabCount: parsed.tabs.length,
+            terminalCount: parsed.tabs.reduce((count, tab) => count + tab.terminalTabs.length, 0),
+          });
+        }
+        localStorage.setItem(EMBEDDED_TERMINAL_RUNTIME_MIGRATION_KEY, '1');
       }
 
       const tabs = parsed.tabs

@@ -1,0 +1,41 @@
+name: Mobile Sync Nightly
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  mobile-sync-nightly:
+    runs-on: [self-hosted, macOS]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Run remote web smoke
+        run: npm run smoke:remote-web
+
+      - name: Run Rust tests
+        run: |
+          cd src-tauri
+          cargo test
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-sync-nightly-logs
+          path: |
+            test-results/**
+            src-tauri/target/**/deps/*.d

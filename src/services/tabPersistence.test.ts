@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   sanitizeTerminalForHydration,
   type PaneNode,
@@ -63,6 +63,10 @@ function makeWorkspace(
 }
 
 describe('TabPersistenceService', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it('persists workspace array order as canonical ordering', () => {
     const workspaceA = makeWorkspace('workspace-a', 99, [makeTerminal('terminal-a')]);
     const workspaceB = makeWorkspace('workspace-b', 0, [makeTerminal('terminal-b')]);
@@ -164,6 +168,68 @@ describe('TabPersistenceService', () => {
     expect(sanitized.paneStates[paneId]?.sessionId).toBe('session-123');
     expect(sanitized.paneStates[paneId]?.restorePreference).toBe('resume_latest');
     expect(sanitized.paneStates[paneId]?.projectPath).toBe('/tmp/project');
+  });
+
+  it('applies one-time runtime migration to clear embedded terminal ids from stored workspace data', () => {
+    const now = new Date('2026-01-01T00:00:00.000Z').toISOString();
+    const paneId = 'terminal-1-pane-1';
+    const payload = {
+      version: 3,
+      activeTabId: 'workspace-1',
+      tabs: [
+        {
+          id: 'workspace-1',
+          type: 'project',
+          projectPath: '/tmp/project',
+          title: 'workspace-1',
+          activeTerminalTabId: 'terminal-1',
+          terminalTabs: [
+            {
+              id: 'terminal-1',
+              kind: 'chat',
+              title: 'Terminal 1',
+              paneTree: makeLeafPane(paneId),
+              activePaneId: paneId,
+              paneStates: {
+                [paneId]: {
+                  embeddedTerminalId: 'embedded-stale-1',
+                  sessionId: 'session-123',
+                  restorePreference: 'resume_latest',
+                  projectPath: '/tmp/project',
+                },
+              },
+              status: 'idle',
+              hasUnsavedChanges: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+          status: 'idle',
+          hasUnsavedChanges: false,
+          order: 0,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    };
+
+    localStorage.setItem('opcode_workspace_v3', JSON.stringify(payload));
+
+    const restored = TabPersistenceService.loadWorkspace();
+    const paneState = restored.tabs[0].terminalTabs[0].paneStates[paneId];
+
+    expect(paneState?.embeddedTerminalId).toBeUndefined();
+    expect(paneState?.sessionId).toBe('session-123');
+    expect(paneState?.restorePreference).toBe('resume_latest');
+    expect(paneState?.projectPath).toBe('/tmp/project');
+
+    const storedAfterMigration = JSON.parse(localStorage.getItem('opcode_workspace_v3') as string) as {
+      tabs: Array<{ terminalTabs: Array<{ paneStates: Record<string, Record<string, unknown>> }> }>;
+    };
+    expect(storedAfterMigration.tabs[0].terminalTabs[0].paneStates[paneId]?.embeddedTerminalId).toBeUndefined();
+    expect(storedAfterMigration.tabs[0].terminalTabs[0].paneStates[paneId]?.sessionId).toBe(
+      'session-123'
+    );
   });
 
   it('persists terminal title lock state and defaults missing values to false', () => {

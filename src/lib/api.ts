@@ -258,6 +258,40 @@ export interface EmbeddedTerminalDebugSnapshot {
   sessions: EmbeddedTerminalDebugSession[];
 }
 
+export interface MobileSyncStatus {
+  version: number;
+  enabled: boolean;
+  bindHost: string;
+  publicHost: string;
+  port: number;
+  baseUrl: string;
+  wsUrl: string;
+  tailscaleIp?: string | null;
+  connectedClients: number;
+  sequence: number;
+}
+
+export interface MobileSyncPairingPayload {
+  version: number;
+  pairCode: string;
+  host: string;
+  port: number;
+  expiresAt: string;
+}
+
+export interface MobileSyncDevice {
+  id: string;
+  deviceName: string;
+  createdAt: string;
+  lastSeenAt?: string | null;
+  revoked: boolean;
+}
+
+export interface MobileSyncPublishEventInput {
+  eventType: string;
+  payload: any;
+}
+
 export interface GenerateLocalTerminalTitleInput {
   transcript: string;
   model?: string;
@@ -1209,6 +1243,38 @@ export const api = {
    */
   async listProviderCapabilities(): Promise<ProviderCapability[]> {
     return apiCall("list_provider_capabilities");
+  },
+
+  async mobileSyncGetStatus(): Promise<MobileSyncStatus> {
+    return apiCall("mobile_sync_get_status");
+  },
+
+  async mobileSyncSetEnabled(enabled: boolean): Promise<MobileSyncStatus> {
+    return apiCall("mobile_sync_set_enabled", { enabled });
+  },
+
+  async mobileSyncSetPublicHost(publicHost: string): Promise<MobileSyncStatus> {
+    return apiCall("mobile_sync_set_public_host", { publicHost });
+  },
+
+  async mobileSyncPublishSnapshot(snapshotState: Record<string, any>): Promise<void> {
+    await apiCall("mobile_sync_publish_snapshot", { snapshotState });
+  },
+
+  async mobileSyncPublishEvents(events: MobileSyncPublishEventInput[]): Promise<void> {
+    await apiCall("mobile_sync_publish_events", { events });
+  },
+
+  async mobileSyncStartPairing(): Promise<MobileSyncPairingPayload> {
+    return apiCall("mobile_sync_start_pairing");
+  },
+
+  async mobileSyncListDevices(): Promise<MobileSyncDevice[]> {
+    return apiCall("mobile_sync_list_devices");
+  },
+
+  async mobileSyncRevokeDevice(deviceId: string): Promise<void> {
+    await apiCall("mobile_sync_revoke_device", { deviceId });
   },
 
   /**

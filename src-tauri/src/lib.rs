@@ -5,6 +5,7 @@ pub mod agent_binary;
 pub mod checkpoint;
 pub mod claude_binary;
 pub mod commands;
+pub mod mobile_sync;
 pub mod process;
 pub mod providers;
 pub mod usage_index;
