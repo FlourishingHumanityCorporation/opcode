@@ -10,6 +10,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import {
   MobileSyncClient,
+  MobileSyncRequestError,
   type MobileSyncCredentials,
   type PairClaimInput,
 } from './src/protocol/client';
@@ -56,6 +57,13 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return 'Unexpected error';
+}
+
+function getErrorStatus(error: unknown): number | null {
+  if (error instanceof MobileSyncRequestError) {
+    return error.status;
+  }
+  return null;
 }
 
 export default function App() {
@@ -142,6 +150,7 @@ export default function App() {
 
   const handleAuthFailure = useCallback(
     async (message: string) => {
+      console.warn('mobile_auth_failure_reset', { message });
       await runAuthFailureReset(message, {
         clearTimers,
         closeSocket,
@@ -199,6 +208,12 @@ export default function App() {
       closeSocket();
       setConnectionError(null);
 
+      const connectStartedAt = Date.now();
+      console.info('mobile_connect_attempt', {
+        attempt: reconnectAttemptRef.current + 1,
+        baseUrl: nextCredentials.baseUrl,
+      });
+
       const client = new MobileSyncClient({
         baseUrl: nextCredentials.baseUrl,
         wsUrl: nextCredentials.wsUrl,
@@ -212,26 +227,44 @@ export default function App() {
         const snapshot = await client.fetchSnapshot();
         snapshotSequence = snapshot.sequence;
         setSnapshot(snapshot);
+        console.info('mobile_connect_snapshot_success', {
+          sequence: snapshot.sequence,
+          durationMs: Date.now() - connectStartedAt,
+        });
       } catch (error) {
+        const message = getErrorMessage(error);
+        const status = getErrorStatus(error);
+        console.error('mobile_connect_snapshot_failed', {
+          status,
+          error: message,
+          durationMs: Date.now() - connectStartedAt,
+        });
+
         if (isAuthError(error)) {
           await handleAuthFailure('Saved token is no longer valid. Pair this device again.');
           return;
         }
 
         setConnected(false);
-        setConnectionError(`Failed to fetch snapshot: ${getErrorMessage(error)}`);
+        setConnectionError(`Failed to fetch snapshot: ${message}`);
         const currentCredentials = credentialsRef.current;
         if (currentCredentials && !shuttingDownRef.current && !reconnectTimerRef.current) {
           const nextAttempt = reconnectAttemptRef.current + 1;
           reconnectAttemptRef.current = nextAttempt;
           setReconnectAttempts(nextAttempt);
+          const delayMs = computeReconnectDelayMs(nextAttempt);
+          console.warn('mobile_reconnect_scheduled', {
+            attempt: nextAttempt,
+            reason: 'snapshot_fetch_failed',
+            delayMs,
+          });
 
           reconnectTimerRef.current = setTimeout(() => {
             reconnectTimerRef.current = null;
             const retryCredentials = credentialsRef.current;
             if (!retryCredentials || shuttingDownRef.current) return;
             void connectWithCredentials(retryCredentials);
-          }, computeReconnectDelayMs(nextAttempt));
+          }, delayMs);
         }
         return;
       }
@@ -242,6 +275,10 @@ export default function App() {
           setConnected(true);
           setPairError(null);
           setConnectionError(null);
+          console.info('mobile_connect_ws_open', {
+            since: snapshotSequence,
+            reconnectAttempts: reconnectAttemptRef.current,
+          });
 
           if (stableTimerRef.current) {
             clearTimeout(stableTimerRef.current);
@@ -257,9 +294,15 @@ export default function App() {
         },
         onError: () => {
           setConnectionError('Realtime connection error. Reconnecting...');
+          console.warn('mobile_ws_error', {
+            reconnectAttempts: reconnectAttemptRef.current,
+          });
         },
         onClose: () => {
           setConnected(false);
+          console.warn('mobile_ws_closed', {
+            reconnectAttempts: reconnectAttemptRef.current,
+          });
           if (shuttingDownRef.current) return;
 
           if (stableTimerRef.current) {
@@ -275,13 +318,19 @@ export default function App() {
           const nextAttempt = reconnectAttemptRef.current + 1;
           reconnectAttemptRef.current = nextAttempt;
           setReconnectAttempts(nextAttempt);
+          const delayMs = computeReconnectDelayMs(nextAttempt);
+          console.warn('mobile_reconnect_scheduled', {
+            attempt: nextAttempt,
+            reason: 'ws_closed',
+            delayMs,
+          });
 
           reconnectTimerRef.current = setTimeout(() => {
             reconnectTimerRef.current = null;
             const retryCredentials = credentialsRef.current;
             if (!retryCredentials || shuttingDownRef.current) return;
             void connectWithCredentials(retryCredentials);
-          }, computeReconnectDelayMs(nextAttempt));
+          }, delayMs);
         },
       });
 
@@ -341,9 +390,17 @@ export default function App() {
     async (input: PairClaimInput) => {
       setPairBusy(true);
       setPairError(null);
+      console.info('mobile_pair_claim_start', {
+        host: input.host,
+        deviceName: input.deviceName,
+      });
 
       try {
         const pairedCredentials = await MobileSyncClient.claimPairing(input);
+        console.info('mobile_pair_claim_success', {
+          deviceId: pairedCredentials.deviceId,
+          baseUrl: pairedCredentials.baseUrl,
+        });
         await persistCredentials(pairedCredentials);
         setCredentials(pairedCredentials);
 
@@ -353,6 +410,10 @@ export default function App() {
         await connectWithCredentials(pairedCredentials);
       } catch (error) {
         const message = getErrorMessage(error);
+        console.error('mobile_pair_claim_failed', {
+          error: message,
+          status: getErrorStatus(error),
+        });
         setPairError(message);
         setConnectionError(message);
         throw error;

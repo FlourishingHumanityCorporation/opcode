@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MobileSyncClient, MobileSyncRequestError } from './client';
+import { MobileSyncClient } from './client';
 
 class FakeWebSocket {
   static lastUrl = '';
@@ -106,5 +106,58 @@ describe('MobileSyncClient', () => {
     expect(FakeWebSocket.lastUrl).toContain('ws://100.64.0.1:8091/mobile/v1/ws?');
     expect(FakeWebSocket.lastUrl).toContain('token=token-1');
     expect(FakeWebSocket.lastUrl).toContain('since=42');
+  });
+
+  it('surfaces auth failure on snapshot fetch', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        success: false,
+        error: 'Unauthorized',
+      }),
+    })) as any;
+
+    const client = new MobileSyncClient({
+      baseUrl: 'http://100.64.0.1:8091/mobile/v1',
+      wsUrl: 'ws://100.64.0.1:8091/mobile/v1/ws',
+      bearerToken: 'token-1',
+    });
+
+    await expect(client.fetchSnapshot()).rejects.toMatchObject({
+      status: 401,
+      isAuthError: true,
+      message: 'Unauthorized',
+    });
+  });
+
+  it('sends protocol and auth headers on action request', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: {
+          version: 1,
+          actionId: 'action-1',
+          status: 'accepted',
+          sequence: 12,
+          payload: {},
+        },
+      }),
+    })) as any;
+
+    const client = new MobileSyncClient({
+      baseUrl: 'http://100.64.0.1:8091/mobile/v1',
+      wsUrl: 'ws://100.64.0.1:8091/mobile/v1/ws',
+      bearerToken: 'token-1',
+    });
+
+    await client.activateWorkspace('workspace-1');
+
+    const [, requestInit] = (globalThis.fetch as any).mock.calls[0];
+    const headers = new Headers(requestInit.headers);
+    expect(headers.get('Authorization')).toBe('Bearer token-1');
+    expect(headers.get('X-Opcode-Sync-Version')).toBe('1');
   });
 });

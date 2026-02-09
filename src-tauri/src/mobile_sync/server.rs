@@ -96,12 +96,22 @@ fn authenticate_request(
     app: &AppHandle,
     headers: &HeaderMap,
 ) -> Result<super::auth::AuthenticatedDevice, (StatusCode, Json<serde_json::Value>)> {
+    authenticate_request_with(headers, |token| authenticate_token(app, token))
+}
+
+fn authenticate_request_with<F>(
+    headers: &HeaderMap,
+    mut authenticate_fn: F,
+) -> Result<super::auth::AuthenticatedDevice, (StatusCode, Json<serde_json::Value>)>
+where
+    F: FnMut(&str) -> Result<super::auth::AuthenticatedDevice, String>,
+{
     verify_version(headers)?;
 
     let token = extract_bearer_token(headers)
         .ok_or_else(|| api_error(StatusCode::UNAUTHORIZED, "Missing bearer token"))?;
 
-    authenticate_token(app, &token).map_err(|error| api_error(StatusCode::UNAUTHORIZED, error))
+    authenticate_fn(&token).map_err(|error| api_error(StatusCode::UNAUTHORIZED, error))
 }
 
 fn authenticate_ws_request(
@@ -152,6 +162,14 @@ where
 {
     let selection = select_ws_auth_token(headers, query)?;
     authenticate_fn(&selection.token).map_err(|error| api_error(StatusCode::UNAUTHORIZED, error))
+}
+
+fn requires_resnapshot(since: u64, current_sequence: u64) -> bool {
+    since.saturating_add(1) < current_sequence
+}
+
+fn action_dispatch_error(error: String) -> (StatusCode, Json<serde_json::Value>) {
+    api_error(StatusCode::INTERNAL_SERVER_ERROR, error)
 }
 
 async fn health_handler(
@@ -215,7 +233,7 @@ async fn action_handler(
     }
 
     dispatch_action_to_desktop(&state.app, &request)
-        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error))?;
+        .map_err(action_dispatch_error)?;
 
     let envelope = state.service.cache.publish_event(
         "mobile.action.requested",
@@ -395,7 +413,7 @@ async fn websocket_loop(socket: WebSocket, state: MobileServerAppState, since: u
     let mut event_receiver = service.cache.subscribe();
     let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(10));
 
-    if since.saturating_add(1) < service.cache.current_sequence() {
+    if requires_resnapshot(since, service.cache.current_sequence()) {
         let resync = super::protocol::EventEnvelopeV1 {
             version: PROTOCOL_VERSION,
             sequence: service.cache.current_sequence(),
@@ -557,5 +575,67 @@ mod tests {
         .expect("auth should succeed");
 
         assert_eq!(device.device_id, "device-1");
+    }
+
+    #[test]
+    fn authenticate_request_with_revoked_token_maps_unauthorized() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", HeaderValue::from_static("Bearer header-token"));
+        headers.insert("x-opcode-sync-version", HeaderValue::from_static("1"));
+
+        let error = authenticate_request_with(&headers, |_token| {
+            Err("Device has been revoked".to_string())
+        })
+        .expect_err("auth should fail");
+
+        assert_eq!(error.0, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn authenticate_request_with_missing_bearer_token_maps_unauthorized() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-opcode-sync-version", HeaderValue::from_static("1"));
+
+        let error = authenticate_request_with(&headers, |_token| {
+            Ok(authenticated_device())
+        })
+        .expect_err("auth should fail");
+
+        assert_eq!(error.0, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn action_dispatch_error_maps_to_internal_server_error() {
+        let (status, body) = action_dispatch_error("dispatch failure".to_string());
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body.0["success"], serde_json::json!(false));
+        assert_eq!(body.0["error"], serde_json::json!("dispatch failure"));
+    }
+
+    #[test]
+    fn select_ws_auth_token_requires_version_header_for_bearer_path() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", HeaderValue::from_static("Bearer header-token"));
+        let query = ws_query(Some("query-token"));
+
+        let error = select_ws_auth_token(&headers, &query).expect_err("selection should fail");
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn select_ws_auth_token_allows_query_path_without_version_header() {
+        let headers = HeaderMap::new();
+        let query = ws_query(Some("query-token"));
+
+        let selection = select_ws_auth_token(&headers, &query).expect("selection should succeed");
+        assert_eq!(selection.token, "query-token");
+        assert_eq!(selection.source, WsAuthTokenSource::Query);
+    }
+
+    #[test]
+    fn requires_resnapshot_detects_sequence_gap() {
+        assert!(!requires_resnapshot(0, 1));
+        assert!(!requires_resnapshot(10, 11));
+        assert!(requires_resnapshot(10, 12));
     }
 }

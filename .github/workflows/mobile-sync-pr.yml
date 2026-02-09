@@ -8,10 +8,13 @@ on:
       - 'src-tauri/src/commands/agents.rs'
       - 'src/contexts/TabContext.tsx'
       - 'src/services/mobileSyncBridge.ts'
+      - 'src/services/mobileSyncBridge.test.ts'
       - 'src/components/Settings.tsx'
       - 'packages/mobile-sync-protocol/**'
       - 'apps/mobile/**'
+      - 'docs/mobile-companion-roadmap.md'
       - '.github/workflows/mobile-sync-pr.yml'
+      - '.github/workflows/mobile-sync-nightly.yml'
 
 jobs:
   mobile-sync-checks:
@@ -33,25 +36,48 @@ jobs:
           cd apps/mobile
           npm install
 
+      - name: Prepare test log directory
+        run: mkdir -p test-results/mobile-sync-pr
+
       - name: Run protocol parity/unit tests
-        run: npm run test:unit -- src/services/mobileSyncProtocol.test.ts
+        run: |
+          set -euo pipefail
+          npm run test:unit -- src/services/mobileSyncProtocol.test.ts 2>&1 | tee test-results/mobile-sync-pr/protocol-tests.log
 
       - name: Rust unit tests (mobile_sync protocol)
         run: |
+          set -euo pipefail
           cd src-tauri
-          cargo test mobile_sync::protocol::tests::fixture_parity_event_envelope_v1
+          cargo test mobile_sync::protocol::tests::fixture_parity_event_envelope_v1 2>&1 | tee ../test-results/mobile-sync-pr/rust-protocol-tests.log
 
       - name: Rust auth matrix tests (mobile_sync)
         run: |
+          set -euo pipefail
           cd src-tauri
-          cargo test mobile_sync::server::tests
+          cargo test mobile_sync::server::tests 2>&1 | tee ../test-results/mobile-sync-pr/rust-server-tests.log
+
+      - name: Rust auth helper tests
+        run: |
+          set -euo pipefail
+          cd src-tauri
+          cargo test mobile_sync::auth::tests 2>&1 | tee ../test-results/mobile-sync-pr/rust-auth-tests.log
 
       - name: Mobile app typecheck
         run: |
+          set -euo pipefail
           cd apps/mobile
-          npx tsc --noEmit
+          npx tsc --noEmit 2>&1 | tee ../../test-results/mobile-sync-pr/mobile-typecheck.log
 
       - name: Mobile app tests
         run: |
+          set -euo pipefail
           cd apps/mobile
-          npm test
+          npm test 2>&1 | tee ../../test-results/mobile-sync-pr/mobile-tests.log
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-sync-pr-logs
+          path: |
+            test-results/mobile-sync-pr/**
