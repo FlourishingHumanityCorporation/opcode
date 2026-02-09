@@ -42,6 +42,7 @@ import type { InteractiveTerminal, UnlistenFn } from "@/components/embedded-term
 interface UseEmbeddedTerminalControllerParams {
   projectPath: string;
   autoRunCommand?: string;
+  clearOnAttach?: boolean;
   quickRunCommand?: string;
   runCommandRequestId?: number;
   existingTerminalId?: string;
@@ -99,6 +100,45 @@ export function shouldReattachUsingExistingTerminalId(
   persistentSessionId: string | undefined
 ): boolean {
   return Boolean(existingTerminalId) && !persistentSessionId;
+}
+
+export function shouldAutoClearReusedSessionOnAttach(
+  clearOnAttach: boolean | undefined,
+  reusedExistingSession: boolean,
+  autoRunCommand: string | undefined
+): boolean {
+  if (!clearOnAttach || !reusedExistingSession) {
+    return false;
+  }
+  return !(autoRunCommand?.trim());
+}
+
+export interface AutoClearReusedSessionOnAttachParams {
+  terminalId: string;
+  clearOnAttach: boolean | undefined;
+  reusedExistingSession: boolean;
+  autoRunCommand: string | undefined;
+  writeInput: (terminalId: string, data: string) => Promise<void>;
+}
+
+export async function autoClearReusedSessionOnAttach({
+  terminalId,
+  clearOnAttach,
+  reusedExistingSession,
+  autoRunCommand,
+  writeInput,
+}: AutoClearReusedSessionOnAttachParams): Promise<boolean> {
+  if (
+    !shouldAutoClearReusedSessionOnAttach(
+      clearOnAttach,
+      reusedExistingSession,
+      autoRunCommand
+    )
+  ) {
+    return false;
+  }
+  await writeInput(terminalId, "\u000c");
+  return true;
 }
 
 export const TERMINAL_AUTO_FOCUS_RETRY_DELAYS_MS = [0, 80, 180, 320, 500] as const;
@@ -283,6 +323,7 @@ export function getTerminalAutoFocusRetryDecision({
 export function useEmbeddedTerminalController({
   projectPath,
   autoRunCommand,
+  clearOnAttach = false,
   quickRunCommand = "claude",
   runCommandRequestId = 0,
   existingTerminalId,
@@ -300,6 +341,7 @@ export function useEmbeddedTerminalController({
   const existingTerminalIdRef = useRef<string | undefined>(existingTerminalId);
   const onTerminalIdChangeRef = useRef<typeof onTerminalIdChange>(onTerminalIdChange);
   const autoRunCommandRef = useRef<string | undefined>(autoRunCommand);
+  const clearOnAttachRef = useRef<boolean>(clearOnAttach);
   const quickRunCommandRef = useRef<string>(quickRunCommand);
   const lastHandledRunRequestIdRef = useRef<number>(runCommandRequestId);
   const suppressAutoRecoverRef = useRef(false);
@@ -587,6 +629,10 @@ export function useEmbeddedTerminalController({
   }, [autoRunCommand]);
 
   useEffect(() => {
+    clearOnAttachRef.current = clearOnAttach;
+  }, [clearOnAttach]);
+
+  useEffect(() => {
     quickRunCommandRef.current = quickRunCommand;
   }, [quickRunCommand]);
 
@@ -780,7 +826,7 @@ export function useEmbeddedTerminalController({
 
       const term = new XTerm({
         cursorBlink: true,
-        convertEol: true,
+        convertEol: false,
         scrollback: TERMINAL_SCROLLBACK_LINES,
         fontFamily: "Menlo, Monaco, 'Courier New', monospace",
         fontSize: 12,
@@ -975,6 +1021,26 @@ export function useEmbeddedTerminalController({
           term.dispose();
           return;
         }
+
+        try {
+          const didAutoClear = await autoClearReusedSessionOnAttach({
+            terminalId: id,
+            clearOnAttach: clearOnAttachRef.current,
+            reusedExistingSession: started.reusedExistingSession,
+            autoRunCommand: autoRunCommandRef.current,
+            writeInput: api.writeEmbeddedTerminalInput,
+          });
+          if (didAutoClear) {
+            clearWriteFailureSignals();
+            emitTerminalEvent("auto_clear_reused_session_applied", { terminalId: id });
+          }
+        } catch (clearError) {
+          emitTerminalEvent("auto_clear_reused_session_failed", {
+            terminalId: id,
+            errorCode: classifyTerminalErrorCode(clearError, "ERR_WRITE_FAILED"),
+          });
+        }
+
         onTerminalIdChangeRef.current?.(id);
       } catch (startError) {
         const message = startError instanceof Error ? startError.message : "Failed to start terminal";

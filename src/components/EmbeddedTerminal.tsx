@@ -29,6 +29,7 @@ interface EmbeddedTerminalProps {
   projectPath: string;
   className?: string;
   autoRunCommand?: string;
+  clearOnAttach?: boolean;
   quickRunCommand?: string;
   runCommandRequestId?: number;
   existingTerminalId?: string;
