@@ -96,10 +96,10 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
     });
   });
 
-  it("maps streaming changes to running/complete transitions", () => {
+  it("maps streaming changes to running/idle transitions", () => {
     expect(resolveTerminalStatusFromStreaming("idle", true)).toBe("running");
     expect(resolveTerminalStatusFromStreaming("running", true)).toBeNull();
-    expect(resolveTerminalStatusFromStreaming("running", false)).toBe("complete");
+    expect(resolveTerminalStatusFromStreaming("running", false)).toBe("idle");
     expect(resolveTerminalStatusFromStreaming("attention", false)).toBeNull();
     expect(resolveTerminalStatusFromStreaming("complete", false)).toBeNull();
   });
