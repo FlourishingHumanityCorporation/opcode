@@ -2212,7 +2212,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         <div className="flex-1 overflow-y-auto pb-20">
           <div className={cn("mx-auto w-full px-4 py-6", embedded ? "" : "max-w-4xl")}>
             <div className="rounded-lg border border-border bg-background p-4">
-              <div className="mb-2 text-sm font-medium">In-App Terminal Mode</div>
+              <div className="mb-2 text-sm font-medium">Terminal</div>
               <p className="mb-4 text-sm text-muted-foreground">
                 Select a project path to start an embedded terminal inside this pane.
               </p>
@@ -2230,7 +2230,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         <div className="flex-1 overflow-y-auto pb-20">
           <div className={cn("mx-auto w-full px-4 py-6", embedded ? "" : "max-w-4xl")}>
             <div className="rounded-lg border border-border bg-background p-4">
-              <div className="mb-2 text-sm font-medium">In-App Terminal Mode</div>
+              <div className="mb-2 text-sm font-medium">Terminal</div>
               {isResolvingNativeRestore ? (
                 <p className="mb-2 text-sm text-muted-foreground">
                   Resolving latest session for this project...
@@ -2291,6 +2291,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
 
   const showProjectPathHeader = shouldShowProjectPathHeader(hideProjectBar);
   const showProviderSelector = shouldShowProviderSelectorInHeader();
+  const nativeStatusMessage = error || nativeRestoreNotice;
 
   // Provider selector bar and path/toggles row.
   const projectPathInput = showProjectPathHeader ? (
@@ -2458,12 +2459,12 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
               : "fixed bottom-0 left-0 right-0 transition-all duration-300 z-50",
             showTimeline && "sm:right-96"
           )}>
-            {nativeTerminalMode ? (
+            {nativeTerminalMode && (nativeStatusMessage || !projectPath) ? (
               <div className="pointer-events-none border-t border-border bg-background/95 px-4 py-2">
                 <div className={cn("mx-auto flex w-full items-center justify-between", embedded ? "" : "max-w-6xl")}>
-                  <div className="text-xs text-muted-foreground">
-                    {error || nativeRestoreNotice || 'In-app terminal mode is active'}
-                  </div>
+                  {nativeStatusMessage ? (
+                    <div className="text-xs text-muted-foreground">{nativeStatusMessage}</div>
+                  ) : <div />}
                   {!projectPath && (
                     <Button size="sm" onClick={handleSelectTerminalProject} className="pointer-events-auto">
                       Select Project

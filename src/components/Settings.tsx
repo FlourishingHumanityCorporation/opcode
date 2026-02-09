@@ -1016,9 +1016,9 @@ export const Settings: React.FC<SettingsProps> = ({
                     </div>
 
                     <div className="rounded-lg border border-border bg-muted/50 p-3">
-                      <p className="text-sm font-medium text-foreground">Terminal mode</p>
+                      <p className="text-sm font-medium text-foreground">Terminal</p>
                       <p className="text-xs text-muted-foreground">
-                        In-app terminal mode is always enabled.
+                        In-app terminal is always enabled.
                       </p>
                     </div>
 
