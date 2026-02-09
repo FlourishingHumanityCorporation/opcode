@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   TERMINAL_AUTO_FOCUS_RETRY_DELAYS_MS,
+  clampWheelScrollLinesToBuffer,
   classifyWheelEventTarget,
   getTerminalAutoFocusRetryDecision,
+  shouldApplyWheelScrollFallback,
   shouldEscalateStaleRecoveryFromSignals,
   shouldReattachUsingExistingTerminalId,
 } from "@/components/embedded-terminal/useEmbeddedTerminalController";
@@ -172,5 +174,92 @@ describe("useEmbeddedTerminalController wheel observation classification", () =>
     expect(classifyWheelEventTarget(helper)).toBe("xterm-helper-textarea");
     expect(classifyWheelEventTarget(document.createElement("button"))).toBe("other");
     expect(classifyWheelEventTarget(null)).toBe("other");
+  });
+
+  it("classifies text-node wheel targets inside xterm containers", () => {
+    const screen = document.createElement("div");
+    screen.className = "xterm-screen";
+    screen.appendChild(document.createTextNode("terminal line"));
+
+    expect(classifyWheelEventTarget(screen.firstChild)).toBe("xterm-screen");
+  });
+});
+
+describe("useEmbeddedTerminalController wheel fallback decisions", () => {
+  it("uses fallback when terminal target receives wheel but native viewport does not move", () => {
+    const shouldFallback = shouldApplyWheelScrollFallback({
+      eventTarget: "xterm-screen",
+      isInteractive: true,
+      isRunning: true,
+      viewportBeforeTop: 120,
+      viewportAfterTop: 120,
+      bufferBefore: { ybase: 400, ydisp: 120 },
+      bufferAfter: { ybase: 400, ydisp: 120 },
+    });
+
+    expect(shouldFallback).toBe(true);
+  });
+
+  it("skips fallback when native viewport moves", () => {
+    const shouldFallback = shouldApplyWheelScrollFallback({
+      eventTarget: "xterm-viewport",
+      isInteractive: true,
+      isRunning: true,
+      viewportBeforeTop: 120,
+      viewportAfterTop: 180,
+      bufferBefore: { ybase: 400, ydisp: 120 },
+      bufferAfter: { ybase: 400, ydisp: 180 },
+    });
+
+    expect(shouldFallback).toBe(false);
+  });
+
+  it("skips fallback on non-terminal wheel targets", () => {
+    const shouldFallback = shouldApplyWheelScrollFallback({
+      eventTarget: "other",
+      isInteractive: true,
+      isRunning: true,
+      viewportBeforeTop: 120,
+      viewportAfterTop: 120,
+      bufferBefore: { ybase: 400, ydisp: 120 },
+      bufferAfter: { ybase: 400, ydisp: 120 },
+    });
+
+    expect(shouldFallback).toBe(false);
+  });
+});
+
+describe("useEmbeddedTerminalController wheel fallback line clamping", () => {
+  it("clamps upward wheel scroll to available scrollback", () => {
+    expect(
+      clampWheelScrollLinesToBuffer(-10, {
+        ybase: 500,
+        ydisp: 3,
+      })
+    ).toBe(-3);
+  });
+
+  it("clamps downward wheel scroll to remaining room", () => {
+    expect(
+      clampWheelScrollLinesToBuffer(20, {
+        ybase: 500,
+        ydisp: 495,
+      })
+    ).toBe(5);
+  });
+
+  it("returns zero when already at bounds", () => {
+    expect(
+      clampWheelScrollLinesToBuffer(-1, {
+        ybase: 500,
+        ydisp: 0,
+      })
+    ).toBe(0);
+    expect(
+      clampWheelScrollLinesToBuffer(1, {
+        ybase: 500,
+        ydisp: 500,
+      })
+    ).toBe(0);
   });
 });

@@ -10,9 +10,19 @@ import { StatusBar } from 'expo-status-bar';
 
 import {
   MobileSyncClient,
+  MobileSyncRequestError,
   type MobileSyncCredentials,
   type PairClaimInput,
 } from './src/protocol/client';
+import {
+  appendActionHistory,
+  completeActionRecord,
+  createActionRecord,
+  evaluateActionGuard,
+  type ActionKind,
+  type ActionUiRecord,
+} from './src/actions/actionExecution';
+import { ActionStatusBanner } from './src/components/ActionStatusBanner';
 import {
   computeReconnectDelayMs,
   formatAgeLabel,
@@ -49,11 +59,21 @@ function getErrorMessage(error: unknown): string {
   return 'Unexpected error';
 }
 
+function getErrorStatus(error: unknown): number | null {
+  if (error instanceof MobileSyncRequestError) {
+    return error.status;
+  }
+  return null;
+}
+
 export default function App() {
   const [activeView, setActiveView] = useState<NavView>('workspace');
   const [bootstrapping, setBootstrapping] = useState(true);
   const [pairBusy, setPairBusy] = useState(false);
   const [pairError, setPairError] = useState<string | null>(null);
+  const [lastActionRecord, setLastActionRecord] = useState<ActionUiRecord | null>(null);
+  const [actionHistory, setActionHistory] = useState<ActionUiRecord[]>([]);
+  const [isActionPending, setIsActionPending] = useState(false);
 
   const credentials = useSyncStore((state) => state.credentials);
   const mirror = useSyncStore((state) => state.mirror);
@@ -93,6 +113,7 @@ export default function App() {
   const resyncInFlightRef = useRef(false);
   const credentialsRef = useRef<MobileSyncCredentials | null>(null);
   const shuttingDownRef = useRef(false);
+  const actionInFlightRef = useRef(false);
 
   useEffect(() => {
     credentialsRef.current = credentials;
@@ -129,6 +150,7 @@ export default function App() {
 
   const handleAuthFailure = useCallback(
     async (message: string) => {
+      console.warn('mobile_auth_failure_reset', { message });
       await runAuthFailureReset(message, {
         clearTimers,
         closeSocket,
@@ -140,6 +162,8 @@ export default function App() {
         resetReconnectAttempts: () => {
           clientRef.current = null;
           reconnectAttemptRef.current = 0;
+          actionInFlightRef.current = false;
+          setIsActionPending(false);
           setReconnectAttempts(0);
         },
       });
@@ -184,6 +208,12 @@ export default function App() {
       closeSocket();
       setConnectionError(null);
 
+      const connectStartedAt = Date.now();
+      console.info('mobile_connect_attempt', {
+        attempt: reconnectAttemptRef.current + 1,
+        baseUrl: nextCredentials.baseUrl,
+      });
+
       const client = new MobileSyncClient({
         baseUrl: nextCredentials.baseUrl,
         wsUrl: nextCredentials.wsUrl,
@@ -197,26 +227,44 @@ export default function App() {
         const snapshot = await client.fetchSnapshot();
         snapshotSequence = snapshot.sequence;
         setSnapshot(snapshot);
+        console.info('mobile_connect_snapshot_success', {
+          sequence: snapshot.sequence,
+          durationMs: Date.now() - connectStartedAt,
+        });
       } catch (error) {
+        const message = getErrorMessage(error);
+        const status = getErrorStatus(error);
+        console.error('mobile_connect_snapshot_failed', {
+          status,
+          error: message,
+          durationMs: Date.now() - connectStartedAt,
+        });
+
         if (isAuthError(error)) {
           await handleAuthFailure('Saved token is no longer valid. Pair this device again.');
           return;
         }
 
         setConnected(false);
-        setConnectionError(`Failed to fetch snapshot: ${getErrorMessage(error)}`);
+        setConnectionError(`Failed to fetch snapshot: ${message}`);
         const currentCredentials = credentialsRef.current;
         if (currentCredentials && !shuttingDownRef.current && !reconnectTimerRef.current) {
           const nextAttempt = reconnectAttemptRef.current + 1;
           reconnectAttemptRef.current = nextAttempt;
           setReconnectAttempts(nextAttempt);
+          const delayMs = computeReconnectDelayMs(nextAttempt);
+          console.warn('mobile_reconnect_scheduled', {
+            attempt: nextAttempt,
+            reason: 'snapshot_fetch_failed',
+            delayMs,
+          });
 
           reconnectTimerRef.current = setTimeout(() => {
             reconnectTimerRef.current = null;
             const retryCredentials = credentialsRef.current;
             if (!retryCredentials || shuttingDownRef.current) return;
             void connectWithCredentials(retryCredentials);
-          }, computeReconnectDelayMs(nextAttempt));
+          }, delayMs);
         }
         return;
       }
@@ -227,6 +275,10 @@ export default function App() {
           setConnected(true);
           setPairError(null);
           setConnectionError(null);
+          console.info('mobile_connect_ws_open', {
+            since: snapshotSequence,
+            reconnectAttempts: reconnectAttemptRef.current,
+          });
 
           if (stableTimerRef.current) {
             clearTimeout(stableTimerRef.current);
@@ -242,9 +294,15 @@ export default function App() {
         },
         onError: () => {
           setConnectionError('Realtime connection error. Reconnecting...');
+          console.warn('mobile_ws_error', {
+            reconnectAttempts: reconnectAttemptRef.current,
+          });
         },
         onClose: () => {
           setConnected(false);
+          console.warn('mobile_ws_closed', {
+            reconnectAttempts: reconnectAttemptRef.current,
+          });
           if (shuttingDownRef.current) return;
 
           if (stableTimerRef.current) {
@@ -260,13 +318,19 @@ export default function App() {
           const nextAttempt = reconnectAttemptRef.current + 1;
           reconnectAttemptRef.current = nextAttempt;
           setReconnectAttempts(nextAttempt);
+          const delayMs = computeReconnectDelayMs(nextAttempt);
+          console.warn('mobile_reconnect_scheduled', {
+            attempt: nextAttempt,
+            reason: 'ws_closed',
+            delayMs,
+          });
 
           reconnectTimerRef.current = setTimeout(() => {
             reconnectTimerRef.current = null;
             const retryCredentials = credentialsRef.current;
             if (!retryCredentials || shuttingDownRef.current) return;
             void connectWithCredentials(retryCredentials);
-          }, computeReconnectDelayMs(nextAttempt));
+          }, delayMs);
         },
       });
 
@@ -326,9 +390,17 @@ export default function App() {
     async (input: PairClaimInput) => {
       setPairBusy(true);
       setPairError(null);
+      console.info('mobile_pair_claim_start', {
+        host: input.host,
+        deviceName: input.deviceName,
+      });
 
       try {
         const pairedCredentials = await MobileSyncClient.claimPairing(input);
+        console.info('mobile_pair_claim_success', {
+          deviceId: pairedCredentials.deviceId,
+          baseUrl: pairedCredentials.baseUrl,
+        });
         await persistCredentials(pairedCredentials);
         setCredentials(pairedCredentials);
 
@@ -338,6 +410,10 @@ export default function App() {
         await connectWithCredentials(pairedCredentials);
       } catch (error) {
         const message = getErrorMessage(error);
+        console.error('mobile_pair_claim_failed', {
+          error: message,
+          status: getErrorStatus(error),
+        });
         setPairError(message);
         setConnectionError(message);
         throw error;
@@ -353,6 +429,10 @@ export default function App() {
     closeSocket();
     clientRef.current = null;
     reconnectAttemptRef.current = 0;
+    actionInFlightRef.current = false;
+    setIsActionPending(false);
+    setLastActionRecord(null);
+    setActionHistory([]);
 
     await clearStoredCredentials();
     clearCredentials();
@@ -361,63 +441,163 @@ export default function App() {
     setBootstrapping(false);
   }, [clearCredentials, clearTimers, closeSocket, resetRuntimeState]);
 
-  const activateWorkspace = useCallback(async (workspaceId: string) => {
-    const client = clientRef.current;
-    if (!client) throw new Error('Not connected');
-    await client.activateWorkspace(workspaceId);
-  }, []);
+  const runAction = useCallback(
+    async (
+      kind: ActionKind,
+      targetLabel: string,
+      options: { hasInput?: boolean } | undefined,
+      executeFn: (client: MobileSyncClient) => Promise<unknown>
+    ) => {
+      const client = clientRef.current;
+      const guard = evaluateActionGuard(kind, {
+        connected,
+        hasClient: Boolean(client),
+        hasWorkspacePath: Boolean(activeWorkspace?.projectPath),
+        hasSessionId: Boolean(activeTerminal?.sessionState?.sessionId),
+        hasEmbeddedTerminalId: Boolean(activeEmbeddedTerminalId),
+        hasInput: Boolean(options?.hasInput),
+        actionInFlight: actionInFlightRef.current,
+      });
 
-  const activateTerminal = useCallback(async (workspaceId: string, terminalTabId: string) => {
-    const client = clientRef.current;
-    if (!client) throw new Error('Not connected');
+      if (!guard.allowed) {
+        const blocked = completeActionRecord(
+          createActionRecord(kind, targetLabel),
+          'failed',
+          guard.reason || 'Action blocked'
+        );
+        setLastActionRecord(blocked);
+        setActionHistory((history) => appendActionHistory(history, blocked, 10));
+        console.warn('mobile_action_failed', {
+          kind,
+          targetLabel,
+          error: blocked.message,
+          blocked: true,
+        });
+        throw new Error(blocked.message);
+      }
 
-    await client.activateWorkspace(workspaceId);
-    await client.activateTerminal(workspaceId, terminalTabId);
-  }, []);
+      if (!client) {
+        throw new Error('Disconnected');
+      }
+
+      const pending = createActionRecord(kind, targetLabel);
+      const startedAt = Date.now();
+      actionInFlightRef.current = true;
+      setIsActionPending(true);
+      setLastActionRecord(pending);
+      console.info('mobile_action_start', {
+        kind,
+        targetLabel,
+        startedAt: pending.startedAt,
+      });
+
+      try {
+        await executeFn(client);
+        const completed = completeActionRecord(pending, 'succeeded', 'Action completed');
+        setLastActionRecord(completed);
+        setActionHistory((history) => appendActionHistory(history, completed, 10));
+        console.info('mobile_action_success', {
+          kind,
+          targetLabel,
+          durationMs: Date.now() - startedAt,
+        });
+      } catch (error) {
+        const message = getErrorMessage(error);
+        const failed = completeActionRecord(pending, 'failed', message);
+        setLastActionRecord(failed);
+        setActionHistory((history) => appendActionHistory(history, failed, 10));
+        console.error('mobile_action_failed', {
+          kind,
+          targetLabel,
+          durationMs: Date.now() - startedAt,
+          error: message,
+        });
+        throw error;
+      } finally {
+        actionInFlightRef.current = false;
+        setIsActionPending(false);
+      }
+    },
+    [
+      activeEmbeddedTerminalId,
+      activeTerminal?.sessionState?.sessionId,
+      activeWorkspace?.projectPath,
+      connected,
+    ]
+  );
+
+  const activateWorkspace = useCallback(
+    async (workspaceId: string, workspaceTitle?: string) => {
+      const targetLabel = `${workspaceTitle || 'Workspace'} (${workspaceId})`;
+      await runAction('workspace.activate', targetLabel, undefined, (client) =>
+        client.activateWorkspace(workspaceId)
+      );
+    },
+    [runAction]
+  );
+
+  const activateTerminal = useCallback(
+    async (workspaceId: string, terminalTabId: string, terminalTitle?: string) => {
+      const targetLabel = `${terminalTitle || 'Terminal'} (${terminalTabId})`;
+      await runAction('terminal.activate', targetLabel, undefined, async (client) => {
+        await client.activateWorkspace(workspaceId);
+        await client.activateTerminal(workspaceId, terminalTabId);
+      });
+    },
+    [runAction]
+  );
 
   const sendTerminalInput = useCallback(
     async (input: string) => {
-      const client = clientRef.current;
-      if (!client) throw new Error('Not connected');
-      if (!activeEmbeddedTerminalId) throw new Error('No active embedded terminal id available');
-
-      await client.terminalInput(activeEmbeddedTerminalId, input);
+      const targetLabel = activeEmbeddedTerminalId
+        ? `Embedded terminal (${activeEmbeddedTerminalId})`
+        : 'Embedded terminal';
+      await runAction(
+        'terminal.write',
+        targetLabel,
+        { hasInput: input.trim().length > 0 },
+        (client) => client.terminalInput(activeEmbeddedTerminalId || '', input)
+      );
     },
-    [activeEmbeddedTerminalId]
+    [activeEmbeddedTerminalId, runAction]
   );
 
   const submitPrompt = useCallback(
     async (prompt: string) => {
-      const client = clientRef.current;
-      if (!client) throw new Error('Not connected');
-      if (!activeWorkspace?.projectPath) throw new Error('No active workspace project path');
-
-      await client.submitPrompt(activeWorkspace.projectPath, prompt);
+      const projectPath = activeWorkspace?.projectPath || '';
+      const targetLabel = `Session execute (${projectPath || 'N/A'})`;
+      await runAction(
+        'provider_session.execute',
+        targetLabel,
+        { hasInput: prompt.trim().length > 0 },
+        (client) => client.submitPrompt(projectPath, prompt)
+      );
     },
-    [activeWorkspace?.projectPath]
+    [activeWorkspace?.projectPath, runAction]
   );
 
   const resumePrompt = useCallback(
     async (prompt: string) => {
-      const client = clientRef.current;
-      if (!client) throw new Error('Not connected');
-      if (!activeWorkspace?.projectPath) throw new Error('No active workspace project path');
-
-      const sessionId = activeTerminal?.sessionState?.sessionId;
-      if (!sessionId) throw new Error('No active session id for resume');
-
-      await client.resumeSession(activeWorkspace.projectPath, sessionId, prompt);
+      const projectPath = activeWorkspace?.projectPath || '';
+      const sessionId = activeTerminal?.sessionState?.sessionId || '';
+      const targetLabel = `Session resume (${sessionId || 'N/A'})`;
+      await runAction(
+        'provider_session.resume',
+        targetLabel,
+        { hasInput: prompt.trim().length > 0 },
+        (client) => client.resumeSession(projectPath, sessionId, prompt)
+      );
     },
-    [activeTerminal?.sessionState?.sessionId, activeWorkspace?.projectPath]
+    [activeTerminal?.sessionState?.sessionId, activeWorkspace?.projectPath, runAction]
   );
 
   const cancelSession = useCallback(async () => {
-    const client = clientRef.current;
-    if (!client) throw new Error('Not connected');
-
     const sessionId = activeTerminal?.sessionState?.sessionId;
-    await client.cancelSession(sessionId);
-  }, [activeTerminal?.sessionState?.sessionId]);
+    const targetLabel = `Session cancel (${sessionId || 'N/A'})`;
+    await runAction('provider_session.cancel', targetLabel, undefined, (client) =>
+      client.cancelSession(sessionId)
+    );
+  }, [activeTerminal?.sessionState?.sessionId, runAction]);
 
   if (bootstrapping) {
     return (
@@ -472,6 +652,7 @@ export default function App() {
             <Text style={{ color: '#ff7b72', fontSize: 12 }}>{connectionError}</Text>
           ) : null}
         </View>
+        <ActionStatusBanner record={lastActionRecord} />
 
         <View style={{ flexDirection: 'row', gap: 6 }}>
           {NAV_ITEMS.map((item) => {
@@ -498,6 +679,9 @@ export default function App() {
       <View style={{ flex: 1, paddingHorizontal: 16, paddingBottom: 16 }}>
         {activeView === 'workspace' ? (
           <WorkspaceScreen
+            connected={connected}
+            isActionPending={isActionPending}
+            lastActionRecord={lastActionRecord}
             mirror={mirror}
             onActivateWorkspace={activateWorkspace}
             onActivateTerminal={activateTerminal}
@@ -506,6 +690,9 @@ export default function App() {
 
         {activeView === 'terminal' ? (
           <TerminalScreen
+            connected={connected}
+            isActionPending={isActionPending}
+            lastActionRecord={lastActionRecord}
             activeWorkspace={activeWorkspace}
             activeTerminal={activeTerminal}
             activeEmbeddedTerminalId={activeEmbeddedTerminalId}
@@ -516,6 +703,9 @@ export default function App() {
 
         {activeView === 'session' ? (
           <SessionScreen
+            connected={connected}
+            isActionPending={isActionPending}
+            lastActionRecord={lastActionRecord}
             activeWorkspace={activeWorkspace}
             activeTerminal={activeTerminal}
             onSubmitPrompt={submitPrompt}
@@ -560,6 +750,48 @@ export default function App() {
               <Text style={{ color: '#9BA4AE' }}>
                 Active session ID: {activeContext?.activeSessionId || 'N/A'}
               </Text>
+            </View>
+            <View
+              style={{
+                borderWidth: 1,
+                borderColor: '#30363D',
+                borderRadius: 10,
+                padding: 10,
+                gap: 6,
+                backgroundColor: '#11161b',
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700' }}>Recent Actions</Text>
+              <Text style={{ color: '#9BA4AE', fontSize: 12 }}>
+                Actions are rejected while disconnected; no queued replay.
+              </Text>
+              {actionHistory.length === 0 ? (
+                <Text style={{ color: '#9BA4AE' }}>No actions yet.</Text>
+              ) : (
+                actionHistory.map((record) => (
+                  <View
+                    key={record.id}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: '#30363D',
+                      borderRadius: 8,
+                      paddingHorizontal: 8,
+                      paddingVertical: 6,
+                      backgroundColor: '#0d1117',
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 12 }}>
+                      {record.kind} • {record.status}
+                    </Text>
+                    <Text style={{ color: '#9BA4AE', fontSize: 12 }} numberOfLines={1}>
+                      {record.targetLabel}
+                    </Text>
+                    <Text style={{ color: '#9BA4AE', fontSize: 12 }}>
+                      {record.finishedAt || record.startedAt} • {record.message}
+                    </Text>
+                  </View>
+                ))
+              )}
             </View>
 
             <View style={{ flexDirection: 'row', gap: 8 }}>

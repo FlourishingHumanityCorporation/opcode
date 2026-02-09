@@ -10,11 +10,11 @@ Ship an iOS mobile companion that reliably mirrors live desktop Opcode state and
 
 - `P0` Stability/Security: **Complete**
 - `P1` Mirror Fidelity: **Complete**
-- `P2` Control UX Completion: **Next**
+- `P2` Control UX Completion: **Complete**
 - `P3` CI/Test Expansion + Observability: **Next**
 - `P4` TestFlight/Internal Beta: **Pending**
 
-## Completed in Current Iteration (P0 + P1)
+## Completed in Current Iteration (P0 + P1 + P2)
 
 1. WebSocket auth hardening on desktop sync service:
    - header token preferred, query token fallback supported
@@ -37,25 +37,23 @@ Ship an iOS mobile companion that reliably mirrors live desktop Opcode state and
    - store reducer tests for sequence/resnapshot/summary events
 8. Desktop bridge tests added for enriched payload builders.
 9. CI workflows updated so mobile install, typecheck, and tests run from `apps/mobile` context.
+10. Centralized mobile action execution flow:
+   - single-flight action model
+   - consistent guard evaluation before execution
+   - structured action lifecycle logs (`start`, `success`, `failed`)
+11. Action UX completion across workspace/terminal/session controls:
+   - explicit action status (`pending`, `succeeded`, `failed`)
+   - deterministic blocked reasons (`Disconnected`, invalid target, action in progress, empty input)
+   - no queued replay while disconnected (immediate reject policy)
+12. Active target clarity and diagnostics:
+   - action target labels shown at control points
+   - diagnostics panel includes recent action history and policy note
+13. Added P2-focused mobile tests:
+   - action execution/guard/history unit tests
+   - screen guard reason helper tests
+   - reconnect test coverage extended for action-state transitions
 
 ## Remaining Work by Phase
-
-## P2: Control UX Completion (1 week target)
-
-### Scope
-
-1. Add per-action status UX (`pending`, `succeeded`, `failed`) for all control actions.
-2. Add guardrails and validation for invalid targets (missing terminal/session/workspace context).
-3. Add disconnect-safe action handling:
-   - reject instantly with user-visible reason, or
-   - queue only explicitly retry-safe actions
-4. Improve active target labeling on action UI and confirmation toasts.
-
-### Acceptance criteria
-
-1. User can reliably switch workspace/tab, send terminal input, execute/resume/cancel session.
-2. No silent action drops.
-3. Action failure reason is always visible in UI.
 
 ## P3: Test + CI Expansion + Baseline Observability (1 week target)
 
@@ -105,7 +103,7 @@ Ship an iOS mobile companion that reliably mirrors live desktop Opcode state and
 
 1. Gate A (already passed): P0 auth/reconnect reliability.
 2. Gate B (already passed): P1 mirror active-context fidelity.
-3. Gate C (next): P2 action UX reliability and error clarity.
+3. Gate C (already passed): P2 action UX reliability and error clarity.
 4. Gate D (next): P3 deterministic CI + baseline telemetry.
 5. Gate E (final): P4 TestFlight internal beta readiness.
 
@@ -122,7 +120,7 @@ Ship an iOS mobile companion that reliably mirrors live desktop Opcode state and
 
 ## Immediate Checklist (What We Need Now)
 
-1. Implement action result/error UX and retry-safe disconnect handling (`P2`).
-2. Add reducer convergence and action failure-path tests (`P3`).
-3. Add minimal connect/action/auth telemetry events (`P3`).
-4. Define internal TestFlight release checklist draft (`P4` prep).
+1. Add remaining reducer convergence and action failure-path tests (`P3`).
+2. Tighten PR/nightly CI gates for sync + mobile regressions (`P3`).
+3. Add baseline connect/action/auth telemetry events (`P3`).
+4. Draft internal TestFlight release checklist and go/no-go thresholds (`P4` prep).
