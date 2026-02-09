@@ -14,6 +14,9 @@ const LOOP_GUARD_MIN_INTERVAL_MS = 2_000;
 const LOOP_GUARD_WINDOW_MS = 30_000;
 const LOOP_GUARD_MAX_RELOADS = 4;
 const HMR_SETTLE_TIMEOUT_MS = 1_500;
+const HMR_SETTLED_RELOAD_DEBOUNCE_MS = 450;
+const DESKTOP_ATTACH_RETRY_INITIAL_MS = 1_000;
+const DESKTOP_ATTACH_RETRY_MAX_MS = 5_000;
 const BROADCAST_CHANNEL_NAME = "opcode-hot-refresh";
 
 export type HotRefreshReason =
@@ -21,6 +24,7 @@ export type HotRefreshReason =
   | "cross_window"
   | "hmr_timeout"
   | "hmr_error"
+  | "hmr_settled"
   | "manual"
   | "settings_changed";
 
@@ -56,8 +60,12 @@ interface HotRefreshContext {
   reloadTimestamps: number[];
   hmrPending: boolean;
   hmrTimer: number | null;
+  hmrSettledTimer: number | null;
   loopGuardTripped: boolean;
   desktopWatcherActive: boolean;
+  tauriListenersAttached: boolean;
+  desktopRetryTimer: number | null;
+  desktopRetryDelayMs: number;
   broadcastChannel: BroadcastChannel | null;
   tauriUnlisteners: UnlistenFn[];
   domUnlisteners: UnlistenFn[];
@@ -88,6 +96,14 @@ function isTauriRuntimeAvailable(): boolean {
 
   // Web mode installs a lightweight __TAURI__ shim; only treat real Tauri internals/metadata as desktop runtime.
   return Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI_METADATA__);
+}
+
+function shouldRetryDesktopAttachment(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return navigator.userAgent.includes("Tauri");
 }
 
 function resolveHotRuntime(): HotRuntime | null {
@@ -121,6 +137,15 @@ function clearHmrTimer(context: HotRefreshContext): void {
   context.hmrTimer = null;
 }
 
+function clearHmrSettledTimer(context: HotRefreshContext): void {
+  if (context.hmrSettledTimer === null) {
+    return;
+  }
+
+  window.clearTimeout(context.hmrSettledTimer);
+  context.hmrSettledTimer = null;
+}
+
 function scheduleHmrTimeout(context: HotRefreshContext): void {
   clearHmrTimer(context);
 
@@ -132,6 +157,66 @@ function scheduleHmrTimeout(context: HotRefreshContext): void {
     context.hmrPending = false;
     runHotRefresh(context, "hmr_timeout", { source: "hmr" }, true);
   }, HMR_SETTLE_TIMEOUT_MS);
+}
+
+function scheduleHmrSettledReload(context: HotRefreshContext): void {
+  clearHmrSettledTimer(context);
+  context.hmrSettledTimer = window.setTimeout(() => {
+    context.hmrSettledTimer = null;
+    runHotRefresh(context, "hmr_settled", { source: "hmr" }, true);
+  }, HMR_SETTLED_RELOAD_DEBOUNCE_MS);
+}
+
+function clearDesktopRetryTimer(context: HotRefreshContext): void {
+  if (context.desktopRetryTimer === null) {
+    return;
+  }
+
+  window.clearTimeout(context.desktopRetryTimer);
+  context.desktopRetryTimer = null;
+}
+
+async function ensureDesktopIntegration(context: HotRefreshContext): Promise<void> {
+  if (!isTauriRuntimeAvailable()) {
+    if (shouldRetryDesktopAttachment()) {
+      scheduleDesktopIntegrationRetry(context);
+    }
+    return;
+  }
+
+  clearDesktopRetryTimer(context);
+  context.desktopRetryDelayMs = DESKTOP_ATTACH_RETRY_INITIAL_MS;
+
+  const attached = await setupTauriListeners(context);
+  if (!attached) {
+    scheduleDesktopIntegrationRetry(context);
+    return;
+  }
+
+  await syncDesktopWatcher(context);
+}
+
+function scheduleDesktopIntegrationRetry(context: HotRefreshContext): void {
+  if (context.desktopRetryTimer !== null) {
+    return;
+  }
+
+  emitDiagnostic({
+    level: "info",
+    message: "Retrying desktop hot refresh attachment...",
+    reason: "settings_changed",
+  });
+
+  const retryDelayMs = context.desktopRetryDelayMs;
+  context.desktopRetryDelayMs = Math.min(
+    context.desktopRetryDelayMs * 2,
+    DESKTOP_ATTACH_RETRY_MAX_MS
+  );
+
+  context.desktopRetryTimer = window.setTimeout(() => {
+    context.desktopRetryTimer = null;
+    void ensureDesktopIntegration(context);
+  }, retryDelayMs);
 }
 
 function loopGuardAllowsReload(context: HotRefreshContext): boolean {
@@ -210,9 +295,13 @@ async function syncDesktopWatcher(context: HotRefreshContext): Promise<void> {
   }
 }
 
-async function setupTauriListeners(context: HotRefreshContext): Promise<void> {
+async function setupTauriListeners(context: HotRefreshContext): Promise<boolean> {
+  if (context.tauriListenersAttached) {
+    return true;
+  }
+
   if (!isTauriRuntimeAvailable()) {
-    return;
+    return false;
   }
 
   try {
@@ -238,12 +327,21 @@ async function setupTauriListeners(context: HotRefreshContext): Promise<void> {
     );
 
     context.tauriUnlisteners.push(unlistenBackend, unlistenCrossWindow);
+    context.tauriListenersAttached = true;
+    emitDiagnostic({
+      level: "info",
+      message: "Desktop hot refresh attached.",
+      reason: "settings_changed",
+    });
+    return true;
   } catch {
     emitDiagnostic({
       level: "error",
-      message: "Hot refresh could not attach Tauri event listeners.",
+      message: "Hot refresh could not attach Tauri event listeners. Retrying shortly.",
       reason: "settings_changed",
     });
+    context.tauriListenersAttached = false;
+    return false;
   }
 }
 
@@ -315,12 +413,14 @@ function registerHmrHandlers(context: HotRefreshContext): void {
 
   const onBeforeUpdate = () => {
     context.hmrPending = true;
+    clearHmrSettledTimer(context);
     scheduleHmrTimeout(context);
   };
 
   const onAfterUpdate = () => {
     context.hmrPending = false;
     clearHmrTimer(context);
+    scheduleHmrSettledReload(context);
   };
 
   const onError = () => {
@@ -330,6 +430,7 @@ function registerHmrHandlers(context: HotRefreshContext): void {
 
     context.hmrPending = false;
     clearHmrTimer(context);
+    clearHmrSettledTimer(context);
     runHotRefresh(context, "hmr_error", { source: "hmr" }, true);
   };
 
@@ -382,7 +483,8 @@ function registerDomListeners(context: HotRefreshContext): void {
     };
 
     context.loopGuardTripped = false;
-    void syncDesktopWatcher(context);
+    context.desktopRetryDelayMs = DESKTOP_ATTACH_RETRY_INITIAL_MS;
+    void ensureDesktopIntegration(context);
   };
 
   window.addEventListener(
@@ -431,8 +533,12 @@ export async function initHotRefresh(): Promise<() => void> {
     reloadTimestamps: [],
     hmrPending: false,
     hmrTimer: null,
+    hmrSettledTimer: null,
     loopGuardTripped: false,
     desktopWatcherActive: false,
+    tauriListenersAttached: false,
+    desktopRetryTimer: null,
+    desktopRetryDelayMs: DESKTOP_ATTACH_RETRY_INITIAL_MS,
     broadcastChannel: null,
     tauriUnlisteners: [],
     domUnlisteners: [],
@@ -444,8 +550,7 @@ export async function initHotRefresh(): Promise<() => void> {
   registerDomListeners(context);
   registerBroadcastChannel(context);
   registerHmrHandlers(context);
-  await setupTauriListeners(context);
-  await syncDesktopWatcher(context);
+  await ensureDesktopIntegration(context);
 
   return () => {
     if (activeContext !== context) {
@@ -453,6 +558,8 @@ export async function initHotRefresh(): Promise<() => void> {
     }
 
     clearHmrTimer(context);
+    clearHmrSettledTimer(context);
+    clearDesktopRetryTimer(context);
     context.hmrUnsubscribers.forEach((unsubscribe) => unsubscribe());
     context.domUnlisteners.forEach((unlisten) => unlisten());
     context.tauriUnlisteners.forEach((unlisten) => unlisten());
@@ -496,6 +603,8 @@ export function __resetHotRefreshForTests(): void {
     activeContext.tauriUnlisteners.forEach((unlisten) => unlisten());
     activeContext.hmrUnsubscribers.forEach((unsubscribe) => unsubscribe());
     clearHmrTimer(activeContext);
+    clearHmrSettledTimer(activeContext);
+    clearDesktopRetryTimer(activeContext);
 
     if (activeContext.broadcastChannel) {
       activeContext.broadcastChannel.close();

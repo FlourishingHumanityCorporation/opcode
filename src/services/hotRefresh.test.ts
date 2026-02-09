@@ -130,7 +130,7 @@ describe("hotRefresh service", () => {
     delete (window as any).__TAURI_INTERNALS__;
   });
 
-  it("does not hard-reload when HMR settles successfully", async () => {
+  it("hard-reloads once when HMR settles successfully", async () => {
     const hotRuntime = createHotRuntime();
     (globalThis as any).__OPCODE_HOT_RUNTIME__ = hotRuntime;
 
@@ -142,9 +142,36 @@ describe("hotRefresh service", () => {
 
     hotRuntime.trigger("vite:beforeUpdate");
     hotRuntime.trigger("vite:afterUpdate");
-    vi.advanceTimersByTime(2_000);
+    vi.advanceTimersByTime(500);
 
-    expect(reloadSpy).not.toHaveBeenCalled();
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+
+    teardown();
+  });
+
+  it("debounces repeated HMR settle signals into a single reload", async () => {
+    const hotRuntime = createHotRuntime();
+    (globalThis as any).__OPCODE_HOT_RUNTIME__ = hotRuntime;
+
+    const module = await import("@/services/hotRefresh");
+    const reloadSpy = vi.fn();
+    module.__setHotRefreshReloadForTests(reloadSpy);
+
+    const teardown = await module.initHotRefresh();
+
+    hotRuntime.trigger("vite:beforeUpdate");
+    hotRuntime.trigger("vite:afterUpdate");
+    vi.advanceTimersByTime(200);
+    hotRuntime.trigger("vite:afterUpdate");
+    vi.advanceTimersByTime(200);
+    hotRuntime.trigger("vite:afterUpdate");
+    vi.advanceTimersByTime(449);
+
+    expect(reloadSpy).toHaveBeenCalledTimes(0);
+
+    vi.advanceTimersByTime(1);
+    vi.runOnlyPendingTimers();
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
 
     teardown();
   });
@@ -186,6 +213,35 @@ describe("hotRefresh service", () => {
     expect(reloadSpy).toHaveBeenCalledTimes(1);
 
     teardown();
+  });
+
+  it("retries desktop attachment when runtime becomes available later", async () => {
+    const originalUserAgent = navigator.userAgent;
+    Object.defineProperty(window.navigator, "userAgent", {
+      configurable: true,
+      value: `${originalUserAgent} Tauri`,
+    });
+
+    try {
+      const module = await import("@/services/hotRefresh");
+      const teardown = await module.initHotRefresh();
+
+      expect(tauriEventMocks.listen).not.toHaveBeenCalled();
+      expect(apiMocks.hotRefreshStart).not.toHaveBeenCalled();
+
+      (window as any).__TAURI_INTERNALS__ = {};
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(tauriEventMocks.listen).toHaveBeenCalledTimes(2);
+      expect(apiMocks.hotRefreshStart).toHaveBeenCalledWith(["src"]);
+
+      teardown();
+    } finally {
+      Object.defineProperty(window.navigator, "userAgent", {
+        configurable: true,
+        value: originalUserAgent,
+      });
+    }
   });
 
   it("ignores web-mode __TAURI__ shim when real desktop internals are absent", async () => {

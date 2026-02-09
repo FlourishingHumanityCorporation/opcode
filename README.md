@@ -305,7 +305,7 @@ brew install pkg-config
 
 #### Feature Works In New Tabs/Windows But Not Old Ones
 
-Changes can apply to newly created runtime instances only; existing windows or tabs may retain prior capability state.
+Hot refresh now tries to auto-converge existing windows and tabs after behavior changes. In some edge cases, a long-lived runtime can still remain stale.
 
 If behavior seems stale:
 
