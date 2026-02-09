@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  autoClearReusedSessionOnAttach,
   TERMINAL_AUTO_FOCUS_RETRY_DELAYS_MS,
   clampWheelScrollLinesToBuffer,
   classifyWheelEventTarget,
   getTerminalAutoFocusRetryDecision,
+  shouldAutoClearReusedSessionOnAttach,
   shouldApplyWheelScrollFallback,
   shouldEscalateStaleRecoveryFromSignals,
   shouldReattachUsingExistingTerminalId,
@@ -16,6 +18,66 @@ describe("useEmbeddedTerminalController reattach policy", () => {
       false
     );
     expect(shouldReattachUsingExistingTerminalId(undefined, undefined)).toBe(false);
+  });
+
+  it("auto-clears only for reused sessions in clear-on-attach mode without startup command", () => {
+    expect(shouldAutoClearReusedSessionOnAttach(true, true, "")).toBe(true);
+    expect(shouldAutoClearReusedSessionOnAttach(true, true, "   ")).toBe(true);
+  });
+
+  it("does not auto-clear when a startup command is present", () => {
+    expect(shouldAutoClearReusedSessionOnAttach(true, true, "claude --resume abc")).toBe(false);
+  });
+
+  it("does not auto-clear for fresh sessions", () => {
+    expect(shouldAutoClearReusedSessionOnAttach(true, false, "")).toBe(false);
+  });
+
+  it("does not auto-clear for resume-mode attach contexts", () => {
+    expect(shouldAutoClearReusedSessionOnAttach(false, true, "")).toBe(false);
+  });
+
+  it("writes ctrl+l once when auto-clear is enabled for a reused session", async () => {
+    const writeInput = vi.fn().mockResolvedValue(undefined);
+    const didClear = await autoClearReusedSessionOnAttach({
+      terminalId: "term-1",
+      clearOnAttach: true,
+      reusedExistingSession: true,
+      autoRunCommand: "",
+      writeInput,
+    });
+
+    expect(didClear).toBe(true);
+    expect(writeInput).toHaveBeenCalledTimes(1);
+    expect(writeInput).toHaveBeenCalledWith("term-1", "\u000c");
+  });
+
+  it("does not write when startup command is present", async () => {
+    const writeInput = vi.fn().mockResolvedValue(undefined);
+    const didClear = await autoClearReusedSessionOnAttach({
+      terminalId: "term-1",
+      clearOnAttach: true,
+      reusedExistingSession: true,
+      autoRunCommand: "claude",
+      writeInput,
+    });
+
+    expect(didClear).toBe(false);
+    expect(writeInput).not.toHaveBeenCalled();
+  });
+
+  it("does not write for fresh sessions even if clearOnAttach is true", async () => {
+    const writeInput = vi.fn().mockResolvedValue(undefined);
+    const didClear = await autoClearReusedSessionOnAttach({
+      terminalId: "term-1",
+      clearOnAttach: true,
+      reusedExistingSession: false,
+      autoRunCommand: "",
+      writeInput,
+    });
+
+    expect(didClear).toBe(false);
+    expect(writeInput).not.toHaveBeenCalled();
   });
 });
 

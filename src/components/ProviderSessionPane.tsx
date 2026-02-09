@@ -2435,6 +2435,9 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     bootNativeTerminalWithStartupCommand();
   }, [bootNativeTerminalWithStartupCommand, onRestorePreferenceChange, onResumeSessionIdChange]);
 
+  const hasExplicitResumeSessionId = Boolean(sanitizeProviderSessionId(resumeSessionId));
+  const clearOnNativeAttach = !hasExplicitResumeSessionId && restorePreference !== 'resume_latest';
+
   const nativeTerminalPanel = (() => {
     if (!projectPath) {
       return (
@@ -2504,6 +2507,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         <EmbeddedTerminal
           projectPath={projectPath}
           autoRunCommand={nativeTerminalCommand}
+          clearOnAttach={clearOnNativeAttach}
           existingTerminalId={embeddedTerminalId}
           persistentSessionId={persistentTerminalSessionId}
           onTerminalIdChange={onEmbeddedTerminalIdChange}
