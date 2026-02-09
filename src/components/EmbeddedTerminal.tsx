@@ -58,7 +58,7 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = (props) => {
   const {
     containerRef,
     statusText,
-    isStreamingActivity,
+    isCommandActive,
     error,
     recoveryNotice,
     ready,
@@ -109,8 +109,8 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = (props) => {
   );
 
   React.useEffect(() => {
-    onRunningChange?.(isStreamingActivity);
-  }, [isStreamingActivity, onRunningChange]);
+    onRunningChange?.(isCommandActive);
+  }, [isCommandActive, onRunningChange]);
 
   React.useEffect(
     () => () => {

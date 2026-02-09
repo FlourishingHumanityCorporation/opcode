@@ -299,10 +299,13 @@ export function shouldEmitNeedsInputAttention(
 export function resolveStreamingState(params: {
   nativeTerminalMode: boolean;
   isLoading: boolean;
-  nativeTerminalStreaming: boolean;
+  nativeTerminalCommandActive?: boolean;
+  nativeTerminalStreaming?: boolean;
 }): boolean {
   if (params.nativeTerminalMode) {
-    return params.nativeTerminalStreaming;
+    return Boolean(
+      params.nativeTerminalCommandActive ?? params.nativeTerminalStreaming
+    );
   }
   return params.isLoading;
 }
@@ -395,7 +398,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   );
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const nativeTerminalMode = true;
-  const [nativeTerminalStreaming, setNativeTerminalStreaming] = useState(false);
+  const [nativeTerminalCommandActive, setNativeTerminalCommandActive] = useState(false);
   const [hasBootedNativeTerminal, setHasBootedNativeTerminal] = useState<boolean>(
     () => Boolean(embeddedTerminalId)
   );
@@ -980,10 +983,10 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     const isStreaming = resolveStreamingState({
       nativeTerminalMode,
       isLoading,
-      nativeTerminalStreaming,
+      nativeTerminalCommandActive,
     });
     onStreamingChange?.(isStreaming, providerSessionId);
-  }, [isLoading, nativeTerminalMode, nativeTerminalStreaming, onStreamingChange, providerSessionId]);
+  }, [isLoading, nativeTerminalMode, nativeTerminalCommandActive, onStreamingChange, providerSessionId]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -2354,7 +2357,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           onSplitPane={onSplitPane}
           onClosePane={onClosePane}
           canClosePane={resolveCanClosePane(canClosePane)}
-          onRunningChange={setNativeTerminalStreaming}
+          onRunningChange={setNativeTerminalCommandActive}
           className="h-full min-h-0"
         />
       </div>

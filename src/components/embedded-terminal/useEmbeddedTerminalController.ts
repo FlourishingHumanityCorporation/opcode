@@ -58,6 +58,7 @@ interface UseEmbeddedTerminalControllerResult {
   containerRef: MutableRefObject<HTMLDivElement | null>;
   statusText: string;
   isRunning: boolean;
+  isCommandActive: boolean;
   isStreamingActivity: boolean;
   error: string | null;
   recoveryNotice: string | null;
@@ -70,10 +71,112 @@ interface UseEmbeddedTerminalControllerResult {
 
 const WRITE_FAILURE_SIGNAL_WINDOW_MS = 12_000;
 const STREAM_ACTIVITY_IDLE_MS = 7_000;
+export const COMMAND_ACTIVITY_FALLBACK_IDLE_MS = 30_000;
+const COMMAND_ACTIVITY_TAIL_MAX_CHARS = 4_096;
 const STALE_RECOVERY_STAGE2_GRACE_MS = 900;
 const RECOVERY_NOTICE_AUTO_CLEAR_MS = 2_400;
 const WHEEL_OBSERVATION_THROTTLE_MS = 1_000;
 const VIEWPORT_SCROLL_EPSILON_PX = 0.5;
+
+export interface CommandActivityOutputAnalysis {
+  nextTail: string;
+  hasNonPromptOutput: boolean;
+  completionDetected: boolean;
+}
+
+export function stripTerminalControlSequences(input: string): string {
+  if (!input) {
+    return "";
+  }
+
+  return input
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[@-Z\\-_]/g, "")
+    .replace(/\u009b[0-?]*[ -/]*[@-~]/g, "");
+}
+
+export function extractLastMeaningfulTerminalLine(input: string): string | null {
+  const normalized = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = normalized.split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]?.trim();
+    if (line) {
+      return line;
+    }
+  }
+  return null;
+}
+
+export function isPromptLikeTerminalLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (/^(?:\$|#|%|>|\u276f)\s*$/.test(trimmed)) {
+    return true;
+  }
+
+  if (/^PS\s+.+>\s*$/i.test(trimmed)) {
+    return true;
+  }
+
+  if (/^[A-Za-z]:\\[^>]*>\s*$/.test(trimmed)) {
+    return true;
+  }
+
+  const shellStylePrompt = /^(?:[\w.@~:/\\()[\]{}-]+\s+)*[\w.@~:/\\()[\]{}-]+\s*(?:\$|#|%|\u276f)\s*$/.test(
+    trimmed
+  );
+  const hasPromptContext = /[@:/~\\]/.test(trimmed);
+  if (shellStylePrompt && hasPromptContext) {
+    return true;
+  }
+
+  return false;
+}
+
+export function analyzeTerminalOutputForCommandActivity(
+  previousTail: string,
+  chunk: string,
+  maxTailChars = COMMAND_ACTIVITY_TAIL_MAX_CHARS
+): CommandActivityOutputAnalysis {
+  const sanitizedChunk = stripTerminalControlSequences(chunk).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const merged = `${previousTail}${sanitizedChunk}`;
+  const nextTail =
+    merged.length > maxTailChars ? merged.slice(merged.length - maxTailChars) : merged;
+
+  const chunkLines = sanitizedChunk
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const hasNonPromptOutput = chunkLines.some((line) => !isPromptLikeTerminalLine(line));
+
+  const lastMeaningfulLine = extractLastMeaningfulTerminalLine(nextTail);
+  const completionDetected =
+    chunkLines.length > 0 &&
+    Boolean(lastMeaningfulLine && isPromptLikeTerminalLine(lastMeaningfulLine));
+
+  return {
+    nextTail,
+    hasNonPromptOutput,
+    completionDetected,
+  };
+}
+
+export function resolveCommandActivityFromOutput(
+  wasActive: boolean,
+  analysis: Pick<CommandActivityOutputAnalysis, "hasNonPromptOutput" | "completionDetected">
+): boolean {
+  if (analysis.completionDetected) {
+    return false;
+  }
+  if (analysis.hasNonPromptOutput) {
+    return true;
+  }
+  return wasActive;
+}
 
 export interface StaleRecoveryFailureSignals {
   windowStartedAt: number;
@@ -377,8 +480,12 @@ export function useEmbeddedTerminalController({
   const [restartToken, setRestartToken] = useState(0);
   const [isStarting, setIsStarting] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isCommandActive, setIsCommandActive] = useState(false);
   const [isStreamingActivity, setIsStreamingActivity] = useState(false);
   const streamingActivityTimerRef = useRef<number | null>(null);
+  const commandActivityTimerRef = useRef<number | null>(null);
+  const commandOutputTailRef = useRef<string>("");
+  const isCommandActiveRef = useRef(false);
 
   const ready = Boolean(terminalId) && isRunning;
 
@@ -386,6 +493,13 @@ export function useEmbeddedTerminalController({
     if (streamingActivityTimerRef.current !== null) {
       window.clearTimeout(streamingActivityTimerRef.current);
       streamingActivityTimerRef.current = null;
+    }
+  }, []);
+
+  const clearCommandActivityTimer = useCallback(() => {
+    if (commandActivityTimerRef.current !== null) {
+      window.clearTimeout(commandActivityTimerRef.current);
+      commandActivityTimerRef.current = null;
     }
   }, []);
 
@@ -480,6 +594,64 @@ export function useEmbeddedTerminalController({
     [workspaceId, terminalTabId, paneId]
   );
 
+  const clearCommandActivity = useCallback(
+    (reason?: string) => {
+      clearCommandActivityTimer();
+      commandActivityArmedRef.current = false;
+      commandOutputTailRef.current = "";
+      if (!isCommandActiveRef.current) {
+        return;
+      }
+      isCommandActiveRef.current = false;
+      setIsCommandActive(false);
+      if (reason) {
+        emitTerminalEvent("command_activity_stopped", { reason });
+      }
+    },
+    [clearCommandActivityTimer, emitTerminalEvent]
+  );
+
+  const markCommandActivity = useCallback(
+    (source: string) => {
+      if (!isCommandActiveRef.current) {
+        isCommandActiveRef.current = true;
+        setIsCommandActive(true);
+        emitTerminalEvent("command_activity_started", { source });
+      }
+
+      clearCommandActivityTimer();
+      commandActivityTimerRef.current = window.setTimeout(() => {
+        commandActivityTimerRef.current = null;
+        clearCommandActivity("inactivity-timeout");
+      }, COMMAND_ACTIVITY_FALLBACK_IDLE_MS);
+    },
+    [clearCommandActivity, clearCommandActivityTimer, emitTerminalEvent]
+  );
+
+  const handleCommandActivityFromOutput = useCallback(
+    (chunk: string) => {
+      const analysis = analyzeTerminalOutputForCommandActivity(
+        commandOutputTailRef.current,
+        chunk
+      );
+      commandOutputTailRef.current = analysis.nextTail;
+
+      const nextActive = resolveCommandActivityFromOutput(
+        isCommandActiveRef.current,
+        analysis
+      );
+      if (nextActive) {
+        markCommandActivity("output");
+        return;
+      }
+
+      if (analysis.completionDetected) {
+        clearCommandActivity("prompt-detected");
+      }
+    },
+    [clearCommandActivity, markCommandActivity]
+  );
+
   const captureIncident = useCallback(
     async (reason: string, note: string) => {
       const key = `${workspaceId || "unknown"}:${terminalTabId || "unknown"}:${paneId || "unknown"}`;
@@ -533,6 +705,7 @@ export function useEmbeddedTerminalController({
       try {
         lastInputAttemptAtRef.current = Date.now();
         commandActivityArmedRef.current = true;
+        markCommandActivity("run-command");
         await api.writeEmbeddedTerminalInput(terminalIdRef.current, `${command}\n`);
         clearWriteFailureSignals();
         markStreamingActivity();
@@ -554,11 +727,14 @@ export function useEmbeddedTerminalController({
         const message =
           runError instanceof Error ? runError.message : "Failed to send command to terminal";
         setError(message);
+        clearCommandActivity("write-input-failed");
       }
     },
     [
+      clearCommandActivity,
       clearWriteFailureSignals,
       emitTerminalEvent,
+      markCommandActivity,
       markStreamingActivity,
       recordWriteFailureSignal,
       scheduleSoftReattach,
@@ -732,6 +908,7 @@ export function useEmbeddedTerminalController({
       setIsRunning(true);
       isRunningRef.current = true;
       clearStreamingActivity();
+      clearCommandActivity();
       setError(null);
       lastOutputAtRef.current = Date.now();
 
@@ -739,6 +916,7 @@ export function useEmbeddedTerminalController({
         if (!terminalIdRef.current) return;
         if (data.includes("\r") || data.includes("\n")) {
           commandActivityArmedRef.current = true;
+          markCommandActivity("interactive-enter");
           markStreamingActivity();
         }
         lastInputAttemptAtRef.current = Date.now();
@@ -781,6 +959,7 @@ export function useEmbeddedTerminalController({
         }
         setRecoveryNoticeWithTimeout(null);
         const chunk = String(event.payload ?? "");
+        handleCommandActivityFromOutput(chunk);
         terminalInstance.write(chunk);
         const now = Date.now();
         if (now - lastOutputEventEmitAtRef.current > 2000) {
@@ -807,6 +986,7 @@ export function useEmbeddedTerminalController({
         setIsRunning(false);
         isRunningRef.current = false;
         clearStreamingActivity();
+        clearCommandActivity("process-exit");
         terminalIdRef.current = null;
         setTerminalId(null);
         setRecoveryNoticeWithTimeout(null);
@@ -864,6 +1044,7 @@ export function useEmbeddedTerminalController({
       setIsRunning(false);
       isRunningRef.current = false;
       clearStreamingActivity();
+      clearCommandActivity();
       setRecoveryNoticeWithTimeout(null);
 
       const term = new XTerm({
@@ -1013,6 +1194,7 @@ export function useEmbeddedTerminalController({
           setIsRunning(false);
           isRunningRef.current = false;
           clearStreamingActivity();
+          clearCommandActivity();
           onTerminalIdChangeRef.current?.(undefined);
         }
 
@@ -1027,17 +1209,27 @@ export function useEmbeddedTerminalController({
             if (!isCurrentStartup()) {
               return;
             }
+            existingTerminalIdRef.current = undefined;
+            terminalIdRef.current = null;
+            setTerminalId(null);
+            setIsRunning(false);
+            isRunningRef.current = false;
+            clearStreamingActivity();
+            clearCommandActivity();
+            onTerminalIdChangeRef.current?.(undefined);
           } catch {
             emitTerminalEvent("reattach_failed", {
               previousTerminalId,
               errorCode: "ERR_LISTENER_ATTACH_FAILED",
             });
             detachListeners();
+            existingTerminalIdRef.current = undefined;
             terminalIdRef.current = null;
             setTerminalId(null);
             setIsRunning(false);
             isRunningRef.current = false;
             clearStreamingActivity();
+            clearCommandActivity();
             onTerminalIdChangeRef.current?.(undefined);
           }
         }
@@ -1095,6 +1287,7 @@ export function useEmbeddedTerminalController({
         setIsRunning(false);
         isRunningRef.current = false;
         clearStreamingActivity();
+        clearCommandActivity();
       } finally {
         setIsStarting(false);
       }
@@ -1113,6 +1306,7 @@ export function useEmbeddedTerminalController({
       setIsRunning(false);
       isRunningRef.current = false;
       clearStreamingActivity();
+      clearCommandActivity();
       setRecoveryNoticeWithTimeout(null);
 
       if (terminalInstance) {
@@ -1130,7 +1324,10 @@ export function useEmbeddedTerminalController({
     scheduleTerminalAutoFocusRetry,
     clearAutoFocusRetryTimers,
     clearStreamingActivity,
+    clearCommandActivity,
     clearWriteFailureSignals,
+    handleCommandActivityFromOutput,
+    markCommandActivity,
     markStreamingActivity,
     recordWriteFailureSignal,
     emitTerminalEvent,
@@ -1504,12 +1701,16 @@ export function useEmbeddedTerminalController({
       clearAutoFocusRetryTimers();
       clearRecoveryNoticeTimer();
       clearStreamingActivityTimer();
+      clearCommandActivityTimer();
+      commandOutputTailRef.current = "";
+      isCommandActiveRef.current = false;
       clearWriteFailureSignals();
     };
   }, [
     clearAutoFocusRetryTimers,
     clearRecoveryNoticeTimer,
     clearStreamingActivityTimer,
+    clearCommandActivityTimer,
     clearWriteFailureSignals,
   ]);
 
@@ -1523,6 +1724,7 @@ export function useEmbeddedTerminalController({
     containerRef,
     statusText,
     isRunning,
+    isCommandActive,
     isStreamingActivity,
     error,
     recoveryNotice,

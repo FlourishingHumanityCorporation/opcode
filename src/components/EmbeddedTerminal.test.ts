@@ -19,12 +19,14 @@ const embeddedTerminalControllerMocks = vi.hoisted(() => ({
   recoverPointerFocus: vi.fn(),
   quickRunCommandRef: { current: "claude" },
   containerRef: { current: null as HTMLDivElement | null },
+  isCommandActive: false,
 }));
 
 vi.mock("@/components/embedded-terminal", () => ({
   useEmbeddedTerminalController: () => ({
     containerRef: embeddedTerminalControllerMocks.containerRef,
     statusText: "Running",
+    isCommandActive: embeddedTerminalControllerMocks.isCommandActive,
     isStreamingActivity: false,
     error: null,
     recoveryNotice: null,
@@ -94,6 +96,7 @@ describe("EmbeddedTerminal lifecycle close behavior", () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     vi.clearAllMocks();
+    embeddedTerminalControllerMocks.isCommandActive = false;
   });
 
   it("invokes header control actions while suppressing mouse event bubbling", async () => {
@@ -165,6 +168,21 @@ describe("EmbeddedTerminal lifecycle close behavior", () => {
     try {
       const closeButton = container.querySelector('button[title="Close Pane"]');
       expect(closeButton).toBeNull();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("forwards command-active state through onRunningChange", async () => {
+    const onRunningChange = vi.fn();
+    embeddedTerminalControllerMocks.isCommandActive = true;
+
+    const { cleanup } = await renderEmbeddedTerminal({
+      onRunningChange,
+    });
+
+    try {
+      expect(onRunningChange).toHaveBeenCalledWith(true);
     } finally {
       await cleanup();
     }

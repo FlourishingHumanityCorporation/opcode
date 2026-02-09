@@ -1,23 +1,38 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  analyzeTerminalOutputForCommandActivity,
   autoClearReusedSessionOnAttach,
+  COMMAND_ACTIVITY_FALLBACK_IDLE_MS,
   TERMINAL_AUTO_FOCUS_RETRY_DELAYS_MS,
   clampWheelScrollLinesToBuffer,
   classifyWheelEventTarget,
+  extractLastMeaningfulTerminalLine,
   getTerminalAutoFocusRetryDecision,
+  isPromptLikeTerminalLine,
+  resolveCommandActivityFromOutput,
   shouldAutoClearReusedSessionOnAttach,
   shouldApplyWheelScrollFallback,
   shouldEscalateStaleRecoveryFromSignals,
   shouldReattachUsingExistingTerminalId,
+  stripTerminalControlSequences,
 } from "@/components/embedded-terminal/useEmbeddedTerminalController";
 
 describe("useEmbeddedTerminalController reattach policy", () => {
-  it("reuses existing terminal id only when persistent session is absent", () => {
+  it("reuses existing terminal id only when persistent session restore is not active", () => {
     expect(shouldReattachUsingExistingTerminalId("term-1", undefined)).toBe(true);
-    expect(shouldReattachUsingExistingTerminalId("term-1", "opcode_workspace_terminal_pane")).toBe(
-      false
-    );
+    expect(
+      shouldReattachUsingExistingTerminalId("term-1", "opcode_workspace_terminal_pane")
+    ).toBe(false);
     expect(shouldReattachUsingExistingTerminalId(undefined, undefined)).toBe(false);
+    expect(
+      shouldReattachUsingExistingTerminalId(undefined, "opcode_workspace_terminal_pane")
+    ).toBe(false);
+  });
+
+  it("prevents stale terminal id reuse during persistent-session attach", () => {
+    expect(
+      shouldReattachUsingExistingTerminalId("stale-terminal-id", "opcode_workspace_terminal_pane")
+    ).toBe(false);
   });
 
   it("auto-clears only for reused sessions in clear-on-attach mode without startup command", () => {
@@ -78,6 +93,57 @@ describe("useEmbeddedTerminalController reattach policy", () => {
 
     expect(didClear).toBe(false);
     expect(writeInput).not.toHaveBeenCalled();
+  });
+});
+
+describe("useEmbeddedTerminalController command activity heuristics", () => {
+  it("keeps a deterministic fallback timeout for ambiguous completion", () => {
+    expect(COMMAND_ACTIVITY_FALLBACK_IDLE_MS).toBe(30_000);
+  });
+
+  it("strips ANSI and OSC terminal control sequences", () => {
+    const cleaned = stripTerminalControlSequences(
+      "\u001b[32mready\u001b[0m \u001b]0;title\u0007"
+    );
+    expect(cleaned).toBe("ready ");
+  });
+
+  it("detects common shell prompt forms", () => {
+    expect(isPromptLikeTerminalLine("$")).toBe(true);
+    expect(isPromptLikeTerminalLine("paul@host:~/repo %")).toBe(true);
+    expect(isPromptLikeTerminalLine("PS C:\\repo>")).toBe(true);
+    expect(isPromptLikeTerminalLine("processing 95%")).toBe(false);
+  });
+
+  it("extracts the last meaningful terminal line", () => {
+    expect(extractLastMeaningfulTerminalLine("\n  \nhello\n  \n")).toBe("hello");
+    expect(extractLastMeaningfulTerminalLine(" \n \r\n")).toBeNull();
+  });
+
+  it("classifies output chunks into command activity signals", () => {
+    const activeChunk = analyzeTerminalOutputForCommandActivity(
+      "",
+      "\u001b[2mRunning tests...\u001b[0m\n"
+    );
+    expect(activeChunk.hasNonPromptOutput).toBe(true);
+    expect(activeChunk.completionDetected).toBe(false);
+
+    const completionChunk = analyzeTerminalOutputForCommandActivity(
+      activeChunk.nextTail,
+      "paul@host:~/repo % "
+    );
+    expect(completionChunk.hasNonPromptOutput).toBe(false);
+    expect(completionChunk.completionDetected).toBe(true);
+  });
+
+  it("reactivates command activity after prior idle state when new non-prompt output arrives", () => {
+    const analysis = analyzeTerminalOutputForCommandActivity("", "Building target...\n");
+    expect(resolveCommandActivityFromOutput(false, analysis)).toBe(true);
+  });
+
+  it("deactivates command activity when prompt completion appears", () => {
+    const analysis = analyzeTerminalOutputForCommandActivity("Running...\n", "\u276f ");
+    expect(resolveCommandActivityFromOutput(true, analysis)).toBe(false);
   });
 });
 

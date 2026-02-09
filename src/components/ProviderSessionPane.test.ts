@@ -97,6 +97,13 @@ describe("ProviderSessionPane header behavior", () => {
       resolveStreamingState({
         nativeTerminalMode: true,
         isLoading: false,
+        nativeTerminalCommandActive: true,
+      })
+    ).toBe(true);
+    expect(
+      resolveStreamingState({
+        nativeTerminalMode: true,
+        isLoading: false,
         nativeTerminalStreaming: true,
       })
     ).toBe(true);
