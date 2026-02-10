@@ -106,7 +106,7 @@ async function installFakeTauriEventBridge(page: Page) {
       },
     };
 
-    (window as any).__OPCODE_SMOKE_EMIT_TAURI_EVENT__ = (eventName: string, payload: unknown) => {
+    (window as any).__CODEINTERFACEX_SMOKE_EMIT_TAURI_EVENT__ = (eventName: string, payload: unknown) => {
       listeners.forEach((listener) => {
         if (listener.event !== eventName) {
           return;
@@ -141,7 +141,7 @@ async function bootstrapWorkspaceWithNativeTerminal(page: Page) {
 async function seedTerminalOutput(page: Page, terminalId: string, lines = 420) {
   await page.evaluate(
     ({ id, count }) => {
-      const emit = (window as any).__OPCODE_SMOKE_EMIT_TAURI_EVENT__ as
+      const emit = (window as any).__CODEINTERFACEX_SMOKE_EMIT_TAURI_EVENT__ as
         | ((eventName: string, payload: unknown) => void)
         | undefined;
       if (!emit) {
@@ -302,7 +302,7 @@ test.describe("Terminal wheel scroll smoke", () => {
     await page.addInitScript(() => {
       localStorage.removeItem("opcode_workspace_v3");
       localStorage.removeItem("opcode_tabs_v2");
-      localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+      localStorage.setItem("codeinterfacex.smoke.projectPath", "/tmp/codeinterfacex-smoke-project");
       localStorage.setItem("native_terminal_mode", "true");
       localStorage.setItem("app_setting:native_terminal_mode", "true");
     });
@@ -338,7 +338,7 @@ test.describe("Terminal wheel scroll smoke", () => {
     await page.addInitScript(() => {
       localStorage.removeItem("opcode_workspace_v3");
       localStorage.removeItem("opcode_tabs_v2");
-      localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+      localStorage.setItem("codeinterfacex.smoke.projectPath", "/tmp/codeinterfacex-smoke-project");
       localStorage.setItem("native_terminal_mode", "true");
       localStorage.setItem("app_setting:native_terminal_mode", "true");
     });
@@ -382,7 +382,7 @@ test.describe("Terminal wheel scroll smoke", () => {
     await page.addInitScript(() => {
       localStorage.removeItem("opcode_workspace_v3");
       localStorage.removeItem("opcode_tabs_v2");
-      localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+      localStorage.setItem("codeinterfacex.smoke.projectPath", "/tmp/codeinterfacex-smoke-project");
       localStorage.setItem("native_terminal_mode", "true");
       localStorage.setItem("app_setting:native_terminal_mode", "true");
     });
@@ -427,7 +427,7 @@ test.describe("Terminal wheel scroll smoke", () => {
     await page.addInitScript(() => {
       localStorage.removeItem("opcode_workspace_v3");
       localStorage.removeItem("opcode_tabs_v2");
-      localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+      localStorage.setItem("codeinterfacex.smoke.projectPath", "/tmp/codeinterfacex-smoke-project");
       localStorage.setItem("native_terminal_mode", "true");
       localStorage.setItem("app_setting:native_terminal_mode", "true");
     });

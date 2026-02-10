@@ -2,7 +2,7 @@ import { api, type EmbeddedTerminalDebugSnapshot } from "@/lib/api";
 import { getEnvironmentInfo } from "@/lib/apiAdapter";
 import type { Tab } from "@/contexts/TabContext";
 
-const TERMINAL_DEBUG_STORAGE_KEY = "opcode.terminal.debug";
+const TERMINAL_DEBUG_STORAGE_KEY = "codeinterfacex.terminal.debug";
 const MAX_TERMINAL_EVENTS = 400;
 const DEAD_INPUT_CAPTURE_WINDOW_MS = 60_000;
 let workspaceSnapshotProvider:
@@ -77,7 +77,7 @@ function hasLocalStorageDebugFlag(): boolean {
 }
 
 export function isTerminalHangDebugEnabled(): boolean {
-  return Boolean((globalThis as any).__OPCODE_DEBUG_LOGS__) || hasLocalStorageDebugFlag();
+  return Boolean((globalThis as any).__CODEINTERFACEX_DEBUG_LOGS__) || hasLocalStorageDebugFlag();
 }
 
 export function recordTerminalEvent(event: Omit<TerminalHangEvent, "ts">): void {

@@ -198,7 +198,7 @@ async function installFakeTauriEventBridge(page: Page) {
       },
     };
 
-    (window as any).__OPCODE_SMOKE_EMIT_TAURI_EVENT__ = (eventName: string, payload: unknown) => {
+    (window as any).__CODEINTERFACEX_SMOKE_EMIT_TAURI_EVENT__ = (eventName: string, payload: unknown) => {
       listeners.forEach((listener) => {
         if (listener.event !== eventName) {
           return;
@@ -214,7 +214,7 @@ async function bootstrapNativeWorkspace(page: Page, projectPath = DEFAULT_PROJEC
   await page.addInitScript((initialProjectPath) => {
     localStorage.removeItem("opcode_workspace_v3");
     localStorage.removeItem("opcode_tabs_v2");
-    localStorage.setItem("opcode.smoke.projectPath", initialProjectPath);
+    localStorage.setItem("codeinterfacex.smoke.projectPath", initialProjectPath);
     localStorage.setItem("native_terminal_mode", "true");
     localStorage.setItem("app_setting:native_terminal_mode", "true");
   }, projectPath);

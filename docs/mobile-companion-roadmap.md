@@ -1,10 +1,10 @@
-# Opcode Mobile Companion Roadmap (Current)
+# CodeInterfaceX Mobile Companion Roadmap (Current)
 
 Updated on **February 9, 2026**.
 
 ## Goal
 
-Ship an iOS mobile companion that reliably mirrors live desktop Opcode state and supports safe remote control over private networking (Tailscale).
+Ship an iOS mobile companion that reliably mirrors live desktop CodeInterfaceX state and supports safe remote control over private networking (Tailscale).
 
 ## Status Summary
 

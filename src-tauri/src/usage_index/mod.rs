@@ -241,7 +241,7 @@ pub fn append_usage_debug_log(message: &str) {
     let timestamp = Local::now().to_rfc3339();
     let line = format!("[{}] {}\n", timestamp, message);
     if let Some(home) = dirs::home_dir() {
-        let path = home.join(".opcode-usage-debug.log");
+        let path = home.join(".codeinterfacex-usage-debug.log");
         if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
             let _ = file.write_all(line.as_bytes());
         }

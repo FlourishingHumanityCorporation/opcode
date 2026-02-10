@@ -471,7 +471,7 @@ async fn run_iterm_probe(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let probe_dir = std::env::temp_dir().join(format!("opcode-iterm-benchmark-{}-{}", std::process::id(), nonce));
+    let probe_dir = std::env::temp_dir().join(format!("codeinterfacex-iterm-benchmark-{}-{}", std::process::id(), nonce));
     std::fs::create_dir_all(&probe_dir)
         .map_err(|e| format!("Failed to create iTerm benchmark temp directory: {}", e))?;
 

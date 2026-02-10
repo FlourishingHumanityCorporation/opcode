@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "opcode",
+  "productName": "CodeInterfaceX",
   "version": "0.2.1",
-  "identifier": "opcode.asterisk.so",
+  "identifier": "com.flourishinghumanity.codeinterfacex",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1420",
@@ -13,7 +13,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "opcode",
+        "title": "CodeInterfaceX",
         "width": 800,
         "height": 600,
         "decorations": false,
@@ -78,7 +78,7 @@
     "copyright": "© 2025 Asterisk. All rights reserved.",
     "category": "DeveloperTool",
     "shortDescription": "GUI app and Toolkit for Claude Code",
-    "longDescription": "opcode is a comprehensive GUI application and toolkit for working with Claude Code, providing an intuitive interface for AI-assisted development.",
+    "longDescription": "CodeInterfaceX is a comprehensive GUI application and toolkit for working with Claude Code, providing an intuitive interface for AI-assisted development.",
     "linux": {
       "appimage": {
         "bundleMediaFramework": true

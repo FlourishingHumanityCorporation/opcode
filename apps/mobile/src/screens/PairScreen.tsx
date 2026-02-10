@@ -63,7 +63,7 @@ export function PairScreen({ defaultHost, busy = false, error, onPair }: PairScr
   return (
     <View style={{ gap: 12 }}>
       <Text style={{ color: '#D0D7DE' }}>
-        Pair this phone with your desktop Opcode instance.
+        Pair this phone with your desktop CodeInterfaceX instance.
       </Text>
 
       <View style={{ gap: 6 }}>

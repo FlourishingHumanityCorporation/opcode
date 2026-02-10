@@ -5,10 +5,10 @@ import {
   loadHotRefreshPreferences,
 } from "@/lib/hotRefreshPreferences";
 
-export const OPCODE_HOT_REFRESH_REQUESTED_EVENT = "opcode-hot-refresh-requested";
-export const OPCODE_HOT_REFRESH_BACKEND_EVENT = "opcode://hot-refresh-file-changed";
-export const OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT =
-  "opcode-hot-refresh-diagnostic";
+export const CODEINTERFACEX_HOT_REFRESH_REQUESTED_EVENT = "codeinterfacex-hot-refresh-requested";
+export const CODEINTERFACEX_HOT_REFRESH_BACKEND_EVENT = "codeinterfacex://hot-refresh-file-changed";
+export const CODEINTERFACEX_HOT_REFRESH_DIAGNOSTIC_EVENT =
+  "codeinterfacex-hot-refresh-diagnostic";
 
 const LOOP_GUARD_MIN_INTERVAL_MS = 2_000;
 const LOOP_GUARD_WINDOW_MS = 30_000;
@@ -17,7 +17,7 @@ const HMR_SETTLE_TIMEOUT_MS = 1_500;
 const HMR_SETTLED_RELOAD_DEBOUNCE_MS = 450;
 const DESKTOP_ATTACH_RETRY_INITIAL_MS = 1_000;
 const DESKTOP_ATTACH_RETRY_MAX_MS = 5_000;
-const BROADCAST_CHANNEL_NAME = "opcode-hot-refresh";
+const BROADCAST_CHANNEL_NAME = "codeinterfacex-hot-refresh";
 
 export type HotRefreshReason =
   | "backend_file_change"
@@ -83,7 +83,7 @@ function emitDiagnostic(detail: HotRefreshDiagnosticDetail): void {
   }
 
   window.dispatchEvent(
-    new CustomEvent<HotRefreshDiagnosticDetail>(OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT, {
+    new CustomEvent<HotRefreshDiagnosticDetail>(CODEINTERFACEX_HOT_REFRESH_DIAGNOSTIC_EVENT, {
       detail,
     })
   );
@@ -111,7 +111,7 @@ function resolveHotRuntime(): HotRuntime | null {
     return null;
   }
 
-  const testHot = (globalThis as any).__OPCODE_HOT_RUNTIME__ as HotRuntime | undefined;
+  const testHot = (globalThis as any).__CODEINTERFACEX_HOT_RUNTIME__ as HotRuntime | undefined;
   if (testHot?.on) {
     return testHot;
   }
@@ -308,14 +308,14 @@ async function setupTauriListeners(context: HotRefreshContext): Promise<boolean>
     const tauriEvent = await import("@tauri-apps/api/event");
 
     const unlistenBackend = await tauriEvent.listen<HotRefreshPayload>(
-      OPCODE_HOT_REFRESH_BACKEND_EVENT,
+      CODEINTERFACEX_HOT_REFRESH_BACKEND_EVENT,
       (event) => {
         runHotRefresh(context, "backend_file_change", event.payload, true);
       }
     );
 
     const unlistenCrossWindow = await tauriEvent.listen<HotRefreshWirePayload>(
-      OPCODE_HOT_REFRESH_REQUESTED_EVENT,
+      CODEINTERFACEX_HOT_REFRESH_REQUESTED_EVENT,
       (event) => {
         const detail = event.payload;
         if (!detail || detail.sourceId === context.sourceId) {
@@ -356,7 +356,7 @@ async function emitCrossWindowRefresh(context: HotRefreshContext, detail: HotRef
 
   try {
     const tauriEvent = await import("@tauri-apps/api/event");
-    await tauriEvent.emit(OPCODE_HOT_REFRESH_REQUESTED_EVENT, detail);
+    await tauriEvent.emit(CODEINTERFACEX_HOT_REFRESH_REQUESTED_EVENT, detail);
   } catch {
     // best-effort propagation only
   }
@@ -462,10 +462,10 @@ function registerDomListeners(context: HotRefreshContext): void {
     runHotRefresh(context, detail.reason ?? "manual", detail.payload, true);
   };
 
-  window.addEventListener(OPCODE_HOT_REFRESH_REQUESTED_EVENT, onLocalRequest as EventListener);
+  window.addEventListener(CODEINTERFACEX_HOT_REFRESH_REQUESTED_EVENT, onLocalRequest as EventListener);
   context.domUnlisteners.push(() => {
     window.removeEventListener(
-      OPCODE_HOT_REFRESH_REQUESTED_EVENT,
+      CODEINTERFACEX_HOT_REFRESH_REQUESTED_EVENT,
       onLocalRequest as EventListener
     );
   });

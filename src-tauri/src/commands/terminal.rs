@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
-const OPCODE_TMUX_SOCKET: &str = "opcode_persistent";
+const CODEINTERFACEX_TMUX_SOCKET: &str = "codeinterfacex_persistent";
 const TMUX_HISTORY_LIMIT: &str = "200000";
 
 #[cfg(target_os = "windows")]
@@ -186,7 +186,7 @@ fn start_tmux_attached(command: &mut CommandBuilder, session_id: &str, cwd: &Pat
     let shell = resolve_default_shell();
     let shell_kind = shell_name(&shell);
 
-    command.args(["-L", OPCODE_TMUX_SOCKET, "-f", TMUX_CONFIG_PATH]);
+    command.args(["-L", CODEINTERFACEX_TMUX_SOCKET, "-f", TMUX_CONFIG_PATH]);
     command.args(["new-session", "-A", "-s", session_id, "-c"]);
     command.arg(cwd.to_string_lossy().to_string());
     command.arg(shell);
@@ -201,7 +201,7 @@ fn run_tmux_command(args: &[&str]) -> Option<std::process::ExitStatus> {
     ProcessCommand::new("tmux")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .args(["-L", OPCODE_TMUX_SOCKET, "-f", TMUX_CONFIG_PATH])
+        .args(["-L", CODEINTERFACEX_TMUX_SOCKET, "-f", TMUX_CONFIG_PATH])
         .args(args)
         .status()
         .ok()
@@ -378,7 +378,7 @@ pub async fn start_embedded_terminal(
         cmd.env("CLICOLOR", "1");
         cmd.env("CLICOLOR_FORCE", "1");
         cmd.env("FORCE_COLOR", "1");
-        cmd.env("TERM_PROGRAM", "opcode");
+        cmd.env("TERM_PROGRAM", "codeinterfacex");
         cmd.env_remove("npm_config_prefix");
         cmd.env_remove("NPM_CONFIG_PREFIX");
         cmd.env_remove("PREFIX");
@@ -396,7 +396,7 @@ pub async fn start_embedded_terminal(
         cmd.env("CLICOLOR", "1");
         cmd.env("CLICOLOR_FORCE", "1");
         cmd.env("FORCE_COLOR", "1");
-        cmd.env("TERM_PROGRAM", "opcode");
+        cmd.env("TERM_PROGRAM", "codeinterfacex");
         cmd.env_remove("npm_config_prefix");
         cmd.env_remove("NPM_CONFIG_PREFIX");
         cmd.env_remove("PREFIX");
@@ -636,7 +636,7 @@ pub async fn write_terminal_incident_bundle(
     note: Option<String>,
 ) -> Result<String, String> {
     let home = dirs::home_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
-    let output_dir = home.join(".opcode-terminal-debug");
+    let output_dir = home.join(".codeinterfacex-terminal-debug");
     fs::create_dir_all(&output_dir)
         .map_err(|error| format!("Failed to create incident directory: {}", error))?;
 

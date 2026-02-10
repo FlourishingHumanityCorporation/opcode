@@ -1,6 +1,6 @@
 # Notification Architecture
 
-How Opcode notifies users when agent sessions complete or need input.
+How CodeInterfaceX notifies users when agent sessions complete or need input.
 
 ## Overview
 
@@ -113,11 +113,11 @@ Both maps self-clean when they exceed 64 entries.
 
 `emitAgentAttention()` performs up to three actions for each non-suppressed event:
 
-1. **DOM event** (`opcode-agent-attention`) — always dispatched. Consumed by `TabContent.tsx` to update tab status via `applyAgentAttentionStatusUpdate()`.
+1. **DOM event** (`codeinterfacex-agent-attention`) — always dispatched. Consumed by `TabContent.tsx` to update tab status via `applyAgentAttentionStatusUpdate()`.
 
 2. **Desktop notification** — only if the window is unfocused. Requests permission once per session. On success, increments the macOS badge count.
 
-3. **Fallback event** (`opcode-agent-attention-fallback`) — only if the window is unfocused AND the desktop notification was not delivered (permission denied or unavailable). Consumed by `App.tsx` and displayed as an in-app toast.
+3. **Fallback event** (`codeinterfacex-agent-attention-fallback`) — only if the window is unfocused AND the desktop notification was not delivered (permission denied or unavailable). Consumed by `App.tsx` and displayed as an in-app toast.
 
 ## Tab status propagation
 

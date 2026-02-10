@@ -9,21 +9,21 @@
   <key>CFBundleShortVersionString</key>
   <string>0.2.1</string>
   <key>CFBundleName</key>
-  <string>opcode</string>
+  <string>CodeInterfaceX</string>
   <key>CFBundleDisplayName</key>
-  <string>opcode</string>
+  <string>CodeInterfaceX</string>
   <key>CFBundleIdentifier</key>
-  <string>opcode.asterisk.so</string>
+  <string>com.flourishinghumanity.codeinterfacex</string>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
       <key>CFBundleTypeName</key>
-      <string>opcode Agent</string>
+      <string>CodeInterfaceX Agent</string>
       <key>CFBundleTypeRole</key>
       <string>Editor</string>
       <key>CFBundleTypeExtensions</key>
       <array>
-        <string>opcode.json</string>
+        <string>codeinterfacex.json</string>
       </array>
       <key>CFBundleTypeIconFile</key>
       <string>icon.icns</string>
@@ -32,12 +32,12 @@
     </dict>
   </array>
   <key>NSAppleEventsUsageDescription</key>
-  <string>opcode needs to send Apple Events to other applications.</string>
+  <string>CodeInterfaceX needs to send Apple Events to other applications.</string>
   <key>NSAppleScriptEnabled</key>
   <true/>
   <key>NSCameraUsageDescription</key>
-  <string>opcode needs camera access for capturing images for AI processing.</string>
+  <string>CodeInterfaceX needs camera access for capturing images for AI processing.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>opcode needs microphone access for voice input features.</string>
+  <string>CodeInterfaceX needs microphone access for voice input features.</string>
 </dict>
 </plist>

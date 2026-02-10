@@ -158,6 +158,6 @@ describe('MobileSyncClient', () => {
     const [, requestInit] = (globalThis.fetch as any).mock.calls[0];
     const headers = new Headers(requestInit.headers);
     expect(headers.get('Authorization')).toBe('Bearer token-1');
-    expect(headers.get('X-Opcode-Sync-Version')).toBe('1');
+    expect(headers.get('X-CodeInterfaceX-Sync-Version')).toBe('1');
   });
 });

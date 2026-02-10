@@ -113,7 +113,7 @@ describe("hotRefresh service", () => {
     (globalThis as any).BroadcastChannel = MockBroadcastChannel;
     delete (window as any).__TAURI__;
     delete (window as any).__TAURI_INTERNALS__;
-    delete (globalThis as any).__OPCODE_HOT_RUNTIME__;
+    delete (globalThis as any).__CODEINTERFACEX_HOT_RUNTIME__;
   });
 
   afterEach(async () => {
@@ -125,14 +125,14 @@ describe("hotRefresh service", () => {
     vi.clearAllMocks();
     MockBroadcastChannel.reset();
     delete (globalThis as any).BroadcastChannel;
-    delete (globalThis as any).__OPCODE_HOT_RUNTIME__;
+    delete (globalThis as any).__CODEINTERFACEX_HOT_RUNTIME__;
     delete (window as any).__TAURI__;
     delete (window as any).__TAURI_INTERNALS__;
   });
 
   it("hard-reloads once when HMR settles successfully", async () => {
     const hotRuntime = createHotRuntime();
-    (globalThis as any).__OPCODE_HOT_RUNTIME__ = hotRuntime;
+    (globalThis as any).__CODEINTERFACEX_HOT_RUNTIME__ = hotRuntime;
 
     const module = await import("@/services/hotRefresh");
     const reloadSpy = vi.fn();
@@ -151,7 +151,7 @@ describe("hotRefresh service", () => {
 
   it("debounces repeated HMR settle signals into a single reload", async () => {
     const hotRuntime = createHotRuntime();
-    (globalThis as any).__OPCODE_HOT_RUNTIME__ = hotRuntime;
+    (globalThis as any).__CODEINTERFACEX_HOT_RUNTIME__ = hotRuntime;
 
     const module = await import("@/services/hotRefresh");
     const reloadSpy = vi.fn();
@@ -178,7 +178,7 @@ describe("hotRefresh service", () => {
 
   it("forces hard reload when HMR does not settle before timeout", async () => {
     const hotRuntime = createHotRuntime();
-    (globalThis as any).__OPCODE_HOT_RUNTIME__ = hotRuntime;
+    (globalThis as any).__CODEINTERFACEX_HOT_RUNTIME__ = hotRuntime;
 
     const module = await import("@/services/hotRefresh");
     const reloadSpy = vi.fn();
@@ -204,7 +204,7 @@ describe("hotRefresh service", () => {
 
     const teardown = await module.initHotRefresh();
 
-    const callback = tauriListeners.get(module.OPCODE_HOT_REFRESH_BACKEND_EVENT);
+    const callback = tauriListeners.get(module.CODEINTERFACEX_HOT_REFRESH_BACKEND_EVENT);
     expect(callback).toBeTypeOf("function");
 
     callback?.({ payload: { path: "src/App.tsx" } });
@@ -258,7 +258,7 @@ describe("hotRefresh service", () => {
       diagnostics.push((event as CustomEvent<{ message: string }>).detail?.message ?? "");
     };
     window.addEventListener(
-      module.OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+      module.CODEINTERFACEX_HOT_REFRESH_DIAGNOSTIC_EVENT,
       onDiagnostic as EventListener
     );
 
@@ -273,7 +273,7 @@ describe("hotRefresh service", () => {
     ).toBe(false);
 
     window.removeEventListener(
-      module.OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+      module.CODEINTERFACEX_HOT_REFRESH_DIAGNOSTIC_EVENT,
       onDiagnostic as EventListener
     );
     teardown();
@@ -286,7 +286,7 @@ describe("hotRefresh service", () => {
 
     const teardown = await module.initHotRefresh();
 
-    const externalChannel = new MockBroadcastChannel("opcode-hot-refresh");
+    const externalChannel = new MockBroadcastChannel("codeinterfacex-hot-refresh");
     externalChannel.postMessage({
       requestId: "external-1",
       sourceId: "remote-window",
@@ -315,7 +315,7 @@ describe("hotRefresh service", () => {
     };
 
     window.addEventListener(
-      module.OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+      module.CODEINTERFACEX_HOT_REFRESH_DIAGNOSTIC_EVENT,
       onDiagnostic as EventListener
     );
 
@@ -331,7 +331,7 @@ describe("hotRefresh service", () => {
     expect(diagnostics.some((message) => message.includes("paused temporarily"))).toBe(true);
 
     window.removeEventListener(
-      module.OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+      module.CODEINTERFACEX_HOT_REFRESH_DIAGNOSTIC_EVENT,
       onDiagnostic as EventListener
     );
 

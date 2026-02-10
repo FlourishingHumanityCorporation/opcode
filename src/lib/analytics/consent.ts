@@ -1,7 +1,7 @@
 import type { AnalyticsSettings } from './types';
 import { logger } from '@/lib/logger';
 
-const ANALYTICS_STORAGE_KEY = 'opcode-analytics-settings';
+const ANALYTICS_STORAGE_KEY = 'codeinterfacex-analytics-settings';
 
 export class ConsentManager {
   private static instance: ConsentManager;

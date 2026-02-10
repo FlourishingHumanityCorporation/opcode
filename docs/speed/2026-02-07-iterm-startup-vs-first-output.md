@@ -1,7 +1,7 @@
 # Speed Exploration: Claude Startup vs First Model Output (iTerm)
 
 Date: 2026-02-07
-Repo: `/Users/paulrohde/CodeProjects/external/opcode`
+Repo: `/Users/paulrohde/CodeProjects/external/codeinterfacex`
 
 ## Goal
 Determine whether observed latency comes from:

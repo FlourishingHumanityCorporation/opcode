@@ -32,12 +32,12 @@ function addCommonMocks(sandbox: ScriptSandbox): void {
     `
 if [[ "$1" == "print" ]]; then
   case "$2" in
-    *com.opcode.web|*com.opcode.tailscaled-userspace)
+    *com.codeinterfacex.web|*com.codeinterfacex.tailscaled-userspace)
       exit 1
       ;;
-    *com.paulrohde.opcode-web)
+    *com.paulrohde.codeinterfacex-web)
       cat <<OUT
-path = /Users/paulrohde/Library/LaunchAgents/com.paulrohde.opcode-web.plist
+path = /Users/paulrohde/Library/LaunchAgents/com.paulrohde.codeinterfacex-web.plist
 state = running
 pid = 111
 OUT
@@ -62,7 +62,7 @@ exit 0
     `
 cat <<OUT
 COMMAND     PID      USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
-opcode-we 12345 user      9u  IPv4 0x1      0t0  TCP *:8090 (LISTEN)
+codeinterfacex-we 12345 user      9u  IPv4 0x1      0t0  TCP *:8090 (LISTEN)
 OUT
 `,
   );
@@ -130,7 +130,7 @@ exit 0
 
     expect(result.status).toBe(0);
     const output = `${result.stdout}${result.stderr}`;
-    expect(output).toContain("com.paulrohde.opcode-web.plist");
+    expect(output).toContain("com.paulrohde.codeinterfacex-web.plist");
     expect(output).toContain("com.paulrohde.tailscaled-userspace.plist");
     expect(output).toContain('{"success":true,"data":[{"id":"local"}]}');
     expect(output).toContain('{"success":true,"data":[{"id":"lan"}]}');

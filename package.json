@@ -1,5 +1,5 @@
 {
-  "name": "opcode",
+  "name": "codeinterfacex",
   "private": true,
   "version": "0.2.1",
   "license": "AGPL-3.0",
@@ -17,6 +17,7 @@
     "tauri": "tauri",
     "build:dmg": "tauri build --bundles dmg",
     "check": "tsc --noEmit && cd src-tauri && cargo check",
+    "check:legacy-identity": "bash scripts/check-legacy-identity.sh",
     "test:unit": "vitest run",
     "test:attention": "vitest run src/services/agentAttention.test.ts src/services/agentAttention.notifications.test.ts src/services/agentAttentionStreamBridge.test.ts src/services/agentAttention.fallbackToast.test.ts src/components/TabContent.test.ts src/components/ProviderSessionPane.test.ts src/components/AgentExecution.attention.test.ts src/components/AgentRunOutputViewer.attention.test.ts src/components/provider-session-pane/sessionEventBus.test.ts src/components/TerminalPaneSurface.test.ts src/components/ProjectWorkspaceView.test.ts src/components/TabManager.test.ts",
     "test:unit:watch": "vitest",

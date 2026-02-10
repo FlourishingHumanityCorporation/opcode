@@ -140,17 +140,17 @@ describe("setup-remote-access-macos.sh", () => {
 
     expect(result.status).toBe(0);
     const stdout = result.stdout ?? "";
-    expect(stdout).toContain("Opcode web URL (local): http://127.0.0.1:8090");
-    expect(stdout).toContain("Opcode web URL (LAN):   http://10.0.0.52:8090");
+    expect(stdout).toContain("CodeInterfaceX web URL (local): http://127.0.0.1:8090");
+    expect(stdout).toContain("CodeInterfaceX web URL (LAN):   http://10.0.0.52:8090");
     expect(stdout).toContain("Tailscale needs login. Run:");
 
     const opcodePlist = path.join(
       sandbox.homeDir,
-      "Library/LaunchAgents/com.opcode.web.plist",
+      "Library/LaunchAgents/com.codeinterfacex.web.plist",
     );
     const tailscalePlist = path.join(
       sandbox.homeDir,
-      "Library/LaunchAgents/com.opcode.tailscaled-userspace.plist",
+      "Library/LaunchAgents/com.codeinterfacex.tailscaled-userspace.plist",
     );
     expect(existsSync(opcodePlist)).toBe(true);
     expect(existsSync(tailscalePlist)).toBe(true);
@@ -158,13 +158,13 @@ describe("setup-remote-access-macos.sh", () => {
     const opcodePlistContent = readFileSync(opcodePlist, "utf8");
     const tailscalePlistContent = readFileSync(tailscalePlist, "utf8");
     expect(opcodePlistContent).toContain("<string>8090</string>");
-    expect(opcodePlistContent).toContain("<string>com.opcode.web</string>");
-    expect(tailscalePlistContent).toContain("<string>com.opcode.tailscaled-userspace</string>");
+    expect(opcodePlistContent).toContain("<string>com.codeinterfacex.web</string>");
+    expect(tailscalePlistContent).toContain("<string>com.codeinterfacex.tailscaled-userspace</string>");
 
     const commandLog = readCommandLog(sandbox);
     expect(commandLog).toContain("mock_launchctl bootstrap");
-    expect(commandLog).toContain("com.opcode.web.plist");
-    expect(commandLog).toContain("com.opcode.tailscaled-userspace.plist");
+    expect(commandLog).toContain("com.codeinterfacex.web.plist");
+    expect(commandLog).toContain("com.codeinterfacex.tailscaled-userspace.plist");
   });
 
   it("fails with clear guidance when Homebrew is unavailable", () => {
@@ -223,7 +223,7 @@ describe("setup-remote-access-macos.sh", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout ?? "").toContain(
-      "Opcode web URL (tailnet): http://100.64.1.99:8090",
+      "CodeInterfaceX web URL (tailnet): http://100.64.1.99:8090",
     );
   });
 });

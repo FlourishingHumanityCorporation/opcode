@@ -202,7 +202,7 @@ test.describe("Agent attention real stream flow smoke", () => {
     await page.addInitScript(() => {
       localStorage.removeItem("opcode_workspace_v3");
       localStorage.removeItem("opcode_tabs_v2");
-      localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+      localStorage.setItem("codeinterfacex.smoke.projectPath", "/tmp/codeinterfacex-smoke-project");
     });
 
     await page.goto("/");
@@ -215,9 +215,9 @@ test.describe("Agent attention real stream flow smoke", () => {
     const ids = await getWorkspaceAndTerminalIds(page);
     const workspaceTab = page.locator(`[data-testid="workspace-tab-${ids.workspaceId}"]`);
 
-    await dispatchOpenSession(page, sessionId, "/tmp/opcode-smoke-project");
+    await dispatchOpenSession(page, sessionId, "/tmp/codeinterfacex-smoke-project");
     await page.waitForTimeout(250);
-    await dispatchOpenSession(page, sessionId, "/tmp/opcode-smoke-project");
+    await dispatchOpenSession(page, sessionId, "/tmp/codeinterfacex-smoke-project");
     await waitForSessionHydrated(page, ids.workspaceId, sessionId);
 
     await page.waitForTimeout(1200);

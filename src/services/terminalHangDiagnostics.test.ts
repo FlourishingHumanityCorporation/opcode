@@ -12,8 +12,8 @@ describe("terminalHangDiagnostics", () => {
   afterEach(() => {
     clearTerminalEventSnapshot();
     setTerminalWorkspaceSnapshotProvider(null);
-    localStorage.removeItem("opcode.terminal.debug");
-    delete (globalThis as any).__OPCODE_DEBUG_LOGS__;
+    localStorage.removeItem("codeinterfacex.terminal.debug");
+    delete (globalThis as any).__CODEINTERFACEX_DEBUG_LOGS__;
   });
 
   it("records terminal events even when debug mode is disabled", () => {
@@ -24,7 +24,7 @@ describe("terminalHangDiagnostics", () => {
   });
 
   it("records and truncates terminal events in debug mode", () => {
-    localStorage.setItem("opcode.terminal.debug", "1");
+    localStorage.setItem("codeinterfacex.terminal.debug", "1");
     for (let index = 0; index < 405; index += 1) {
       recordTerminalEvent({
         event: `event-${index}`,

@@ -4,7 +4,9 @@ import type { AgentAttentionEventDetail } from "@/services/agentAttention";
 export function mapAgentAttentionKindToStatus(
   kind: AgentAttentionEventDetail["kind"]
 ): TerminalTab["status"] {
-  return kind === "needs_input" ? "attention" : "complete";
+  if (kind === "needs_input") return "attention";
+  if (kind === "running") return "running";
+  return "complete";
 }
 
 function findTerminalWorkspace(

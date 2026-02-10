@@ -4,7 +4,7 @@ export const HOT_REFRESH_ENABLED_KEY = "hot_refresh_enabled";
 export const HOT_REFRESH_SCOPE_KEY = "hot_refresh_scope";
 export const HOT_REFRESH_WATCH_PATHS_KEY = "hot_refresh_watch_paths";
 export const HOT_REFRESH_PREFERENCES_CHANGED_EVENT =
-  "opcode:hot-refresh-preferences-changed";
+  "codeinterfacex:hot-refresh-preferences-changed";
 export const HOT_REFRESH_RUNTIME_SCOPE_WARNING =
   "Hot refresh now tries to auto-converge existing windows/tabs after behavior changes. If a view still seems stale, open a new tab/window or restart.";
 export const HOT_REFRESH_STALE_RUNTIME_ACTION =

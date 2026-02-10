@@ -1335,7 +1335,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         }
       }
 
-      const smokePath = window.localStorage.getItem('opcode.smoke.projectPath');
+      const smokePath = window.localStorage.getItem('codeinterfacex.smoke.projectPath');
       if (smokePath && smokePath.trim()) {
         return smokePath.trim();
       }

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Settings, Minus, Square, X, Bot, BarChart3, FileText, Network, Info, MoreVertical, Bug } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { TooltipProvider, TooltipSimple } from '@/components/ui/tooltip-modern';
+import { NotificationCenter } from '@/components/NotificationCenter';
 import { logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 import { logger } from '@/lib/logger';
 
@@ -14,6 +15,7 @@ interface CustomTitlebarProps {
   onMCPClick?: () => void;
   onDiagnosticsClick?: () => void;
   onInfoClick?: () => void;
+  onNavigateToTerminal?: (terminalTabId: string) => void;
 }
 
 export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
@@ -23,7 +25,8 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
   onClaudeClick,
   onMCPClick,
   onDiagnosticsClick,
-  onInfoClick
+  onInfoClick,
+  onNavigateToTerminal
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -189,6 +192,13 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
             </TooltipSimple>
           )}
         </div>
+
+        {/* Notification center */}
+        <TooltipSimple content="Notifications" side="bottom">
+          <span>
+            <NotificationCenter onNavigateToTerminal={onNavigateToTerminal} />
+          </span>
+        </TooltipSimple>
 
         {/* Visual separator */}
         <div className="w-px h-3.5 bg-[var(--color-chrome-border)]" />

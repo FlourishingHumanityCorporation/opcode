@@ -1,15 +1,25 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { logger } from '@/lib/logger';
+import { readNotificationPreferencesFromStorage } from "@/lib/notificationPreferences";
+import { notificationHistory } from "@/services/notificationHistory";
+import { playNotificationSound } from "@/services/notificationSound";
 
-export const OPCODE_AGENT_ATTENTION_EVENT = "opcode-agent-attention";
-export const OPCODE_AGENT_ATTENTION_FALLBACK_EVENT =
-  "opcode-agent-attention-fallback";
+export const CODEINTERFACEX_AGENT_ATTENTION_EVENT = "codeinterfacex-agent-attention";
+export const CODEINTERFACEX_AGENT_ATTENTION_FALLBACK_EVENT =
+  "codeinterfacex-agent-attention-fallback";
 
-export type AgentAttentionKind = "done" | "needs_input";
+export type AgentAttentionKind = "done" | "needs_input" | "running";
 export type AgentAttentionSource =
   | "provider_session"
   | "agent_execution"
   | "agent_run_output";
+
+export type FocusContext = "same_tab" | "different_tab" | "unfocused";
+
+export type ActiveTabProvider = () => {
+  activeWorkspaceId: string | null;
+  activeTerminalTabId: string | null;
+} | null;
 
 export interface AgentAttentionEventDetail {
   kind: AgentAttentionKind;
@@ -47,6 +57,7 @@ export interface EmitAgentAttentionInput {
 const ATTENTION_DEDUPE_WINDOW_MS = 4500;
 const NEEDS_INPUT_THROTTLE_MS = 12000;
 const ATTENTION_DEDUPE_LIMIT = 64;
+const BATCH_WINDOW_MS = 2000;
 
 const genericDedupeByKey = new Map<string, number>();
 const needsInputByTerminal = new Map<string, number>();
@@ -58,6 +69,38 @@ let focusListenerRefCount = 0;
 let windowFocused = true;
 let unreadBadgeCount = 0;
 let notificationPermissionRequested = false;
+let activeTabProvider: ActiveTabProvider | null = null;
+
+interface PendingBatch {
+  events: AgentAttentionEventDetail[];
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pendingBatch = new Map<string, PendingBatch>();
+
+export function setActiveTabProvider(provider: ActiveTabProvider): void {
+  activeTabProvider = provider;
+}
+
+export function computeFocusContext(detail: AgentAttentionEventDetail): FocusContext {
+  if (!windowFocused) return "unfocused";
+  const ctx = activeTabProvider?.();
+  if (!ctx) return "same_tab";
+  if (
+    detail.terminalTabId &&
+    ctx.activeTerminalTabId === detail.terminalTabId
+  ) {
+    return "same_tab";
+  }
+  if (
+    detail.workspaceId &&
+    ctx.activeWorkspaceId === detail.workspaceId &&
+    !detail.terminalTabId
+  ) {
+    return "same_tab";
+  }
+  return "different_tab";
+}
 
 interface DesktopNotificationResult {
   attempted: boolean;
@@ -90,6 +133,7 @@ function truncate(value: string, max = 180): string {
 }
 
 function defaultTitleForKind(kind: AgentAttentionKind): string {
+  if (kind === "running") return "Agent running";
   return kind === "done" ? "Agent done" : "Agent needs input";
 }
 
@@ -97,7 +141,18 @@ function defaultBodyForKind(kind: AgentAttentionKind): string {
   if (kind === "done") {
     return "A run completed successfully.";
   }
+  if (kind === "running") {
+    return "Processing...";
+  }
   return "The agent is waiting for your approval or decision.";
+}
+
+function isKindEnabledByPreferences(kind: AgentAttentionKind): boolean {
+  if (kind === "running") return true;
+  const prefs = readNotificationPreferencesFromStorage();
+  if (kind === "done") return prefs.enabled_done;
+  if (kind === "needs_input") return prefs.enabled_needs_input;
+  return true;
 }
 
 export function mapAgentAttentionFallbackToToast(
@@ -238,7 +293,7 @@ function dispatchAttentionEvent(detail: AgentAttentionEventDetail): void {
     return;
   }
   window.dispatchEvent(
-    new CustomEvent<AgentAttentionEventDetail>(OPCODE_AGENT_ATTENTION_EVENT, {
+    new CustomEvent<AgentAttentionEventDetail>(CODEINTERFACEX_AGENT_ATTENTION_EVENT, {
       detail,
     })
   );
@@ -260,12 +315,75 @@ function dispatchAttentionFallbackEvent(detail: AgentAttentionEventDetail): void
 
   window.dispatchEvent(
     new CustomEvent<AgentAttentionFallbackEventDetail>(
-      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      CODEINTERFACEX_AGENT_ATTENTION_FALLBACK_EVENT,
       {
         detail: fallbackDetail,
       }
     )
   );
+}
+
+function createConsolidatedPayload(
+  events: AgentAttentionEventDetail[]
+): AgentAttentionEventDetail {
+  const first = events[0];
+  const count = events.length;
+  const kindLabel = first.kind === "done" ? "runs completed" : "inputs needed";
+  return {
+    kind: first.kind,
+    source: first.source,
+    title: `${count} ${kindLabel}`,
+    body: `${count} ${kindLabel} while batching.`,
+    timestamp: Date.now(),
+  };
+}
+
+function flushBatch(key: string): void {
+  const batch = pendingBatch.get(key);
+  pendingBatch.delete(key);
+  if (!batch || batch.events.length <= 1) return;
+
+  const consolidated = createConsolidatedPayload(batch.events);
+  const focusCtx = computeFocusContext(consolidated);
+
+  dispatchAttentionEvent(consolidated);
+
+  notificationHistory.add({
+    id: crypto.randomUUID(),
+    kind: consolidated.kind,
+    source: consolidated.source,
+    title: consolidated.title,
+    body: consolidated.body,
+    focusContext: focusCtx,
+    timestamp: consolidated.timestamp,
+    read: focusCtx === "same_tab",
+  });
+
+  if (focusCtx === "unfocused") {
+    unreadBadgeCount += 1;
+    void setBadgeCountSafely(unreadBadgeCount);
+    void maybeShowDesktopNotification(consolidated).then((result) => {
+      if (!result.delivered) {
+        dispatchAttentionFallbackEvent(consolidated);
+      }
+    });
+    void playNotificationSound(consolidated.kind);
+  }
+}
+
+function tryBatch(detail: AgentAttentionEventDetail): boolean {
+  const key = `${detail.kind}|${detail.source}`;
+  const existing = pendingBatch.get(key);
+  if (existing) {
+    existing.events.push(detail);
+    return true;
+  }
+  const batch: PendingBatch = {
+    events: [detail],
+    timer: setTimeout(() => flushBatch(key), BATCH_WINDOW_MS),
+  };
+  pendingBatch.set(key, batch);
+  return false;
 }
 
 export function initAgentAttention(): () => void {
@@ -286,6 +404,11 @@ export function initAgentAttention(): () => void {
     focusTrackingInFlight = false;
     windowFocused = true;
     unreadBadgeCount = 0;
+    activeTabProvider = null;
+    for (const [, batch] of pendingBatch) {
+      clearTimeout(batch.timer);
+    }
+    pendingBatch.clear();
     void setBadgeCountSafely(0);
   };
 }
@@ -317,8 +440,57 @@ export async function emitAgentAttention(
 ): Promise<boolean> {
   await ensureFocusTracking();
   const detail = normalizeIncomingAttention(input);
+
+  // Running kind: always dispatch DOM event for tab UI, skip everything else
+  if (detail.kind === "running") {
+    if (shouldSuppress(detail)) return false;
+    dispatchAttentionEvent(detail);
+    return true;
+  }
+
+  // Check user preference gating
+  if (!isKindEnabledByPreferences(detail.kind)) {
+    // Still dispatch DOM event so tab badges update
+    dispatchAttentionEvent(detail);
+    return true;
+  }
+
   if (shouldSuppress(detail)) {
     return false;
+  }
+
+  const focusCtx = computeFocusContext(detail);
+
+  // Always dispatch DOM event (tab badges need it regardless of focus)
+  dispatchAttentionEvent(detail);
+
+  // Record in notification history
+  notificationHistory.add({
+    id: crypto.randomUUID(),
+    kind: detail.kind,
+    source: detail.source,
+    title: detail.title,
+    body: detail.body,
+    terminalTabId: detail.terminalTabId,
+    focusContext: focusCtx,
+    timestamp: detail.timestamp,
+    read: focusCtx === "same_tab",
+  });
+
+  // same_tab: no OS notification, no badge, no sound
+  if (focusCtx === "same_tab") {
+    return true;
+  }
+
+  // different_tab: badge only (no OS notification, no toast, no sound)
+  if (focusCtx === "different_tab") {
+    return true;
+  }
+
+  // unfocused: full notification pipeline with batching
+  if (tryBatch(detail)) {
+    // Absorbed into existing batch — will consolidate on flush
+    return true;
   }
 
   const deliveryStatus: AgentAttentionDeliveryStatus = {
@@ -327,21 +499,19 @@ export async function emitAgentAttention(
     fallbackDispatched: false,
   };
 
-  dispatchAttentionEvent(detail);
-
-  if (!windowFocused) {
-    unreadBadgeCount += 1;
-    await setBadgeCountSafely(unreadBadgeCount);
-  }
+  unreadBadgeCount += 1;
+  await setBadgeCountSafely(unreadBadgeCount);
 
   const desktopResult = await maybeShowDesktopNotification(detail);
   deliveryStatus.desktopAttempted = desktopResult.attempted;
   deliveryStatus.desktopDelivered = desktopResult.delivered;
 
-  if (!windowFocused && !desktopResult.delivered) {
+  if (!desktopResult.delivered) {
     dispatchAttentionFallbackEvent(detail);
     deliveryStatus.fallbackDispatched = true;
   }
+
+  void playNotificationSound(detail.kind);
 
   void deliveryStatus;
   return true;
@@ -452,6 +622,35 @@ export function shouldTriggerNeedsInput(text: string): boolean {
   return NEEDS_INPUT_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
+function hasAskUserQuestionToolSignal(value: unknown, seen = new Set<object>()): boolean {
+  if (!value || typeof value !== "object") return false;
+
+  const obj = value as Record<string, unknown>;
+  if (seen.has(obj)) return false;
+  seen.add(obj);
+
+  const tool = typeof obj.tool === "string" ? obj.tool : "";
+  const name = typeof obj.name === "string" ? obj.name : "";
+  if (tool === "AskUserQuestion" || name === "AskUserQuestion") {
+    return true;
+  }
+
+  const candidates: unknown[] = [
+    obj.content, obj.message, obj.item, obj.payload,
+    obj.tool_uses, obj.tools,
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      for (const entry of candidate) {
+        if (hasAskUserQuestionToolSignal(entry, seen)) return true;
+      }
+      continue;
+    }
+    if (hasAskUserQuestionToolSignal(candidate, seen)) return true;
+  }
+  return false;
+}
+
 function hasNeedsInputToolSignal(
   value: unknown,
   seen = new Set<object>()
@@ -520,6 +719,9 @@ function hasNeedsInputToolSignal(
 
 export function shouldTriggerNeedsInputFromMessage(message: unknown): boolean {
   if (hasNeedsInputToolSignal(message)) {
+    return true;
+  }
+  if (hasAskUserQuestionToolSignal(message)) {
     return true;
   }
   return shouldTriggerNeedsInput(extractAttentionText(message));

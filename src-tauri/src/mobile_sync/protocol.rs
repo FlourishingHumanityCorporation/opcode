@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const PROTOCOL_VERSION: u8 = 1;
-pub const VERSION_HEADER: &str = "x-opcode-sync-version";
+pub const VERSION_HEADER: &str = "x-codeinterfacex-sync-version";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

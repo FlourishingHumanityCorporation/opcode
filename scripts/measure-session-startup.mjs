@@ -11,7 +11,7 @@ function parseArgs(argv) {
     benchmarkKind: "startup",
     runs: 1,
     timeoutMs: 120_000,
-    providerBinary: env.OPCODE_PROVIDER_BIN || "claude",
+    providerBinary: env.CODEINTERFACEX_PROVIDER_BIN || "claude",
     includePartialMessages: false,
     failOnSlowMs: null,
     failOnAssistantSlowMs: null,

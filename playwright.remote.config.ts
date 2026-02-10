@@ -22,7 +22,7 @@ export default defineConfig({
         webServer: {
           command:
             process.env.REMOTE_WEB_SERVER_COMMAND ??
-            "npm run build && cd src-tauri && cargo run --bin opcode-web -- --port 8090",
+            "npm run build && cd src-tauri && cargo run --bin codeinterfacex-web -- --port 8090",
           url: baseURL,
           reuseExistingServer: !process.env.CI,
           timeout: 600_000,

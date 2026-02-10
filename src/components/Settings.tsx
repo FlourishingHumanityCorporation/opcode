@@ -48,6 +48,11 @@ import {
   loadNativeTerminalStartCommandPreference,
   saveNativeTerminalStartCommandPreference,
 } from "@/lib/uiPreferences";
+import {
+  loadNotificationPreferences,
+  saveNotificationPreferences,
+  type NotificationPreferences,
+} from "@/lib/notificationPreferences";
 
 interface SettingsProps {
   /**
@@ -118,6 +123,14 @@ export const Settings: React.FC<SettingsProps> = ({
   const [nativeTerminalStartCommand, setNativeTerminalStartCommand] = useState("");
   const [savingNativeTerminalStartCommand, setSavingNativeTerminalStartCommand] = useState(false);
 
+  // Notification preferences state
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>({
+    enabled_done: true,
+    enabled_needs_input: true,
+    sound_enabled: false,
+    sound_kind: "needs_input_only",
+  });
+
   // Provider detection state
   const [detectedAgents, setDetectedAgents] = useState<Array<{ provider_id: string; binary_path: string; version: string | null; source: string }>>([]);
   const [detectingAgents, setDetectingAgents] = useState(false);
@@ -137,6 +150,7 @@ export const Settings: React.FC<SettingsProps> = ({
     loadMobileSyncStatus();
     void loadHotRefreshSettings();
     loadNativeTerminalStartCommandPreference().then(setNativeTerminalStartCommand);
+    loadNotificationPreferences().then(setNotifPrefs);
     // Load tab persistence setting
     setTabPersistenceEnabled(TabPersistenceService.isEnabled());
   }, []);
@@ -887,13 +901,81 @@ export const Settings: React.FC<SettingsProps> = ({
 
                     {/* Separator */}
                     <div className="border-t border-border pt-4 mt-6" />
-                    
+
+                    {/* Notifications Section */}
+                    <div className="space-y-4">
+                      <h4 className="text-label">Notifications</h4>
+
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5 flex-1">
+                          <Label htmlFor="notif-done">Notify on completion</Label>
+                          <p className="text-caption text-muted-foreground">
+                            Show a notification when an agent run finishes
+                          </p>
+                        </div>
+                        <Switch
+                          id="notif-done"
+                          checked={notifPrefs.enabled_done}
+                          onCheckedChange={async (checked) => {
+                            const updated = { ...notifPrefs, enabled_done: checked };
+                            setNotifPrefs(updated);
+                            await saveNotificationPreferences(updated);
+                            trackEvent.settingsChanged("notification_done", checked);
+                            setToast({ message: checked ? "Completion notifications enabled" : "Completion notifications disabled", type: "success" });
+                          }}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5 flex-1">
+                          <Label htmlFor="notif-needs-input">Notify when input needed</Label>
+                          <p className="text-caption text-muted-foreground">
+                            Show a notification when an agent needs your input
+                          </p>
+                        </div>
+                        <Switch
+                          id="notif-needs-input"
+                          checked={notifPrefs.enabled_needs_input}
+                          onCheckedChange={async (checked) => {
+                            const updated = { ...notifPrefs, enabled_needs_input: checked };
+                            setNotifPrefs(updated);
+                            await saveNotificationPreferences(updated);
+                            trackEvent.settingsChanged("notification_needs_input", checked);
+                            setToast({ message: checked ? "Input notifications enabled" : "Input notifications disabled", type: "success" });
+                          }}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5 flex-1">
+                          <Label htmlFor="notif-sound">Play sound</Label>
+                          <p className="text-caption text-muted-foreground">
+                            Play an audio cue for notifications (needs-input only by default)
+                          </p>
+                        </div>
+                        <Switch
+                          id="notif-sound"
+                          checked={notifPrefs.sound_enabled}
+                          onCheckedChange={async (checked) => {
+                            const updated = { ...notifPrefs, sound_enabled: checked };
+                            setNotifPrefs(updated);
+                            await saveNotificationPreferences(updated);
+                            trackEvent.settingsChanged("notification_sound", checked);
+                            setToast({ message: checked ? "Notification sound enabled" : "Notification sound disabled", type: "success" });
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Separator */}
+                    <div className="border-t border-border pt-4 mt-6" />
+
                     {/* Analytics Toggle */}
                     <div className="flex items-center justify-between">
                       <div className="space-y-1">
                         <Label htmlFor="analytics-enabled">Enable Analytics</Label>
                         <p className="text-caption text-muted-foreground">
-                          Help improve opcode by sharing anonymous usage data
+                          Help improve codeinterfacex by sharing anonymous usage data
                         </p>
                       </div>
                       <Switch

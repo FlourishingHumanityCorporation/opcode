@@ -713,7 +713,7 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
                   </p>
                   {(usageIndexStatus?.state === "error" || usageIndexError) && (
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      Log: ~/.opcode-usage-debug.log
+                      Log: ~/.codeinterfacex-usage-debug.log
                     </p>
                   )}
                   {usageIndexStatus?.current_file && usageIndexStatus.state === "indexing" && (

@@ -12,7 +12,7 @@ interface NativeTelemetry {
   startedTerminalIds: string[];
 }
 
-const PROJECT_PATH = "/tmp/opcode-smoke-project";
+const PROJECT_PATH = "/tmp/codeinterfacex-smoke-project";
 
 function successPayload<T>(data: T) {
   return JSON.stringify({ success: true, data });
@@ -173,7 +173,7 @@ async function installFakeTauriEventBridge(page: Page) {
       },
     };
 
-    (window as any).__OPCODE_SMOKE_EMIT_TAURI_EVENT__ = (eventName: string, payload: unknown) => {
+    (window as any).__CODEINTERFACEX_SMOKE_EMIT_TAURI_EVENT__ = (eventName: string, payload: unknown) => {
       listeners.forEach((listener) => {
         if (listener.event !== eventName) {
           return;
@@ -188,7 +188,7 @@ async function installFakeTauriEventBridge(page: Page) {
 async function bootstrapWorkspace(page: Page, options: { nativeMode: boolean }) {
   await page.addInitScript(({ projectPath, nativeMode }) => {
     localStorage.clear();
-    localStorage.setItem("opcode.smoke.projectPath", projectPath);
+    localStorage.setItem("codeinterfacex.smoke.projectPath", projectPath);
     if (nativeMode) {
       localStorage.setItem("native_terminal_mode", "true");
       localStorage.setItem("app_setting:native_terminal_mode", "true");
@@ -324,7 +324,7 @@ test.describe("Explorer interaction smoke", () => {
 
     const terminalId = telemetry.startedTerminalIds[telemetry.startedTerminalIds.length - 1];
     await page.evaluate((id) => {
-      const emit = (window as any).__OPCODE_SMOKE_EMIT_TAURI_EVENT__ as
+      const emit = (window as any).__CODEINTERFACEX_SMOKE_EMIT_TAURI_EVENT__ as
         | ((eventName: string, payload: unknown) => void)
         | undefined;
       if (!emit) {

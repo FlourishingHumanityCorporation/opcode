@@ -1,13 +1,13 @@
-# Remote Access on macOS (Opcode Web + Tailscale)
+# Remote Access on macOS (CodeInterfaceX Web + Tailscale)
 
-This guide configures a persistent Opcode web server instance and private remote access over Tailscale.
+This guide configures a persistent CodeInterfaceX web server instance and private remote access over Tailscale.
 
 ## What this sets up
 
-1. Builds frontend assets and `opcode-web`.
-2. Runs `opcode-web` on port `8090` via `launchd` user agent.
+1. Builds frontend assets and `codeinterfacex-web`.
+2. Runs `codeinterfacex-web` on port `8090` via `launchd` user agent.
 3. Runs `tailscaled` in userspace mode via `launchd` user agent.
-4. Leaves desktop `opcode` app behavior unchanged.
+4. Leaves desktop `codeinterfacex` app behavior unchanged.
 
 ## Quick start
 
@@ -50,12 +50,12 @@ The contract suite uses simulated system binaries and does not touch real launch
 
 ## Launch agent files created
 
-1. `~/Library/LaunchAgents/com.opcode.web.plist`
-2. `~/Library/LaunchAgents/com.opcode.tailscaled-userspace.plist`
+1. `~/Library/LaunchAgents/com.codeinterfacex.web.plist`
+2. `~/Library/LaunchAgents/com.codeinterfacex.tailscaled-userspace.plist`
 
 ## Logs
 
-1. `~/Library/Logs/opcode-web/stdout.log`
-2. `~/Library/Logs/opcode-web/stderr.log`
+1. `~/Library/Logs/codeinterfacex-web/stdout.log`
+2. `~/Library/Logs/codeinterfacex-web/stderr.log`
 3. `~/Library/Logs/tailscale/tailscaled.out.log`
 4. `~/Library/Logs/tailscale/tailscaled.err.log`

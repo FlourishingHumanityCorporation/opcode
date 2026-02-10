@@ -13,22 +13,22 @@ const repoRoot = path.resolve(__dirname, "..");
 
 const WINDOW_WIDTH_KEY = "window_width";
 const WINDOW_HEIGHT_KEY = "window_height";
-const APP_NAME = "opcode";
-const PROCESS_NAME = "opcode";
+const APP_NAME = "codeinterfacex";
+const PROCESS_NAME = "codeinterfacex";
 
-const defaultBinaryPath = path.resolve(repoRoot, "src-tauri/target/debug/opcode");
+const defaultBinaryPath = path.resolve(repoRoot, "src-tauri/target/debug/codeinterfacex");
 const defaultDbPath = path.join(
   os.homedir(),
   "Library",
   "Application Support",
-  "opcode.asterisk.so",
+  "com.flourishinghumanity.codeinterfacex",
   "agents.db"
 );
 
-const binaryPath = process.env.OPCODE_WINDOW_TEST_BINARY || defaultBinaryPath;
-const dbPath = process.env.OPCODE_WINDOW_TEST_DB_PATH || defaultDbPath;
-const skipBuild = process.env.OPCODE_WINDOW_TEST_SKIP_BUILD === "1";
-const tolerancePx = Number.parseInt(process.env.OPCODE_WINDOW_TEST_TOLERANCE_PX || "20", 10);
+const binaryPath = process.env.CODEINTERFACEX_WINDOW_TEST_BINARY || defaultBinaryPath;
+const dbPath = process.env.CODEINTERFACEX_WINDOW_TEST_DB_PATH || defaultDbPath;
+const skipBuild = process.env.CODEINTERFACEX_WINDOW_TEST_SKIP_BUILD === "1";
+const tolerancePx = Number.parseInt(process.env.CODEINTERFACEX_WINDOW_TEST_TOLERANCE_PX || "20", 10);
 
 const scenarioOneTarget = { width: 980, height: 700 };
 const scenarioTwoTarget = { width: 1120, height: 760 };
@@ -624,7 +624,7 @@ function preflightChecks() {
   }
 
   if (!Number.isFinite(tolerancePx) || tolerancePx < 0) {
-    fail(`Invalid OPCODE_WINDOW_TEST_TOLERANCE_PX: ${String(process.env.OPCODE_WINDOW_TEST_TOLERANCE_PX)}`);
+    fail(`Invalid CODEINTERFACEX_WINDOW_TEST_TOLERANCE_PX: ${String(process.env.CODEINTERFACEX_WINDOW_TEST_TOLERANCE_PX)}`);
   }
 
   checkToolExists("osascript");
@@ -638,7 +638,7 @@ function preflightChecks() {
 
 function maybeBuild() {
   if (skipBuild) {
-    logStep("Skipping build (OPCODE_WINDOW_TEST_SKIP_BUILD=1)");
+    logStep("Skipping build (CODEINTERFACEX_WINDOW_TEST_SKIP_BUILD=1)");
   } else {
     logStep("Building frontend and Tauri debug binary");
     runCommand("npm", ["run", "build"], { stdio: "inherit" });

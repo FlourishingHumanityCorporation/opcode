@@ -2,7 +2,7 @@ import { api } from "@/lib/api";
 import { logger } from '@/lib/logger';
 
 export const NATIVE_TERMINAL_START_COMMAND_KEY = "native_terminal_start_command";
-export const NATIVE_TERMINAL_START_COMMAND_EVENT = "opcode:native-terminal-start-command-changed";
+export const NATIVE_TERMINAL_START_COMMAND_EVENT = "codeinterfacex:native-terminal-start-command-changed";
 
 export function readNativeTerminalStartCommandFromStorage(): string {
   if (typeof window === "undefined" || !("localStorage" in window)) {

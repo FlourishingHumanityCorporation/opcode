@@ -28,13 +28,14 @@ import { useAppLifecycle, useTrackEvent } from "@/hooks";
 import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
 import {
   initAgentAttention,
+  setActiveTabProvider,
   mapAgentAttentionFallbackToToast,
-  OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+  CODEINTERFACEX_AGENT_ATTENTION_FALLBACK_EVENT,
   type AgentAttentionFallbackEventDetail,
 } from "@/services/agentAttention";
 import {
   initHotRefresh,
-  OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+  CODEINTERFACEX_HOT_REFRESH_DIAGNOSTIC_EVENT,
   type HotRefreshDiagnosticDetail,
 } from "@/services/hotRefresh";
 import { HOT_REFRESH_STALE_RUNTIME_ACTION } from "@/lib/hotRefreshPreferences";
@@ -61,7 +62,7 @@ type View =
  */
 function AppContent() {
   const [view, setView] = useState<View>("tabs");
-  const { createClaudeMdTab, createSettingsTab, createUsageTab, createMCPTab, createAgentsTab } = useTabState();
+  const { createClaudeMdTab, createSettingsTab, createUsageTab, createMCPTab, createAgentsTab, activeTabId: activeWorkspaceId, activeWorkspace } = useTabState();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -108,6 +109,14 @@ function AppContent() {
     };
   }, []);
 
+  // Wire active-tab context into the notification system for three-tier focus
+  useEffect(() => {
+    setActiveTabProvider(() => ({
+      activeWorkspaceId: activeWorkspaceId,
+      activeTerminalTabId: activeWorkspace?.activeTerminalTabId ?? null,
+    }));
+  }, [activeWorkspaceId, activeWorkspace?.activeTerminalTabId]);
+
   useEffect(() => {
     let teardownHotRefresh: (() => void) | null = null;
     let isDisposed = false;
@@ -144,12 +153,12 @@ function AppContent() {
     };
 
     window.addEventListener(
-      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      CODEINTERFACEX_AGENT_ATTENTION_FALLBACK_EVENT,
       handleAttentionFallback as EventListener
     );
     return () => {
       window.removeEventListener(
-        OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+        CODEINTERFACEX_AGENT_ATTENTION_FALLBACK_EVENT,
         handleAttentionFallback as EventListener
       );
     };
@@ -171,12 +180,12 @@ function AppContent() {
     };
 
     window.addEventListener(
-      OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+      CODEINTERFACEX_HOT_REFRESH_DIAGNOSTIC_EVENT,
       handleHotRefreshDiagnostic as EventListener
     );
     return () => {
       window.removeEventListener(
-        OPCODE_HOT_REFRESH_DIAGNOSTIC_EVENT,
+        CODEINTERFACEX_HOT_REFRESH_DIAGNOSTIC_EVENT,
         handleHotRefreshDiagnostic as EventListener
       );
     };
@@ -373,7 +382,7 @@ function AppContent() {
               >
                 <h1 className="text-4xl font-bold tracking-tight">
                   <span className="rotating-symbol"></span>
-                  Welcome to opcode
+                  Welcome to CodeInterfaceX
                 </h1>
               </motion.div>
 

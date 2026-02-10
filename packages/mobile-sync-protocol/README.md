@@ -1,3 +1,3 @@
-# @opcode/mobile-sync-protocol
+# @codeinterfacex/mobile-sync-protocol
 
-Shared protocol schema for Opcode desktop/mobile sync.
+Shared protocol schema for CodeInterfaceX desktop/mobile sync.

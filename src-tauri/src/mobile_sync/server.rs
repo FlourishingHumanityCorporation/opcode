@@ -512,7 +512,7 @@ mod tests {
     fn select_ws_auth_token_prefers_header_token() {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", HeaderValue::from_static("Bearer header-token"));
-        headers.insert("x-opcode-sync-version", HeaderValue::from_static("1"));
+        headers.insert("x-codeinterfacex-sync-version", HeaderValue::from_static("1"));
         let query = ws_query(Some("query-token"));
 
         let selection = select_ws_auth_token(&headers, &query).expect("selection should succeed");
@@ -581,7 +581,7 @@ mod tests {
     fn authenticate_request_with_revoked_token_maps_unauthorized() {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", HeaderValue::from_static("Bearer header-token"));
-        headers.insert("x-opcode-sync-version", HeaderValue::from_static("1"));
+        headers.insert("x-codeinterfacex-sync-version", HeaderValue::from_static("1"));
 
         let error = authenticate_request_with(&headers, |_token| {
             Err("Device has been revoked".to_string())
@@ -594,7 +594,7 @@ mod tests {
     #[test]
     fn authenticate_request_with_missing_bearer_token_maps_unauthorized() {
         let mut headers = HeaderMap::new();
-        headers.insert("x-opcode-sync-version", HeaderValue::from_static("1"));
+        headers.insert("x-codeinterfacex-sync-version", HeaderValue::from_static("1"));
 
         let error = authenticate_request_with(&headers, |_token| {
             Ok(authenticated_device())

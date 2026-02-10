@@ -29,6 +29,30 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: mockFns.sendNotification,
 }));
 
+vi.mock("@/services/notificationHistory", () => ({
+  notificationHistory: {
+    add: vi.fn(),
+    getAll: () => [],
+    getUnread: () => [],
+    getUnreadCount: () => 0,
+    markAllRead: vi.fn(),
+    clear: vi.fn(),
+  },
+}));
+
+vi.mock("@/services/notificationSound", () => ({
+  playNotificationSound: vi.fn(),
+}));
+
+vi.mock("@/lib/notificationPreferences", () => ({
+  readNotificationPreferencesFromStorage: vi.fn(() => ({
+    enabled_done: true,
+    enabled_needs_input: true,
+    sound_enabled: false,
+    sound_kind: "needs_input_only",
+  })),
+}));
+
 async function loadService() {
   return import("@/services/agentAttention");
 }
@@ -207,7 +231,7 @@ describe("agentAttention notifications and badge behavior", () => {
     const {
       initAgentAttention,
       emitAgentAttention,
-      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      CODEINTERFACEX_AGENT_ATTENTION_FALLBACK_EVENT,
     } = await loadService();
     const cleanup = initAgentAttention();
 
@@ -216,7 +240,7 @@ describe("agentAttention notifications and badge behavior", () => {
       fallbackEvents.push((event as CustomEvent<Record<string, unknown>>).detail);
     };
     window.addEventListener(
-      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      CODEINTERFACEX_AGENT_ATTENTION_FALLBACK_EVENT,
       onFallback as EventListener
     );
 
@@ -237,7 +261,7 @@ describe("agentAttention notifications and badge behavior", () => {
     );
 
     window.removeEventListener(
-      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      CODEINTERFACEX_AGENT_ATTENTION_FALLBACK_EVENT,
       onFallback as EventListener
     );
     cleanup();
@@ -251,7 +275,7 @@ describe("agentAttention notifications and badge behavior", () => {
     const {
       initAgentAttention,
       emitAgentAttention,
-      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      CODEINTERFACEX_AGENT_ATTENTION_FALLBACK_EVENT,
     } = await loadService();
     const cleanup = initAgentAttention();
 
@@ -260,7 +284,7 @@ describe("agentAttention notifications and badge behavior", () => {
       fallbackEvents.push((event as CustomEvent<Record<string, unknown>>).detail);
     };
     window.addEventListener(
-      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      CODEINTERFACEX_AGENT_ATTENTION_FALLBACK_EVENT,
       onFallback as EventListener
     );
 
@@ -280,7 +304,7 @@ describe("agentAttention notifications and badge behavior", () => {
     );
 
     window.removeEventListener(
-      OPCODE_AGENT_ATTENTION_FALLBACK_EVENT,
+      CODEINTERFACEX_AGENT_ATTENTION_FALLBACK_EVENT,
       onFallback as EventListener
     );
     cleanup();
@@ -379,7 +403,7 @@ describe("agentAttention notifications and badge behavior", () => {
   it("resets unread badge count when focus returns", async () => {
     mockState.isFocusedValue = false;
 
-    const { initAgentAttention, emitAgentAttention, OPCODE_AGENT_ATTENTION_EVENT } =
+    const { initAgentAttention, emitAgentAttention, CODEINTERFACEX_AGENT_ATTENTION_EVENT } =
       await loadService();
     const cleanup = initAgentAttention();
 
@@ -387,10 +411,23 @@ describe("agentAttention notifications and badge behavior", () => {
     const onAttention = (event: Event) => {
       dispatched.push((event as CustomEvent<AgentAttentionEventDetail>).detail);
     };
-    window.addEventListener(OPCODE_AGENT_ATTENTION_EVENT, onAttention as EventListener);
+    window.addEventListener(CODEINTERFACEX_AGENT_ATTENTION_EVENT, onAttention as EventListener);
 
-    await emitAttentionWithDefaults(emitAgentAttention, "First badge increment body.");
-    await emitAttentionWithDefaults(emitAgentAttention, "Second badge increment body.");
+    // Use different sources to avoid batch consolidation
+    await emitAgentAttention({
+      kind: "done",
+      workspaceId: "workspace-1",
+      terminalTabId: "terminal-1",
+      source: "provider_session",
+      body: "First badge increment body.",
+    });
+    await emitAgentAttention({
+      kind: "done",
+      workspaceId: "workspace-1",
+      terminalTabId: "terminal-1",
+      source: "agent_execution",
+      body: "Second badge increment body.",
+    });
 
     expect(mockFns.setBadgeCount).toHaveBeenCalledWith(1);
     expect(mockFns.setBadgeCount).toHaveBeenCalledWith(2);
@@ -405,7 +442,7 @@ describe("agentAttention notifications and badge behavior", () => {
     );
     expect(hasBadgeResetCall).toBe(true);
 
-    window.removeEventListener(OPCODE_AGENT_ATTENTION_EVENT, onAttention as EventListener);
+    window.removeEventListener(CODEINTERFACEX_AGENT_ATTENTION_EVENT, onAttention as EventListener);
     cleanup();
   });
 });
