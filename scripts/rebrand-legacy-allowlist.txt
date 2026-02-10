@@ -10,3 +10,4 @@ src/lib/rebrand.test.ts
 src/components/NFOCredits.tsx
 src/components/GitHubAgentBrowser.tsx
 src-tauri/src/commands/agents.rs
+docs/adr/0001-split-from-opcode.md
