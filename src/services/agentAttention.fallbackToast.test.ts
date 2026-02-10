@@ -7,6 +7,7 @@ describe("agentAttention fallback toast mapping", () => {
       mapAgentAttentionFallbackToToast({
         kind: "needs_input",
         source: "provider_session",
+        title: "Needs input",
         body: "Please choose an option.",
       })
     ).toEqual({
@@ -20,6 +21,7 @@ describe("agentAttention fallback toast mapping", () => {
       mapAgentAttentionFallbackToToast({
         kind: "done",
         source: "agent_execution",
+        title: "Done",
         body: "Run completed.",
       })
     ).toEqual({
@@ -33,6 +35,7 @@ describe("agentAttention fallback toast mapping", () => {
       mapAgentAttentionFallbackToToast({
         kind: "needs_input",
         source: "agent_execution",
+        title: "Needs input",
         body: "   ",
       })
     ).toEqual({

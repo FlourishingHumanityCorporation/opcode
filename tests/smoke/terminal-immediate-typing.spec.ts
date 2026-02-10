@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 
 interface TerminalTelemetry {
   startedTerminalIds: string[];
@@ -249,6 +249,114 @@ test.describe("Terminal immediate typing smoke", () => {
     await page.evaluate(() => {
       document.querySelector('[data-testid="smoke-stale-helper"]')?.remove();
     });
+  });
+
+  test("split-pane: helper-target pane activation keeps typing routed to selected pane", async ({
+    page,
+  }) => {
+    const telemetry: TerminalTelemetry = {
+      startedTerminalIds: [],
+      writes: [],
+    };
+
+    await setupTerminalApiMock(page, telemetry);
+    await page.addInitScript(() => {
+      localStorage.removeItem("opcode_workspace_v3");
+      localStorage.removeItem("opcode_tabs_v2");
+      localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+      localStorage.setItem("native_terminal_mode", "true");
+      localStorage.setItem("app_setting:native_terminal_mode", "true");
+    });
+
+    await bootstrapWorkspaceWithNativeTerminal(page);
+    await expect.poll(() => telemetry.startedTerminalIds.length).toBeGreaterThan(0);
+
+    const startsBeforeSplit = telemetry.startedTerminalIds.length;
+    await page.getByTitle("Split Right").first().click({ force: true });
+    await expect(page.locator('[data-testid^="workspace-pane-"]:visible')).toHaveCount(2);
+    await expect.poll(() => telemetry.startedTerminalIds.length).toBeGreaterThan(startsBeforeSplit);
+
+    const splitTerminalIds = Array.from(new Set(telemetry.startedTerminalIds));
+    expect(splitTerminalIds.length).toBeGreaterThanOrEqual(2);
+
+    const writesForTerminal = (terminalId: string) =>
+      telemetry.writes
+        .filter((entry) => entry.terminalId === terminalId)
+        .map((entry) => entry.data)
+        .join("");
+
+    const terminalForMarker = (marker: string) =>
+      splitTerminalIds.find((terminalId) => writesForTerminal(terminalId).includes(marker)) ?? null;
+
+    const initialMarker = "initial-split-active";
+    await page.keyboard.type(initialMarker);
+    await expect.poll(() => terminalForMarker(initialMarker)).not.toBeNull();
+
+    const initialActiveTerminalId = terminalForMarker(initialMarker);
+    expect(initialActiveTerminalId).not.toBeNull();
+    if (!initialActiveTerminalId) {
+      throw new Error("Unable to identify active terminal after split");
+    }
+
+    const panes = page.locator('[data-testid^="workspace-pane-"]:visible');
+    const leftPane = panes.first();
+    const rightPane = panes.last();
+
+    const focusPaneThroughHelper = async (pane: Locator, helperId: string, marker: string) => {
+      await pane.evaluate(
+        (element, id) => {
+          const helper = document.createElement("textarea");
+          helper.className = "xterm-helper-textarea";
+          helper.setAttribute("data-testid", id);
+          element.appendChild(helper);
+        },
+        helperId
+      );
+      await pane
+        .locator(`[data-testid="${helperId}"]`)
+        .dispatchEvent("mousedown", { bubbles: true, cancelable: true });
+      await pane
+        .locator(`[data-testid="${helperId}"]`)
+        .dispatchEvent("click", { bubbles: true, cancelable: true });
+      await page.keyboard.type(marker);
+      await expect.poll(() => terminalForMarker(marker)).not.toBeNull();
+      await pane.evaluate((element, id) => {
+        element.querySelector(`[data-testid="${id}"]`)?.remove();
+      }, helperId);
+      return terminalForMarker(marker);
+    };
+
+    const switchToInactiveMarker = "helper-switch-inactive";
+    let switchedTerminalId = await focusPaneThroughHelper(
+      leftPane,
+      "smoke-pane-helper-left",
+      switchToInactiveMarker
+    );
+    let paneUsedForActive = rightPane;
+
+    if (switchedTerminalId === initialActiveTerminalId || switchedTerminalId === null) {
+      switchedTerminalId = await focusPaneThroughHelper(
+        rightPane,
+        "smoke-pane-helper-right",
+        switchToInactiveMarker
+      );
+      paneUsedForActive = leftPane;
+    }
+
+    expect(switchedTerminalId).not.toBeNull();
+    expect(switchedTerminalId).not.toBe(initialActiveTerminalId);
+    expect(writesForTerminal(initialActiveTerminalId)).not.toContain(switchToInactiveMarker);
+
+    const switchBackMarker = "helper-switch-back-active";
+    const switchedBackTerminalId = await focusPaneThroughHelper(
+      paneUsedForActive,
+      "smoke-pane-helper-back",
+      switchBackMarker
+    );
+    expect(switchedBackTerminalId).toBe(initialActiveTerminalId);
+    if (switchedTerminalId) {
+      expect(writesForTerminal(switchedTerminalId)).not.toContain(switchBackMarker);
+    }
   });
 
   test("recovers from stale runtime terminal id when persistent session restore is active", async ({

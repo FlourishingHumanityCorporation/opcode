@@ -173,6 +173,26 @@ describe("EmbeddedTerminal lifecycle close behavior", () => {
     }
   });
 
+  it("activates pane on terminal viewport mouse down capture", async () => {
+    const onPaneActivate = vi.fn();
+    const { container, cleanup } = await renderEmbeddedTerminal({
+      onPaneActivate,
+    });
+
+    try {
+      const viewport = container.querySelector('div[tabindex="0"]') as HTMLDivElement | null;
+      expect(viewport).toBeTruthy();
+
+      await act(async () => {
+        viewport?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      });
+
+      expect(onPaneActivate).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("forwards command-active state through onRunningChange", async () => {
     const onRunningChange = vi.fn();
     embeddedTerminalControllerMocks.isCommandActive = true;
