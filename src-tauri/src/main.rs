@@ -9,6 +9,7 @@ mod logging;
 mod mobile_sync;
 mod process;
 mod providers;
+mod rebrand;
 mod usage_index;
 
 use checkpoint::state::CheckpointState;
@@ -180,6 +181,7 @@ fn persist_window_size(app: &tauri::AppHandle, width: u32, height: u32) {
 fn main() {
     // Initialize logger
     logging::init();
+    rebrand::archive_legacy_opcode_state();
 
     #[cfg(debug_assertions)]
     if let Err(err) = ensure_dev_server_reachable() {
