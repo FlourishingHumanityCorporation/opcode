@@ -604,7 +604,7 @@ export default function App() {
       <SafeAreaView style={{ flex: 1, backgroundColor: '#0b0f12', padding: 16 }}>
         <StatusBar style="light" />
         <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700', marginBottom: 12 }}>
-          Opcode Mobile
+          CodeInterfaceX Mobile
         </Text>
         <Text style={{ color: '#9BA4AE' }}>Loading saved mobile connection...</Text>
       </SafeAreaView>
@@ -616,7 +616,7 @@ export default function App() {
       <SafeAreaView style={{ flex: 1, backgroundColor: '#0b0f12', padding: 16 }}>
         <StatusBar style="light" />
         <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700', marginBottom: 12 }}>
-          Opcode Mobile
+          CodeInterfaceX Mobile
         </Text>
         <PairScreen busy={pairBusy} error={pairError} onPair={pairDevice} />
       </SafeAreaView>
@@ -628,7 +628,7 @@ export default function App() {
       <StatusBar style="light" />
       <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 }}>
         <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700', marginBottom: 8 }}>
-          Opcode Mobile
+          CodeInterfaceX Mobile
         </Text>
 
         <View

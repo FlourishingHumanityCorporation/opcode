@@ -1,8 +1,8 @@
 
 <div align="center">
-  <img src="src-tauri/icons/icon.png" alt="opcode Logo" width="120" height="120">
+  <img src="src-tauri/icons/icon.png" alt="CodeInterfaceX Logo" width="120" height="120">
 
-  <h1>opcode</h1>
+  <h1>CodeInterfaceX</h1>
   
   <p>
     <strong>A powerful GUI app and Toolkit for Claude Code</strong>
@@ -36,13 +36,23 @@ https://github.com/user-attachments/assets/6bceea0f-60b6-4c3e-a745-b891de00b8d0
 
 ## 🌟 Overview
 
-**opcode** is a powerful desktop application that transforms how you interact with Claude Code. Built with Tauri 2, it provides a beautiful GUI for managing your Claude Code sessions, creating custom agents, tracking usage, and much more.
+**CodeInterfaceX** is a powerful desktop application that transforms how you interact with Claude Code. Built with Tauri 2, it provides a beautiful GUI for managing your Claude Code sessions, creating custom agents, tracking usage, and much more.
 
-Think of opcode as your command center for Claude Code - bridging the gap between the command-line tool and a visual experience that makes AI-assisted development more intuitive and productive.
+Think of CodeInterfaceX as your command center for Claude Code - bridging the gap between the command-line tool and a visual experience that makes AI-assisted development more intuitive and productive.
+
+## 🧬 Project Lineage
+
+CodeInterfaceX is an actively evolved internal fork/rebrand of the original opcode project.
+
+- Active development remote: `origin` (`https://github.com/FlourishingHumanityCorporation/opcode.git`)
+- Original upstream reference: `upstream` (`https://github.com/winfunc/opcode.git`)
+
+This lineage is preserved intentionally so you can trace original architecture/history while continuing independent product direction in CodeInterfaceX.
 
 ## 📋 Table of Contents
 
 - [🌟 Overview](#-overview)
+- [🧬 Project Lineage](#-project-lineage)
 - [✨ Features](#-features)
   - [🗂️ Project & Session Management](#️-project--session-management)
   - [🤖 CC Agents](#-cc-agents)
@@ -110,9 +120,9 @@ Think of opcode as your command center for Claude Code - bridging the gap betwee
 
 ### Getting Started
 
-1. **Launch opcode**: Open the application after installation
+1. **Launch CodeInterfaceX**: Open the application after installation
 2. **Welcome Screen**: Choose between CC Agents or Projects
-3. **First Time Setup**: opcode will automatically detect your `~/.claude` directory
+3. **First Time Setup**: CodeInterfaceX will automatically detect your `~/.claude` directory
 
 ### Managing Projects
 
@@ -167,7 +177,7 @@ Menu → MCP Manager → Add Server → Configure
 
 ### Prerequisites
 
-Before building opcode from source, ensure you have the following installed:
+Before building CodeInterfaceX from source, ensure you have the following installed:
 
 #### System Requirements
 
@@ -240,7 +250,7 @@ brew install pkg-config
 
 1. **Clone the Repository**
    ```bash
-   git clone https://github.com/getAsterisk/opcode.git
+   git clone https://github.com/FlourishingHumanityCorporation/opcode.git
    cd opcode
    ```
 
@@ -330,7 +340,7 @@ After building, you can verify the application works:
 
 The build process creates several artifacts:
 
-- **Executable**: The main opcode application
+- **Executable**: The main CodeInterfaceX application
 - **Installers** (when using `tauri build`):
   - `.deb` package (Linux)
   - `.AppImage` (Linux)
@@ -388,7 +398,7 @@ cd src-tauri && cargo fmt
 
 ## 🔒 Security
 
-opcode prioritizes your privacy and security:
+CodeInterfaceX prioritizes your privacy and security:
 
 1. **Process Isolation**: Agents run in separate processes
 2. **Permission Control**: Configure file and network access per agent
@@ -425,13 +435,13 @@ This project is licensed under the AGPL License - see the [LICENSE](LICENSE) fil
     <strong>Made with ❤️ by the <a href="https://asterisk.so/">Asterisk</a></strong>
   </p>
   <p>
-    <a href="https://github.com/getAsterisk/opcode/issues">Report Bug</a>
+    <a href="https://github.com/FlourishingHumanityCorporation/opcode/issues">Report Bug</a>
     ·
-    <a href="https://github.com/getAsterisk/opcode/issues">Request Feature</a>
+    <a href="https://github.com/FlourishingHumanityCorporation/opcode/issues">Request Feature</a>
   </p>
 </div>
 
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=getAsterisk/opcode&type=Date)](https://www.star-history.com/#getAsterisk/opcode&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=FlourishingHumanityCorporation/opcode&type=Date)](https://www.star-history.com/#FlourishingHumanityCorporation/opcode&Date)
