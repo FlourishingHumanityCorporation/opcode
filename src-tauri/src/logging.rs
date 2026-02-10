@@ -52,11 +52,17 @@ pub fn init() {
         .with_file(true)
         .with_line_number(true);
 
-    tracing_subscriber::registry()
+    let init_result = tracing_subscriber::registry()
         .with(env_filter)
         .with(stdout_layer)
         .with(file_layer)
-        .init();
+        .try_init();
 
-    tracing::info!(log_dir = %log_dir.display(), "Logging initialized");
+    match init_result {
+        Ok(()) => tracing::info!(log_dir = %log_dir.display(), "Logging initialized"),
+        Err(err) => {
+            eprintln!("Logging already initialized, continuing: {}", err);
+            tracing::debug!(%err, "Logging subscriber already initialized");
+        }
+    }
 }
