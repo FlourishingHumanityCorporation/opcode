@@ -19,6 +19,7 @@ import {
 import type { SlashCommand } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useTrackEvent, useFeatureAdoptionTracking } from "@/hooks";
+import { logger } from '@/lib/logger';
 
 interface SlashCommandPickerProps {
   /**
@@ -220,7 +221,7 @@ export const SlashCommandPicker: React.FC<SlashCommandPickerProps> = ({
       const loadedCommands = await api.slashCommandsList(projectPath);
       setCommands(loadedCommands);
     } catch (err) {
-      console.error("Failed to load slash commands:", err);
+      logger.error("ui", "Failed to load slash commands", { error: err });
       setError(err instanceof Error ? err.message : 'Failed to load commands');
       setCommands([]);
     } finally {

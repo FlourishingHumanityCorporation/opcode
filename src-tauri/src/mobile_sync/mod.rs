@@ -109,7 +109,7 @@ pub fn ensure_server_running(app: AppHandle, state: MobileSyncServiceState) {
 
     tauri::async_runtime::spawn(async move {
         if let Err(error) = server::run_mobile_sync_server(app.clone(), state.clone()).await {
-            log::error!("mobile sync server failed: {}", error);
+            tracing::error!("mobile sync server failed: {}", error);
             state.mark_server_stopped();
         }
     });

@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { Toast, ToastContainer } from "./ui/toast";
+import { logger } from '@/lib/logger';
 
 interface TableInfo {
   name: string;
@@ -130,7 +131,7 @@ export const StorageTab: React.FC = () => {
         setSelectedTable(result[0].name);
       }
     } catch (err) {
-      console.error("Failed to load tables:", err);
+      logger.error('ui', 'Failed to load tables:', { error: err });
       setError("Failed to load tables");
     } finally {
       setLoading(false);
@@ -155,7 +156,7 @@ export const StorageTab: React.FC = () => {
       setTableData(result);
       setCurrentPage(page);
     } catch (err) {
-      console.error("Failed to load table data:", err);
+      logger.error('ui', 'Failed to load table data:', { error: err });
       setError("Failed to load table data");
     } finally {
       setLoading(false);
@@ -202,7 +203,7 @@ export const StorageTab: React.FC = () => {
       await loadTableData(currentPage);
       setEditingRow(null);
     } catch (err) {
-      console.error("Failed to update row:", err);
+      logger.error('ui', 'Failed to update row:', { error: err });
       setError("Failed to update row");
     } finally {
       setLoading(false);
@@ -222,7 +223,7 @@ export const StorageTab: React.FC = () => {
       await loadTableData(currentPage);
       setDeletingRow(null);
     } catch (err) {
-      console.error("Failed to delete row:", err);
+      logger.error('ui', 'Failed to delete row:', { error: err });
       setError("Failed to delete row");
     } finally {
       setLoading(false);
@@ -241,7 +242,7 @@ export const StorageTab: React.FC = () => {
       await loadTableData(currentPage);
       setNewRow(null);
     } catch (err) {
-      console.error("Failed to insert row:", err);
+      logger.error('ui', 'Failed to insert row:', { error: err });
       setError("Failed to insert row");
     } finally {
       setLoading(false);
@@ -266,7 +267,7 @@ export const StorageTab: React.FC = () => {
         }
       }
     } catch (err) {
-      console.error("Failed to execute SQL:", err);
+      logger.error('ui', 'Failed to execute SQL:', { error: err });
       setSqlError(err instanceof Error ? err.message : "Failed to execute SQL");
     } finally {
       setLoading(false);
@@ -289,7 +290,7 @@ export const StorageTab: React.FC = () => {
         type: "success",
       });
     } catch (err) {
-      console.error("Failed to reset database:", err);
+      logger.error('ui', 'Failed to reset database:', { error: err });
       setError("Failed to reset database");
       setToast({
         message: "Reset Failed: Failed to reset the database. Please try again.",

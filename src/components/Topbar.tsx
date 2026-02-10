@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Popover } from "@/components/ui/popover";
 import { api, type ClaudeVersionStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { logger } from '@/lib/logger';
 
 interface TopbarProps {
   /**
@@ -72,7 +73,7 @@ export const Topbar: React.FC<TopbarProps> = ({
         window.dispatchEvent(new CustomEvent('claude-not-found'));
       }
     } catch (err) {
-      console.error("Failed to check Claude version:", err);
+      logger.error('ui', 'Failed to check Claude version:', { error: err });
       setVersionStatus({
         is_installed: false,
         output: "Failed to check version",

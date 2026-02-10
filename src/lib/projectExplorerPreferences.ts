@@ -1,3 +1,5 @@
+import { logger } from '@/lib/logger';
+
 const EXPLORER_OPEN_PREFIX = "opcode:explorer:open:";
 const EXPLORER_WIDTH_PREFIX = "opcode:explorer:width:";
 const EXPLORER_EXPANDED_PREFIX = "opcode:explorer:expanded:";
@@ -81,7 +83,7 @@ export function getExpandedPaths(projectPath: string): string[] {
     }
     return parsed.filter((entry): entry is string => typeof entry === "string");
   } catch (error) {
-    console.warn("[projectExplorerPreferences] Failed to parse expanded paths:", error);
+    logger.warn('misc', '[projectExplorerPreferences] Failed to parse expanded paths:', { value: error });
     return [];
   }
 }

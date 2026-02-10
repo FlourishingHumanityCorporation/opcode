@@ -100,11 +100,11 @@ pub async fn save_proxy_settings(
 
 /// Apply proxy settings as environment variables
 pub fn apply_proxy_settings(settings: &ProxySettings) {
-    log::info!("Applying proxy settings: enabled={}", settings.enabled);
+    tracing::info!("Applying proxy settings: enabled={}", settings.enabled);
 
     if !settings.enabled {
         // Clear proxy environment variables if disabled
-        log::info!("Clearing proxy environment variables");
+        tracing::info!("Clearing proxy environment variables");
         std::env::remove_var("HTTP_PROXY");
         std::env::remove_var("HTTPS_PROXY");
         std::env::remove_var("NO_PROXY");
@@ -129,34 +129,34 @@ pub fn apply_proxy_settings(settings: &ProxySettings) {
     // Set proxy environment variables (uppercase is standard)
     if let Some(http_proxy) = &settings.http_proxy {
         if !http_proxy.is_empty() {
-            log::info!("Setting HTTP_PROXY={}", http_proxy);
+            tracing::info!("Setting HTTP_PROXY={}", http_proxy);
             std::env::set_var("HTTP_PROXY", http_proxy);
         }
     }
 
     if let Some(https_proxy) = &settings.https_proxy {
         if !https_proxy.is_empty() {
-            log::info!("Setting HTTPS_PROXY={}", https_proxy);
+            tracing::info!("Setting HTTPS_PROXY={}", https_proxy);
             std::env::set_var("HTTPS_PROXY", https_proxy);
         }
     }
 
     // Always set NO_PROXY to include localhost
-    log::info!("Setting NO_PROXY={}", no_proxy_value);
+    tracing::info!("Setting NO_PROXY={}", no_proxy_value);
     std::env::set_var("NO_PROXY", &no_proxy_value);
 
     if let Some(all_proxy) = &settings.all_proxy {
         if !all_proxy.is_empty() {
-            log::info!("Setting ALL_PROXY={}", all_proxy);
+            tracing::info!("Setting ALL_PROXY={}", all_proxy);
             std::env::set_var("ALL_PROXY", all_proxy);
         }
     }
 
     // Log current proxy environment variables for debugging
-    log::info!("Current proxy environment variables:");
+    tracing::info!("Current proxy environment variables:");
     for (key, value) in std::env::vars() {
         if key.contains("PROXY") || key.contains("proxy") {
-            log::info!("  {}={}", key, value);
+            tracing::info!("  {}={}", key, value);
         }
     }
 }

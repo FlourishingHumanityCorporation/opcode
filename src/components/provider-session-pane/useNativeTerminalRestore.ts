@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { logger } from '@/lib/logger';
 import {
   resolveLatestSessionIdForProject,
   sanitizeProviderSessionId,
@@ -21,7 +22,7 @@ export function useNativeTerminalRestore() {
 
       return sanitizeProviderSessionId(latestSessionId);
     } catch (error) {
-      console.warn("[ProviderSessionPane] Failed to resolve latest native restore session", error);
+      logger.warn('provider', '[ProviderSessionPane] Failed to resolve latest native restore session', { value: error });
       setNativeRestoreNotice("Could not load prior sessions. Starting fresh.");
       return undefined;
     } finally {

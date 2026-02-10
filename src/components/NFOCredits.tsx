@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import asteriskLogo from "@/assets/nfo/asterisk-logo.png";
 import keygennMusic from "@/assets/nfo/opcode-nfo.ogg";
+import { logger } from '@/lib/logger';
 
 interface NFOCreditsProps {
   /**
@@ -40,7 +41,7 @@ export const NFOCredits: React.FC<NFOCreditsProps> = ({ onClose }) => {
       // Unmute after autoplay
       audio.muted = false;
     }).catch(err => {
-      console.error("Audio autoplay failed:", err);
+      logger.error('ui', 'Audio autoplay failed:', { error: err });
     });
     return () => {
       if (audioRef.current) {

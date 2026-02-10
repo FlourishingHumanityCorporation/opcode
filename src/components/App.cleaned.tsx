@@ -10,6 +10,7 @@ import { TabContent } from "@/components/TabContent";
 import { AgentsModal } from "@/components/AgentsModal";
 import { CustomTitlebar } from "@/components/CustomTitlebar";
 import { useTabState } from "@/hooks/useTabState";
+import { logger } from '@/lib/logger';
 
 /**
  * AppContent component - Contains the main app logic, wrapped by providers
@@ -72,7 +73,7 @@ function AppContent() {
           setShowClaudeBinaryDialog(true);
         }
       } catch (error) {
-        console.error("Error checking Claude executable:", error);
+        logger.error('ui', 'Error checking Claude executable:', { error: error });
       }
     };
 

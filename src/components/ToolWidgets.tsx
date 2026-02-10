@@ -63,6 +63,7 @@ import { open } from "@tauri-apps/plugin-shell";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { motion, AnimatePresence } from "framer-motion";
+import { logger } from '@/lib/logger';
 
 /**
  * Widget for TodoWrite tool - displays a beautiful TODO list
@@ -2050,7 +2051,7 @@ export const WebSearchWidget: React.FC<{
     try {
       await open(url);
     } catch (error) {
-      console.error('Failed to open URL:', error);
+      logger.error('ui', 'Failed to open URL:', { error: error });
     }
   };
   
@@ -2270,7 +2271,7 @@ export const WebFetchWidget: React.FC<{
     try {
       await open(url);
     } catch (error) {
-      console.error('Failed to open URL:', error);
+      logger.error('ui', 'Failed to open URL:', { error: error });
     }
   };
   

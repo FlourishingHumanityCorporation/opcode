@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { api, type ProcessInfo, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { formatISOTimestamp } from "@/lib/date-utils";
+import { logger } from '@/lib/logger';
 
 interface RunningProviderSessionsProps {
   /**
@@ -70,7 +71,7 @@ export const RunningProviderSessions: React.FC<RunningProviderSessionsProps> = (
       setRunningSessions(sessions);
       setError(null);
     } catch (err) {
-      console.error("Failed to load running sessions:", err);
+      logger.error('ui', 'Failed to load running sessions:', { error: err });
       setError("Failed to load running sessions");
     } finally {
       setLoading(false);

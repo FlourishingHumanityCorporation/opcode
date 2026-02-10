@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { logger } from '@/lib/logger';
 
 export interface ProxySettings {
   http_proxy: string | null;
@@ -47,7 +48,7 @@ export function ProxySettings({ setToast, onChange }: ProxySettingsProps) {
         type: 'success',
       });
     } catch (error) {
-      console.error('Failed to save proxy settings:', error);
+      logger.error('ui', 'Failed to save proxy settings:', { error: error });
       setToast({
         message: 'Failed to save proxy settings',
         type: 'error',
@@ -70,7 +71,7 @@ export function ProxySettings({ setToast, onChange }: ProxySettingsProps) {
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
     } catch (error) {
-      console.error('Failed to load proxy settings:', error);
+      logger.error('ui', 'Failed to load proxy settings:', { error: error });
       setToast({
         message: 'Failed to load proxy settings',
         type: 'error',

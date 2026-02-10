@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { DetectedProvider } from "./types";
+import { logger } from '@/lib/logger';
 
 interface UseProviderDetectionOptions {
   initialProviderId: string;
@@ -58,7 +59,7 @@ export function useProviderDetection({
       })
       .catch((err: unknown) => {
         if (isCancelled) return;
-        console.warn("[ProviderSessionPane] Failed to detect agents:", err);
+        logger.warn('provider', '[ProviderSessionPane] Failed to detect agents:', { value: err });
       });
 
     return () => {

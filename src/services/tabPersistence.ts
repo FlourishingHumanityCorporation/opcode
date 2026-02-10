@@ -11,6 +11,7 @@ import type {
 } from '@/contexts/TabContext';
 import { api } from '@/lib/api';
 import { hashWorkspaceState, logWorkspaceEvent } from '@/services/workspaceDiagnostics';
+import { logger } from '@/lib/logger';
 
 const STORAGE_KEY = 'opcode_workspace_v3';
 const WORKSPACE_DB_MIRROR_KEY = 'workspace_state_v3';
@@ -459,7 +460,7 @@ export class TabPersistenceService {
         action: 'save_workspace_db_mirror',
       });
     } catch (error) {
-      console.warn('Failed to mirror workspace to app settings:', error);
+      logger.warn('misc', 'Failed to mirror workspace to app settings:', { value: error });
       logWorkspaceEvent({
         category: 'error',
         action: 'save_workspace_db_mirror_failed',
@@ -515,7 +516,7 @@ export class TabPersistenceService {
         terminalCount: countTerminalTabs(orderedTabs),
       });
     } catch (error) {
-      console.error('Failed to save workspace:', error);
+      logger.error('persistence', 'Failed to save workspace:', { error });
       logWorkspaceEvent({
         category: 'error',
         action: 'persist_save_failed',
@@ -578,7 +579,7 @@ export class TabPersistenceService {
 
       return { tabs, activeTabId };
     } catch (error) {
-      console.error('Failed to load workspace:', error);
+      logger.error('persistence', 'Failed to load workspace:', { error });
       const raw = localStorage.getItem(STORAGE_KEY);
       logWorkspaceEvent({
         category: 'error',
@@ -768,7 +769,7 @@ export class TabPersistenceService {
         terminalCount: countTerminalTabs(migratedTabs),
       });
     } catch (error) {
-      console.error('Failed to migrate workspace from v2:', error);
+      logger.error('persistence', 'Failed to migrate workspace from v2:', { error });
       logWorkspaceEvent({
         category: 'error',
         action: 'persist_migration_failed',

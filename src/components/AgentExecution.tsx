@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  ArrowLeft, 
-  Play, 
-  StopCircle, 
+import {
+  ArrowLeft,
+  Play,
+  StopCircle,
   Terminal,
   AlertCircle,
   Loader2,
@@ -48,6 +48,7 @@ import {
   getProviderModelOptions,
 } from "@/lib/providerModels";
 import type { ProviderSessionMessage } from "@/lib/providerSessionProtocol";
+import { logger } from "@/lib/logger";
 
 interface AgentExecutionProps {
   /**
@@ -284,7 +285,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
           setProviderRuntime(runtime);
         }
       } catch (err) {
-        console.warn("Failed to check provider runtime:", err);
+        logger.warn("ui", "Failed to check provider runtime", { err });
         if (!isCancelled) {
           setProviderRuntime(null);
         }
@@ -377,7 +378,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
     try {
       setIsRunning(true);
       // Update tab status to running
-      console.log('Setting tab status to running for tab:', tabId);
+      logger.debug('ui', 'Setting tab status to running', { tabId });
       if (tabId) {
         updateTabStatus(tabId, 'running');
       }
@@ -398,7 +399,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
         model,
         providerId === "codex" ? codexReasoningEffort : undefined
       );
-      console.log("Agent execution started with run ID:", executionRunId);
+      logger.info("ui", "Agent execution started", { runId: executionRunId });
       setRunId(executionRunId);
       
       // Track agent execution start
@@ -430,12 +431,12 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
 
           setMessages(prev => [...prev, message]);
         } catch (err) {
-          console.error("Failed to parse message:", err, event.payload);
+          logger.error("ui", "Failed to parse message", { err, payload: event.payload });
         }
       });
 
       const errorUnlisten = await listenToAgentEvent<string>(`agent-error:${executionRunId}`, (event) => {
-        console.error("Agent error:", event.payload);
+        logger.error("ui", "Agent error", { message: event.payload });
         setError(event.payload);
         
         // Track agent error
@@ -491,7 +492,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
 
       unlistenRefs.current = [outputUnlisten, errorUnlisten, completeUnlisten, cancelUnlisten];
     } catch (err) {
-      console.error("Failed to execute agent:", err);
+      logger.error("ui", "Failed to execute agent", { err });
       setIsRunning(false);
       setExecutionStartTime(null);
       setRunId(null);
@@ -517,7 +518,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
   const handleStop = async () => {
     try {
       if (!runId) {
-        console.error("No run ID available to stop");
+        logger.error("ui", "No run ID available to stop");
         return;
       }
 
@@ -525,16 +526,16 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
       const success = await api.killAgentSession(runId);
 
       if (success) {
-        console.log(`Successfully stopped agent session ${runId}`);
+        logger.info("ui", "Successfully stopped agent session", { runId });
       } else {
-        console.warn(`Failed to stop agent session ${runId} - it may have already finished`);
+        logger.warn("ui", "Failed to stop agent session - it may have already finished", { runId });
       }
 
       // Update UI state
       setIsRunning(false);
       setExecutionStartTime(null);
     } catch (err) {
-      console.error("Failed to stop agent:", err);
+      logger.error("ui", "Failed to stop agent", { err });
     }
   };
 

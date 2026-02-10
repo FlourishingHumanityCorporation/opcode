@@ -1,3 +1,5 @@
+import { logger } from '@/lib/logger';
+
 export type WorkspaceDiagnosticCategory =
   | 'state_action'
   | 'reorder'
@@ -48,7 +50,7 @@ function emitUpdate(): void {
     try {
       listener();
     } catch (error) {
-      console.error('[workspaceDiagnostics] listener failed', error);
+      logger.error('misc', '[workspaceDiagnostics] listener failed', { error: error });
     }
   });
 }

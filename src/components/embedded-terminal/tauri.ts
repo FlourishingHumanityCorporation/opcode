@@ -1,21 +1,9 @@
+import { logger } from '@/lib/logger';
+
 let tauriListenPromise: Promise<any> | null = null;
 
-function shouldDebugLogs(): boolean {
-  return Boolean(
-    (import.meta as any)?.env?.DEV &&
-      (globalThis as any).__OPCODE_DEBUG_LOGS__
-  );
-}
-
 export function debugLog(event: string, payload?: Record<string, unknown>): void {
-  if (!shouldDebugLogs()) {
-    return;
-  }
-  if (payload) {
-    console.log(`[EmbeddedTerminal] ${event}`, payload);
-    return;
-  }
-  console.log(`[EmbeddedTerminal] ${event}`);
+  logger.debug('terminal', event, payload);
 }
 
 export async function getTauriListen(): Promise<any> {
@@ -34,7 +22,7 @@ export async function getTauriListen(): Promise<any> {
       .then((m) => m.listen)
       .catch((error) => {
         tauriListenPromise = null;
-        console.warn("[EmbeddedTerminal] failed to load Tauri listener", error);
+        logger.warn('terminal', 'failed to load Tauri listener', { error });
         return null;
       });
   }

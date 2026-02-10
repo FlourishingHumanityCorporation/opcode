@@ -16,6 +16,7 @@ import type { TerminalTab } from "@/contexts/TabContext";
 import {
   getTerminalStatusMeta,
   persistExplorerSplitWidth,
+  resolveProjectSwitchForActiveTerminal,
   resolveTerminalStatusOnActivate,
   toggleExplorerPanel,
   toggleTerminalTitleLock,
@@ -109,5 +110,102 @@ describe("ProjectWorkspaceView title lock", () => {
 
     expect(persisted).toBe(31.5);
     expect(setExplorerWidthSpy).toHaveBeenCalledWith("workspace-42", 31.5);
+  });
+
+  it("resets pane and terminal session linkage when switching projects", () => {
+    const terminal = makeTerminal({
+      sessionState: {
+        providerId: "claude",
+        sessionId: "session-123",
+        sessionData: { id: "session-123" },
+        projectPath: "/tmp/project-a",
+        initialProjectPath: "/tmp/project-a",
+      },
+      paneStates: {
+        "pane-1": {
+          projectPath: "/tmp/project-a",
+          sessionId: "session-123",
+          embeddedTerminalId: "term-abc",
+          restorePreference: "resume_latest",
+        },
+      },
+    });
+    const workspace = {
+      id: "workspace-1",
+      type: "project" as const,
+      projectPath: "/tmp/project-a",
+      title: "Project A",
+      activeTerminalTabId: terminal.id,
+      terminalTabs: [terminal],
+      status: "idle" as const,
+      hasUnsavedChanges: false,
+      order: 0,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    };
+
+    const resolved = resolveProjectSwitchForActiveTerminal(workspace, terminal, "/tmp/project-b");
+
+    expect(resolved.didProjectSwitch).toBe(true);
+    expect(resolved.nextCanonicalPath).toBe("/tmp/project-b");
+    expect(resolved.embeddedTerminalIdToClose).toBe("term-abc");
+    expect(resolved.nextPaneState).toEqual({
+      projectPath: "/tmp/project-b",
+      embeddedTerminalId: undefined,
+      sessionId: undefined,
+      restorePreference: "start_fresh",
+    });
+    expect(resolved.nextSessionState).toEqual({
+      providerId: "claude",
+      sessionId: undefined,
+      sessionData: undefined,
+      projectPath: "/tmp/project-b",
+      initialProjectPath: "/tmp/project-b",
+    });
+  });
+
+  it("keeps existing session linkage when path does not change", () => {
+    const terminal = makeTerminal({
+      sessionState: {
+        providerId: "claude",
+        sessionId: "session-123",
+        sessionData: { id: "session-123" },
+        projectPath: "/tmp/project-a",
+        initialProjectPath: "/tmp/project-a",
+      },
+      paneStates: {
+        "pane-1": {
+          projectPath: "/tmp/project-a",
+          sessionId: "session-123",
+          embeddedTerminalId: "term-abc",
+        },
+      },
+    });
+    const workspace = {
+      id: "workspace-1",
+      type: "project" as const,
+      projectPath: "/tmp/project-a",
+      title: "Project A",
+      activeTerminalTabId: terminal.id,
+      terminalTabs: [terminal],
+      status: "idle" as const,
+      hasUnsavedChanges: false,
+      order: 0,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    };
+
+    const resolved = resolveProjectSwitchForActiveTerminal(workspace, terminal, "/tmp/project-a/");
+
+    expect(resolved.didProjectSwitch).toBe(false);
+    expect(resolved.nextPaneState).toBeUndefined();
+    expect(resolved.embeddedTerminalIdToClose).toBeUndefined();
+    expect(resolved.nextSessionState).toEqual({
+      providerId: "claude",
+      sessionId: "session-123",
+      sessionData: { id: "session-123" },
+      projectPath: "/tmp/project-a",
+      initialProjectPath: "/tmp/project-a",
+    });
   });
 });

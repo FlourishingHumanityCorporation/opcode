@@ -30,6 +30,7 @@ import { api, type SlashCommand } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { COMMON_TOOL_MATCHERS } from "@/types/hooks";
 import { useTrackEvent } from "@/hooks";
+import { logger } from '@/lib/logger';
 
 interface SlashCommandsManagerProps {
   projectPath?: string;
@@ -132,7 +133,7 @@ export const SlashCommandsManager: React.FC<SlashCommandsManagerProps> = ({
       const loadedCommands = await api.slashCommandsList(projectPath);
       setCommands(loadedCommands);
     } catch (err) {
-      console.error("Failed to load slash commands:", err);
+      logger.error('ui', 'Failed to load slash commands:', { error: err });
       setError("Failed to load commands");
     } finally {
       setLoading(false);
@@ -189,7 +190,7 @@ export const SlashCommandsManager: React.FC<SlashCommandsManagerProps> = ({
       setEditDialogOpen(false);
       await loadCommands();
     } catch (err) {
-      console.error("Failed to save command:", err);
+      logger.error('ui', 'Failed to save command:', { error: err });
       setError(err instanceof Error ? err.message : "Failed to save command");
     } finally {
       setSaving(false);
@@ -212,7 +213,7 @@ export const SlashCommandsManager: React.FC<SlashCommandsManagerProps> = ({
       setCommandToDelete(null);
       await loadCommands();
     } catch (err) {
-      console.error("Failed to delete command:", err);
+      logger.error('ui', 'Failed to delete command:', { error: err });
       const errorMessage = err instanceof Error ? err.message : "Failed to delete command";
       setError(errorMessage);
     } finally {

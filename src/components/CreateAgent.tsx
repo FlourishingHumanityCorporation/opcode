@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import MDEditor from "@uiw/react-md-editor";
 import { type AgentIconName } from "./CCAgents";
 import { IconPicker, ICON_MAP } from "./IconPicker";
+import { logger } from '@/lib/logger';
 import {
   getDefaultModelForProvider,
   getModelDisplayName,
@@ -100,7 +101,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
         );
         setDetectedProviderIds(ids);
       } catch (err) {
-        console.warn("Failed to detect providers for agent form:", err);
+        logger.warn('ui', 'Failed to detect providers for agent form:', { value: err });
       }
     };
 
@@ -118,7 +119,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
           setProviderRuntime(status);
         }
       } catch (err) {
-        console.warn("Failed to check provider runtime:", err);
+        logger.warn('ui', 'Failed to check provider runtime:', { value: err });
         if (!isCancelled) {
           setProviderRuntime(null);
         }
@@ -174,7 +175,7 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
       
       onAgentCreated();
     } catch (err) {
-      console.error("Failed to save agent:", err);
+      logger.error('ui', 'Failed to save agent:', { error: err });
       setError(isEditMode ? "Failed to update agent" : "Failed to create agent");
       setToast({ 
         message: isEditMode ? "Failed to update agent" : "Failed to create agent", 

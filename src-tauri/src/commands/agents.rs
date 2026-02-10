@@ -1,7 +1,6 @@
 use anyhow::Result;
 use chrono;
 use dirs;
-use log::{debug, error, info, warn};
 use reqwest;
 use rusqlite::{params, Connection, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
@@ -250,8 +249,14 @@ pub fn init_database(app: &AppHandle) -> SqliteResult<Connection> {
     let app_dir = app
         .path()
         .app_data_dir()
-        .expect("Failed to get app data dir");
-    std::fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
+        .map_err(|e| {
+            tracing::error!("Failed to get app data directory: {}", e);
+            rusqlite::Error::InvalidQuery
+        })?;
+    std::fs::create_dir_all(&app_dir).map_err(|e| {
+        tracing::error!("Failed to create app data directory: {}", e);
+        rusqlite::Error::InvalidQuery
+    })?;
 
     let db_path = app_dir.join("agents.db");
     let conn = Connection::open(db_path)?;
@@ -878,8 +883,7 @@ async fn provider_runtime_status(
             }
         }
     } else {
-        let detected = crate::agent_binary::discover_all_agents(app).await;
-        if let Some(agent) = detected.into_iter().find(|a| a.provider_id == provider_id) {
+        if let Some(agent) = crate::agent_binary::discover_agent(app, provider_id).await {
             status.installed = true;
             status.detected_binary = Some(agent.binary_path);
             status.detected_version = agent.version;
@@ -961,7 +965,7 @@ pub async fn execute_agent(
     db: State<'_, AgentDb>,
     registry: State<'_, crate::process::ProcessRegistryState>,
 ) -> Result<i64, String> {
-    info!("Executing agent {} with task: {}", agent_id, task);
+    tracing::info!("Executing agent {} with task: {}", agent_id, task);
 
     // Get the agent from database
     let agent = get_agent(db.clone(), agent_id).await?;
@@ -990,7 +994,13 @@ pub async fn execute_agent(
 
     // Create .claude/settings.json with agent hooks for Claude providers.
     if provider_id == "claude" && agent.hooks.is_some() {
-        let hooks_json = agent.hooks.as_ref().expect("checked is_some");
+        let hooks_json = match agent.hooks.as_ref() {
+            Some(hooks) => hooks,
+            None => {
+                tracing::error!("Agent hooks field is None despite is_some() check");
+                return Err("Agent hooks unavailable".into());
+            }
+        };
         let claude_dir = std::path::Path::new(&project_path).join(".claude");
         let settings_path = claude_dir.join("settings.json");
 
@@ -998,7 +1008,7 @@ pub async fn execute_agent(
         if !claude_dir.exists() {
             std::fs::create_dir_all(&claude_dir)
                 .map_err(|e| format!("Failed to create .claude directory: {}", e))?;
-            info!("Created .claude directory at: {:?}", claude_dir);
+            tracing::info!("Created .claude directory at: {:?}", claude_dir);
         }
 
         // Check if settings.json already exists
@@ -1019,12 +1029,12 @@ pub async fn execute_agent(
             std::fs::write(&settings_path, settings_content)
                 .map_err(|e| format!("Failed to write settings.json: {}", e))?;
 
-            info!(
+            tracing::info!(
                 "Created settings.json with agent hooks at: {:?}",
                 settings_path
             );
         } else {
-            info!("settings.json already exists at: {:?}", settings_path);
+            tracing::info!("settings.json already exists at: {:?}", settings_path);
         }
     }
 
@@ -1049,7 +1059,7 @@ pub async fn execute_agent(
         conn.last_insert_rowid()
     };
 
-    info!(
+    tracing::info!(
         "Running agent '{}' with provider '{}'",
         agent.name, provider_id
     );
@@ -1084,11 +1094,8 @@ async fn resolve_provider_binary(app: &AppHandle, provider_id: &str) -> Result<S
         return find_claude_binary(app);
     }
 
-    // Discover other providers dynamically.
-    let agents = crate::agent_binary::discover_all_agents(app).await;
-    agents
-        .into_iter()
-        .find(|a| a.provider_id == provider_id)
+    crate::agent_binary::discover_agent(app, provider_id)
+        .await
         .map(|a| a.binary_path)
         .ok_or_else(|| format!("Provider '{}' is not installed or not detected", provider_id))
 }
@@ -1133,7 +1140,7 @@ fn build_provider_args(
                     format!("model_reasoning_effort=\"{}\"", effort),
                 ]);
             } else if reasoning_effort.is_some() {
-                warn!("Ignoring invalid codex reasoning effort: {:?}", reasoning_effort);
+                tracing::warn!("Ignoring invalid codex reasoning effort: {:?}", reasoning_effort);
             }
             args
         }
@@ -1279,18 +1286,18 @@ async fn spawn_agent_system(
     let mut cmd = create_agent_system_command(&binary_path, args, &project_path);
 
     // Spawn the process
-    info!("🚀 Spawning {} system process...", provider_id);
+    tracing::info!("🚀 Spawning {} system process...", provider_id);
     let mut child = cmd.spawn().map_err(|e| {
-        error!("❌ Failed to spawn {} process: {}", provider_id, e);
+        tracing::error!("❌ Failed to spawn {} process: {}", provider_id, e);
         format!("Failed to spawn {}: {}", provider_id, e)
     })?;
 
-    info!("🔌 Using Stdio::null() for stdin - no input expected");
+    tracing::info!("🔌 Using Stdio::null() for stdin - no input expected");
 
     // Get the PID and register the process
     let pid = child.id().unwrap_or(0);
     let now = chrono::Utc::now().to_rfc3339();
-    info!(
+    tracing::info!(
         "✅ {} process spawned successfully with PID: {}",
         provider_id, pid
     );
@@ -1302,13 +1309,13 @@ async fn spawn_agent_system(
             "UPDATE agent_runs SET status = 'running', pid = ?1, process_started_at = ?2 WHERE id = ?3",
             params![pid as i64, now, run_id],
         ).map_err(|e| e.to_string())?;
-        info!("📝 Updated database with running status and PID");
+        tracing::info!("📝 Updated database with running status and PID");
     }
 
     // Get stdout and stderr
     let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
-    info!("📡 Set up stdout/stderr readers");
+    tracing::info!("📡 Set up stdout/stderr readers");
 
     // Create readers
     let stdout_reader = TokioBufReader::new(stdout);
@@ -1318,7 +1325,10 @@ async fn spawn_agent_system(
     let app_dir = app
         .path()
         .app_data_dir()
-        .expect("Failed to get app data dir");
+        .map_err(|e| {
+            tracing::error!("Failed to get app data directory: {}", e);
+            format!("Failed to get app data directory: {}", e)
+        })?;
     let db_path = app_dir.join("agents.db");
 
     // Shared state for collecting session ID and live output
@@ -1361,7 +1371,7 @@ async fn spawn_agent_system(
     let provider_stdout = provider_id.clone();
 
     let stdout_task = tokio::spawn(async move {
-        info!("📖 Starting to read {} stdout...", provider_stdout);
+        tracing::info!("📖 Starting to read {} stdout...", provider_stdout);
         let mut lines = stdout_reader.lines();
         let mut line_count = 0;
 
@@ -1370,7 +1380,7 @@ async fn spawn_agent_system(
 
             // Log first output
             if !first_output_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                info!(
+                tracing::info!(
                     "🎉 First output received from {} process! Line: {}",
                     provider_stdout,
                     line
@@ -1379,9 +1389,9 @@ async fn spawn_agent_system(
             }
 
             if line_count <= 5 {
-                info!("stdout[{}]: {}", line_count, line);
+                tracing::info!("stdout[{}]: {}", line_count, line);
             } else {
-                debug!("stdout[{}]: {}", line_count, line);
+                tracing::debug!("stdout[{}]: {}", line_count, line);
             }
 
             let Some(emitted_line) = transform_provider_output(&provider_stdout, &line) else {
@@ -1406,7 +1416,7 @@ async fn spawn_agent_system(
                             if let Ok(mut current_session_id) = session_id_clone.lock() {
                                 if current_session_id.is_empty() {
                                     *current_session_id = sid.to_string();
-                                    info!("🔑 Extracted session ID: {}", sid);
+                                    tracing::info!("🔑 Extracted session ID: {}", sid);
 
                                     if let Ok(conn) = Connection::open(&db_path_for_stdout) {
                                         match conn.execute(
@@ -1415,11 +1425,11 @@ async fn spawn_agent_system(
                                         ) {
                                             Ok(rows) => {
                                                 if rows > 0 {
-                                                    info!("✅ Updated agent run {} with session ID immediately", run_id);
+                                                    tracing::info!("✅ Updated agent run {} with session ID immediately", run_id);
                                                 }
                                             }
                                             Err(e) => {
-                                                error!("❌ Failed to update session ID immediately: {}", e);
+                                                tracing::error!("❌ Failed to update session ID immediately: {}", e);
                                             }
                                         }
                                     }
@@ -1436,7 +1446,7 @@ async fn spawn_agent_system(
             let _ = app_handle.emit("agent-output", &emitted_line);
         }
 
-        info!(
+        tracing::info!(
             "📖 Finished reading {} stdout. Total lines: {}",
             provider_stdout, line_count
         );
@@ -1450,7 +1460,7 @@ async fn spawn_agent_system(
     let registry_stderr = registry.0.clone();
 
     let stderr_task = tokio::spawn(async move {
-        info!("📖 Starting to read {} stderr...", provider_stderr);
+        tracing::info!("📖 Starting to read {} stderr...", provider_stderr);
         let mut lines = stderr_reader.lines();
         let mut error_count = 0;
 
@@ -1459,14 +1469,14 @@ async fn spawn_agent_system(
 
             // Log first error
             if !first_error_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                warn!(
+                tracing::warn!(
                     "⚠️ First error output from {} process! Line: {}",
                     provider_stderr, line
                 );
                 first_error_clone.store(true, std::sync::atomic::Ordering::Relaxed);
             }
 
-            error!("stderr[{}]: {}", error_count, line);
+            tracing::error!("stderr[{}]: {}", error_count, line);
 
             if provider_stderr == "claude" {
                 let _ = app_handle_stderr.emit(&format!("agent-error:{}", run_id), &line);
@@ -1487,12 +1497,12 @@ async fn spawn_agent_system(
         }
 
         if error_count > 0 {
-            warn!(
+            tracing::warn!(
                 "📖 Finished reading {} stderr. Total error lines: {}",
                 provider_stderr, error_count
             );
         } else {
-            info!("📖 Finished reading {} stderr. No errors.", provider_stderr);
+            tracing::info!("📖 Finished reading {} stderr. No errors.", provider_stderr);
         }
     });
 
@@ -1509,7 +1519,7 @@ async fn spawn_agent_system(
             execution_model.clone(),
         )
         .map_err(|e| format!("Failed to register process: {}", e))?;
-    info!("📋 Registered process in registry");
+    tracing::info!("📋 Registered process in registry");
 
     let db_path_for_monitor = db_path.clone(); // Clone for the monitor task
     let provider_monitor = provider_id.clone();
@@ -1524,13 +1534,13 @@ async fn spawn_agent_system(
 
     // Monitor process status and wait for completion
     tokio::spawn(async move {
-        info!("🕐 Starting process monitoring...");
+        tracing::info!("🕐 Starting process monitoring...");
 
         // Wait for first output with timeout
         for i in 0..300 {
             // 30 seconds (300 * 100ms)
             if first_output.load(std::sync::atomic::Ordering::Relaxed) {
-                info!(
+                tracing::info!(
                     "✅ Output detected after {}ms, continuing normal execution",
                     i * 100
                 );
@@ -1538,18 +1548,18 @@ async fn spawn_agent_system(
             }
 
             if i == 299 {
-                warn!(
+                tracing::warn!(
                     "⏰ TIMEOUT: No output from {} process after 30 seconds",
                     provider_monitor
                 );
-                warn!("💡 This usually means:");
-                warn!("   1. Provider process is waiting for user input");
-                warn!("   3. Provider failed to initialize but didn't report an error");
-                warn!("   4. Network connectivity issues");
-                warn!("   5. Authentication issues (API key not found/invalid)");
+                tracing::warn!("💡 This usually means:");
+                tracing::warn!("   1. Provider process is waiting for user input");
+                tracing::warn!("   3. Provider failed to initialize but didn't report an error");
+                tracing::warn!("   4. Network connectivity issues");
+                tracing::warn!("   5. Authentication issues (API key not found/invalid)");
 
                 // Process timed out - kill it via PID
-                warn!(
+                tracing::warn!(
                     "🔍 Process likely stuck waiting for input, attempting to kill PID: {}",
                     pid
                 );
@@ -1560,17 +1570,17 @@ async fn spawn_agent_system(
 
                 match kill_result {
                     Ok(output) if output.status.success() => {
-                        warn!("🔍 Successfully sent TERM signal to process");
+                        tracing::warn!("🔍 Successfully sent TERM signal to process");
                     }
                     Ok(_) => {
-                        warn!("🔍 Failed to kill process with TERM, trying KILL");
+                        tracing::warn!("🔍 Failed to kill process with TERM, trying KILL");
                         let _ = std::process::Command::new("kill")
                             .arg("-KILL")
                             .arg(pid.to_string())
                             .output();
                     }
                     Err(e) => {
-                        warn!("🔍 Error killing process: {}", e);
+                        tracing::warn!("🔍 Error killing process: {}", e);
                     }
                 }
 
@@ -1598,22 +1608,22 @@ async fn spawn_agent_system(
         }
 
         // Wait for reading tasks to complete
-        info!("⏳ Waiting for stdout/stderr reading to complete...");
+        tracing::info!("⏳ Waiting for stdout/stderr reading to complete...");
         let _ = stdout_task.await;
         let _ = stderr_task.await;
 
         let duration_ms = start_time.elapsed().as_millis() as i64;
-        info!("⏱️ Process execution took {} ms", duration_ms);
+        tracing::info!("⏱️ Process execution took {} ms", duration_ms);
         let process_success = match child_for_wait.wait().await {
             Ok(status) => {
-                info!(
+                tracing::info!(
                     "✅ {} exited with status: {}",
                     provider_monitor, status
                 );
                 status.success()
             }
             Err(e) => {
-                error!("❌ Failed to wait for {} process: {}", provider_monitor, e);
+                tracing::error!("❌ Failed to wait for {} process: {}", provider_monitor, e);
                 false
             }
         };
@@ -1635,11 +1645,11 @@ async fn spawn_agent_system(
             .unwrap_or_default();
 
         // Wait for process completion and update status
-        info!("✅ {} process execution monitoring complete", provider_monitor);
+        tracing::info!("✅ {} process execution monitoring complete", provider_monitor);
 
         // Update the run record with session/output and mark as completed.
         if let Ok(conn) = Connection::open(&db_path_for_monitor) {
-            info!(
+            tracing::info!(
                 "🔄 Updating database with final session ID: {}",
                 final_session_id
             );
@@ -1659,17 +1669,17 @@ async fn spawn_agent_system(
             ) {
                 Ok(rows_affected) => {
                     if rows_affected > 0 {
-                        info!("✅ Successfully updated agent run {} metadata", run_id);
+                        tracing::info!("✅ Successfully updated agent run {} metadata", run_id);
                     } else {
-                        warn!("⚠️ No rows affected when updating agent run {}", run_id);
+                        tracing::warn!("⚠️ No rows affected when updating agent run {}", run_id);
                     }
                 }
                 Err(e) => {
-                    error!("❌ Failed to update agent run {} metadata: {}", run_id, e);
+                    tracing::error!("❌ Failed to update agent run {} metadata: {}", run_id, e);
                 }
             }
         } else {
-            error!(
+            tracing::error!(
                 "❌ Failed to open database to update session ID for run {}",
                 run_id
             );
@@ -1762,21 +1772,21 @@ pub async fn kill_agent_session(
     registry: State<'_, crate::process::ProcessRegistryState>,
     run_id: i64,
 ) -> Result<bool, String> {
-    info!("Attempting to kill agent session {}", run_id);
+    tracing::info!("Attempting to kill agent session {}", run_id);
 
     // First try to kill using the process registry
     let killed_via_registry = match registry.0.kill_process(run_id).await {
         Ok(success) => {
             if success {
-                info!("Successfully killed process {} via registry", run_id);
+                tracing::info!("Successfully killed process {} via registry", run_id);
                 true
             } else {
-                warn!("Process {} not found in registry", run_id);
+                tracing::warn!("Process {} not found in registry", run_id);
                 false
             }
         }
         Err(e) => {
-            warn!("Failed to kill process {} via registry: {}", run_id, e);
+            tracing::warn!("Failed to kill process {} via registry: {}", run_id, e);
             false
         }
     };
@@ -1794,7 +1804,7 @@ pub async fn kill_agent_session(
         };
 
         if let Some(pid) = pid_result {
-            info!("Attempting fallback kill for PID {} from database", pid);
+            tracing::info!("Attempting fallback kill for PID {} from database", pid);
             let _ = registry.0.kill_process_by_pid(run_id, pid as u32)?;
         }
     }
@@ -1891,7 +1901,7 @@ pub async fn cleanup_finished_processes(db: State<'_, AgentDb>) -> Result<Vec<i6
 
             if updated > 0 {
                 cleaned_up.push(run_id);
-                info!(
+                tracing::info!(
                     "Marked agent run {} as completed (PID {} no longer running)",
                     run_id, pid
                 );
@@ -1952,13 +1962,13 @@ pub async fn get_session_output(
 
     // Check if projects directory exists
     if !projects_dir.exists() {
-        log::error!("Projects directory not found at: {:?}", projects_dir);
+        tracing::error!("Projects directory not found at: {:?}", projects_dir);
         return Err("Projects directory not found".to_string());
     }
 
     // Search for the session file in all project directories
     let mut session_file_path = None;
-    log::info!(
+    tracing::info!(
         "Searching for session file {} in all project directories",
         run.session_id
     );
@@ -1968,20 +1978,20 @@ pub async fn get_session_output(
             let path = entry.path();
             if path.is_dir() {
                 let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
-                log::debug!("Checking project directory: {}", dir_name);
+                tracing::debug!("Checking project directory: {}", dir_name);
 
                 let potential_session_file = path.join(format!("{}.jsonl", run.session_id));
                 if potential_session_file.exists() {
-                    log::info!("Found session file at: {:?}", potential_session_file);
+                    tracing::info!("Found session file at: {:?}", potential_session_file);
                     session_file_path = Some(potential_session_file);
                     break;
                 } else {
-                    log::debug!("Session file not found in: {}", dir_name);
+                    tracing::debug!("Session file not found in: {}", dir_name);
                 }
             }
         }
     } else {
-        log::error!("Failed to read projects directory");
+        tracing::error!("Failed to read projects directory");
     }
 
     // If we found the session file, read it
@@ -1989,7 +1999,7 @@ pub async fn get_session_output(
         match tokio::fs::read_to_string(&session_path).await {
             Ok(content) => Ok(content),
             Err(e) => {
-                log::error!(
+                tracing::error!(
                     "Failed to read session file {}: {}",
                     session_path.display(),
                     e
@@ -2001,7 +2011,7 @@ pub async fn get_session_output(
         }
     } else {
         // If session file not found, try the old method as fallback
-        log::warn!(
+        tracing::warn!(
             "Session file not found for {}, trying legacy method",
             run.session_id
         );
@@ -2087,12 +2097,12 @@ pub async fn stream_session_output(
                     |row| row.get::<_, String>(0),
                 ) {
                     if status != "running" {
-                        debug!("Session {} is no longer running, stopping stream", run_id);
+                        tracing::debug!("Session {} is no longer running, stopping stream", run_id);
                         break;
                     }
                 } else {
                     // If we can't query the status, assume it's still running
-                    debug!(
+                    tracing::debug!(
                         "Could not query session status for {}, continuing stream",
                         run_id
                     );
@@ -2102,7 +2112,7 @@ pub async fn stream_session_output(
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         }
 
-        debug!("Stopped streaming for session {}", run_id);
+        tracing::debug!("Stopped streaming for session {}", run_id);
     });
 
     Ok(())
@@ -2403,7 +2413,7 @@ struct GitHubApiResponse {
 /// Fetch list of agents from GitHub repository
 #[tauri::command]
 pub async fn fetch_github_agents() -> Result<Vec<GitHubAgentFile>, String> {
-    info!("Fetching agents from GitHub repository...");
+    tracing::info!("Fetching agents from GitHub repository...");
 
     let client = reqwest::Client::new();
     let url = "https://api.github.com/repos/getAsterisk/opcode/contents/cc_agents";
@@ -2442,14 +2452,14 @@ pub async fn fetch_github_agents() -> Result<Vec<GitHubAgentFile>, String> {
         })
         .collect();
 
-    info!("Found {} agents on GitHub", agent_files.len());
+    tracing::info!("Found {} agents on GitHub", agent_files.len());
     Ok(agent_files)
 }
 
 /// Fetch and preview a specific agent from GitHub
 #[tauri::command]
 pub async fn fetch_github_agent_content(download_url: String) -> Result<AgentExport, String> {
-    info!("Fetching agent content from: {}", download_url);
+    tracing::info!("Fetching agent content from: {}", download_url);
 
     let client = reqwest::Client::new();
     let response = client
@@ -2493,7 +2503,7 @@ pub async fn import_agent_from_github(
     db: State<'_, AgentDb>,
     download_url: String,
 ) -> Result<Agent, String> {
-    info!("Importing agent from GitHub: {}", download_url);
+    tracing::info!("Importing agent from GitHub: {}", download_url);
 
     // First, fetch the agent content
     let export_data = fetch_github_agent_content(download_url).await?;
@@ -2512,7 +2522,7 @@ pub async fn import_agent_from_github(
 pub async fn load_agent_session_history(
     session_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    log::info!("Loading agent session history for session: {}", session_id);
+    tracing::info!("Loading agent session history for session: {}", session_id);
 
     let claude_dir = dirs::home_dir()
         .ok_or("Failed to get home directory")?
@@ -2521,13 +2531,13 @@ pub async fn load_agent_session_history(
     let projects_dir = claude_dir.join("projects");
 
     if !projects_dir.exists() {
-        log::error!("Projects directory not found at: {:?}", projects_dir);
+        tracing::error!("Projects directory not found at: {:?}", projects_dir);
         return Err("Projects directory not found".to_string());
     }
 
     // Search for the session file in all project directories
     let mut session_file_path = None;
-    log::info!(
+    tracing::info!(
         "Searching for session file {} in all project directories",
         session_id
     );
@@ -2537,20 +2547,20 @@ pub async fn load_agent_session_history(
             let path = entry.path();
             if path.is_dir() {
                 let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
-                log::debug!("Checking project directory: {}", dir_name);
+                tracing::debug!("Checking project directory: {}", dir_name);
 
                 let potential_session_file = path.join(format!("{}.jsonl", session_id));
                 if potential_session_file.exists() {
-                    log::info!("Found session file at: {:?}", potential_session_file);
+                    tracing::info!("Found session file at: {:?}", potential_session_file);
                     session_file_path = Some(potential_session_file);
                     break;
                 } else {
-                    log::debug!("Session file not found in: {}", dir_name);
+                    tracing::debug!("Session file not found in: {}", dir_name);
                 }
             }
         }
     } else {
-        log::error!("Failed to read projects directory");
+        tracing::error!("Failed to read projects directory");
     }
 
     if let Some(session_path) = session_file_path {

@@ -61,7 +61,7 @@ pub async fn run_mobile_sync_server(
         .with_state(state);
 
     let listener = TcpListener::bind(format!("{}:{}", bind_host, port)).await?;
-    log::info!("mobile sync server listening on {}:{}", bind_host, port);
+    tracing::info!("mobile sync server listening on {}:{}", bind_host, port);
     axum::serve(listener, router).await?;
     Ok(())
 }

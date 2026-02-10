@@ -19,15 +19,9 @@ import { Label } from "@/components/ui/label";
 import { Popover } from "@/components/ui/popover";
 import { api, type ProviderCapability, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { canonicalizeProjectPath } from "@/lib/terminalPaneState";
 
-const ENABLE_DEBUG_LOGS =
-  Boolean((globalThis as any)?.__OPCODE_DEBUG_LOGS__) &&
-  Boolean(import.meta.env?.DEV);
-
-function debugLog(...args: unknown[]) {
-  if (!ENABLE_DEBUG_LOGS) return;
-  console.log(...args);
-}
+import { logger } from '@/lib/logger';
 
 import {
   listenToProviderSessionEvent as listen,
@@ -270,6 +264,10 @@ interface ProviderSessionPaneProps {
    * Whether the current pane can be closed.
    */
   canClosePane?: boolean;
+  /**
+   * Optional callback to activate the pane that owns this session.
+   */
+  onPaneActivate?: () => void;
 }
 
 export function shouldShowProjectPathHeader(
@@ -310,6 +308,16 @@ export function resolveStreamingState(params: {
   return params.isLoading;
 }
 
+export function shouldResetNativeBootStateOnProjectSwitch(
+  previousProjectPath: string | undefined,
+  nextProjectPath: string | undefined
+): boolean {
+  return (
+    canonicalizeProjectPath(previousProjectPath) !==
+    canonicalizeProjectPath(nextProjectPath)
+  );
+}
+
 /**
  * ProviderSessionPane component for interactive provider sessions
  * 
@@ -332,6 +340,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   onSplitPane,
   onClosePane,
   canClosePane = true,
+  onPaneActivate,
   paneId,
   workspaceId,
   terminalTabId,
@@ -439,6 +448,9 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   const autoTitleSessionStartedAtRef = useRef<number | null>(null);
   const didApplyEarlyAutoTitleRef = useRef(false);
   const lastAutoTitleTranscriptRef = useRef<string>("");
+  const lastCanonicalProjectPathRef = useRef<string>(
+    canonicalizeProjectPath(initialProjectPath || session?.project_path || "")
+  );
 
   const AUTO_TITLE_MODEL = "glm-4.7-flash";
   const AUTO_TITLE_EARLY_PROMPT_THRESHOLD = 2;
@@ -534,7 +546,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
       })
       .catch((error) => {
         if (cancelled) return;
-        console.warn("[ProviderSessionPane] Failed to load provider capabilities:", error);
+        logger.warn('ui', '[ProviderSessionPane] Failed to load provider capabilities:', { error: error });
       });
 
     return () => {
@@ -603,6 +615,27 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   useEffect(() => {
     queuedPromptsRef.current = queuedPrompts;
   }, [queuedPrompts]);
+
+  useEffect(() => {
+    const previousCanonicalPath = lastCanonicalProjectPathRef.current;
+    const nextCanonicalPath = canonicalizeProjectPath(projectPath);
+    if (!shouldResetNativeBootStateOnProjectSwitch(previousCanonicalPath, nextCanonicalPath)) {
+      return;
+    }
+
+    lastCanonicalProjectPathRef.current = nextCanonicalPath;
+    setHasBootedNativeTerminal(false);
+    setNativeTerminalCommand("");
+    setShowNativeRestorePrompt(false);
+    setNativeRestoreNotice(null);
+    onResumeSessionIdChange?.(undefined);
+    onEmbeddedTerminalIdChange?.(undefined);
+  }, [
+    onEmbeddedTerminalIdChange,
+    onResumeSessionIdChange,
+    projectPath,
+    setNativeRestoreNotice,
+  ]);
 
   // Get effective session info (from prop or extracted) - use useMemo to ensure it updates
   const effectiveSession = useMemo(() => {
@@ -687,7 +720,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
 
       bootNativeTerminalWithStartupCommand();
     } catch (restoreError) {
-      console.warn('[ProviderSessionPane] Failed to resolve latest native restore session', restoreError);
+      logger.warn('ui', '[ProviderSessionPane] Failed to resolve latest native restore session', { error: restoreError });
       setNativeRestoreNotice('Could not load prior sessions. Starting fresh.');
       bootNativeTerminalWithStartupCommand();
     }
@@ -821,7 +854,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           didApplyEarlyAutoTitleRef.current = true;
         }
       } catch (autoRenameError) {
-        console.warn("[ProviderSessionPane] Native auto-rename failed", autoRenameError);
+        logger.warn('ui', '[ProviderSessionPane] Native auto-rename failed', { error: autoRenameError });
       }
     };
 
@@ -945,7 +978,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
 
   // Debug logging
   useEffect(() => {
-    debugLog('[ProviderSessionPane] State update:', {
+    logger.debug('provider', 'State update:', {
       projectPath,
       session,
       extractedSessionInfo,
@@ -1074,7 +1107,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         }
       }, 100);
     } catch (err) {
-      console.error("Failed to load session history:", err);
+      logger.error("ui", "Failed to load session history:", { error: err });
       setError("Failed to load session history");
     } finally {
       setIsLoading(false);
@@ -1095,7 +1128,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         
         if (activeSession) {
           // Session is still active, reconnect to its stream
-          debugLog('[ProviderSessionPane] Found active session, reconnecting:', session.id);
+          logger.debug('provider', 'Found active session, reconnecting', { sessionId: session.id });
           // IMPORTANT: Set providerSessionId before reconnecting
           setProviderSessionId(session.id);
           
@@ -1106,17 +1139,17 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           reconnectToSession(session.id);
         }
       } catch (err) {
-        console.error('Failed to check for active sessions:', err);
+        logger.error("ui", "Failed to check for active sessions:", { error: err });
       }
     }
   };
 
   const reconnectToSession = async (sessionId: string) => {
-    debugLog('[ProviderSessionPane] Reconnecting to session:', sessionId);
+    logger.debug('provider', 'Reconnecting to session', { sessionId });
     
     // Prevent duplicate listeners
     if (isListeningRef.current) {
-      debugLog('[ProviderSessionPane] Already listening to session, skipping reconnect');
+      logger.debug('provider', 'Already listening to session, skipping reconnect');
       return;
     }
     
@@ -1133,7 +1166,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     // Set up session-specific listeners
     const outputUnlisten = await listen(`provider-session-output:${sessionId}`, async (event: any) => {
       try {
-        debugLog('[ProviderSessionPane] Received provider-session-output on reconnect:', event.payload);
+        logger.debug('provider', 'Received provider-session-output on reconnect', { payload: event.payload });
         
         if (!isMountedRef.current) return;
         markFirstStreamSeen(activeProviderId);
@@ -1158,12 +1191,12 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
 
         setMessages(prev => [...prev, message]);
       } catch (err) {
-        console.error("Failed to parse message:", err, event.payload);
+        logger.error("ui", "Failed to parse message", { error: err, payload: event.payload });
       }
     });
 
     const errorUnlisten = await listen(`provider-session-error:${sessionId}`, (event: any) => {
-      console.error("Provider session error:", event.payload);
+      logger.error("ui", "Provider session error:", { error: event.payload });
       if (isMountedRef.current) {
         setError(event.payload);
         clearStreamWatchdogs();
@@ -1174,7 +1207,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     });
 
     const completeUnlisten = await listen(`provider-session-complete:${sessionId}`, async (event: any) => {
-      debugLog('[ProviderSessionPane] Received provider-session-complete on reconnect:', event.payload);
+      logger.debug('provider', 'Received provider-session-complete on reconnect', { payload: event.payload });
       if (isMountedRef.current) {
         const completion = normalizeProviderSessionCompletion(event.payload);
         if (completion.success) {
@@ -1298,7 +1331,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
             return result.trim();
           }
         } catch (dialogError) {
-          console.error('Failed to open native directory picker:', dialogError);
+          logger.error("ui", "Failed to open native directory picker:", { error: dialogError });
         }
       }
 
@@ -1312,7 +1345,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         return typedPath.trim();
       }
     } catch (err) {
-      console.error('Failed to resolve project path:', err);
+      logger.error("ui", "Failed to resolve project path:", { error: err });
     }
 
     return null;
@@ -1334,7 +1367,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     const modelForTracking = model || "default";
     let runProjectPath = projectPath;
 
-    debugLog('[ProviderSessionPane] handleSendPrompt called with:', {
+    logger.debug('provider', 'handleSendPrompt called with:', {
       prompt,
       model,
       providerToUse,
@@ -1423,20 +1456,20 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         //     generic ones to prevent duplicate handling.
         // --------------------------------------------------------------------
 
-        debugLog('[ProviderSessionPane] Setting up generic event listeners first');
+        logger.debug('provider', 'Setting up generic event listeners first');
 
         let currentSessionId: string | null = providerSessionId || effectiveSession?.id || null;
 
         // Helper to attach session-specific listeners **once we are sure**
         const attachSessionSpecificListeners = async (sid: string) => {
-          debugLog('[ProviderSessionPane] Attaching session-specific listeners for', sid);
+          logger.debug('provider', 'Attaching session-specific listeners', { sessionId: sid });
 
           const specificOutputUnlisten = await listen(`provider-session-output:${sid}`, (evt: any) => {
             handleStreamMessage(evt.payload);
           });
 
           const specificErrorUnlisten = await listen(`provider-session-error:${sid}`, (evt: any) => {
-            console.error('Provider session error (scoped):', evt.payload);
+            logger.error("ui", "Provider session error (scoped):", { error: evt.payload });
             setError(evt.payload);
             clearStreamWatchdogs();
             setIsLoading(false);
@@ -1454,7 +1487,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           });
 
           const specificCompleteUnlisten = await listen(`provider-session-complete:${sid}`, (evt: any) => {
-            debugLog('[ProviderSessionPane] Received provider-session-complete (scoped):', evt.payload);
+            logger.debug('provider', 'Received provider-session-complete (scoped)', { payload: evt.payload });
             processComplete(evt.payload);
           });
 
@@ -1475,7 +1508,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
                 : (event.payload as ProviderSessionMessage);
             if (msg.type === 'system' && msg.subtype === 'init' && msg.session_id) {
               if (!currentSessionId || currentSessionId !== msg.session_id) {
-                debugLog('[ProviderSessionPane] Detected new session_id from generic listener:', msg.session_id);
+                logger.debug('provider', 'Detected new session_id from generic listener', { sessionId: msg.session_id });
                 currentSessionId = msg.session_id;
                 setProviderSessionId(msg.session_id);
 
@@ -1522,7 +1555,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
               rawPayload = JSON.stringify(payload);
             }
             
-            debugLog('[ProviderSessionPane] handleStreamMessage - message type:', message.type);
+            logger.debug('provider', 'handleStreamMessage', { messageType: message.type });
 
             const needsInputAttention = buildNeedsInputAttentionPayload(message, {
               source: "provider_session",
@@ -1605,7 +1638,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
 
             setMessages((prev) => [...prev, message]);
           } catch (err) {
-            console.error('Failed to parse message:', err, payload);
+            logger.error("ui", "Failed to parse message:", { error: err, payload });
           }
         }
 
@@ -1722,7 +1755,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
                 setTimelineVersion((v) => v + 1);
               }
             } catch (err) {
-              console.error('Failed to check auto checkpoint:', err);
+              logger.error("ui", "Failed to check auto checkpoint:", { error: err });
             }
           }
 
@@ -1742,7 +1775,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         };
 
         const genericErrorUnlisten = await listen('provider-session-error', (evt: any) => {
-          console.error('Provider session error:', evt.payload);
+          logger.error("ui", "Provider session error:", { error: evt.payload });
           setError(evt.payload);
           clearStreamWatchdogs();
           setIsLoading(false);
@@ -1759,7 +1792,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         });
 
         const genericCompleteUnlisten = await listen('provider-session-complete', (evt: any) => {
-          debugLog('[ProviderSessionPane] Received provider-session-complete (generic):', evt.payload);
+          logger.debug('provider', 'Received provider-session-complete (generic)', { payload: evt.payload });
           processComplete(evt.payload);
         });
 
@@ -1827,7 +1860,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
 
         // Execute the appropriate command (provider-aware)
         if (effectiveSession && !isFirstPrompt) {
-          debugLog('[ProviderSessionPane] Resuming session:', effectiveSession.id, 'provider:', providerToUse);
+          logger.debug('provider', 'Resuming session', { sessionId: effectiveSession.id, provider: providerToUse });
           trackEvent.sessionResumed(effectiveSession.id);
           trackEvent.modelSelected(modelForTracking);
           if (isClaudeProviderForRun) {
@@ -1861,7 +1894,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
             }
           }
         } else {
-          debugLog('[ProviderSessionPane] Starting new session, provider:', providerToUse);
+          logger.debug('provider', 'Starting new session', { provider: providerToUse });
           setIsFirstPrompt(false);
           trackEvent.sessionCreated(modelForTracking, 'prompt_input');
           trackEvent.modelSelected(modelForTracking);
@@ -1879,7 +1912,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
         }
       }
     } catch (err) {
-      console.error("Failed to send prompt:", err);
+      logger.error("ui", "Failed to send prompt:", { error: err });
       setError("Failed to send prompt");
       setIsLoading(false);
       hasActiveSessionRef.current = false;
@@ -2077,7 +2110,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
       };
       setMessages(prev => [...prev, cancelMessage]);
     } catch (err) {
-      console.error("Failed to cancel execution:", err);
+      logger.error("ui", "Failed to cancel execution:", { error: err });
       
       // Even if backend fails, we should update UI to reflect stopped state
       // Add error message but still stop the UI loading state
@@ -2137,13 +2170,13 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
       
       // Open the new forked session
       // You would need to implement navigation to the new session
-      debugLog("Forked to new session:", newSessionId);
+      logger.debug('provider', 'Forked to new session', { sessionId: newSessionId });
       
       setShowForkDialog(false);
       setForkCheckpointId(null);
       setForkSessionName("");
     } catch (err) {
-      console.error("Failed to fork checkpoint:", err);
+      logger.error("ui", "Failed to fork checkpoint:", { error: err });
       setError("Failed to fork checkpoint");
     } finally {
       setIsLoading(false);
@@ -2157,7 +2190,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
   };
 
   const handlePreviewUrlChange = (url: string) => {
-    debugLog('[ProviderSessionPane] Preview URL changed to:', url);
+    logger.debug('provider', 'Preview URL changed', { url });
     setPreviewUrl(url);
   };
 
@@ -2174,7 +2207,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
     isMountedRef.current = true;
     
     return () => {
-      debugLog('[ProviderSessionPane] Component unmounting, cleaning up listeners');
+      logger.debug('provider', 'Component unmounting, cleaning up listeners');
       isMountedRef.current = false;
       isListeningRef.current = false;
       
@@ -2217,7 +2250,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
       // Clear checkpoint manager when session ends
       if (effectiveSession) {
         api.clearCheckpointManager(effectiveSession.id).catch(err => {
-          console.error("Failed to clear checkpoint manager:", err);
+          logger.error("ui", "Failed to clear checkpoint manager:", { error: err });
         });
       }
     };
@@ -2357,6 +2390,7 @@ export const ProviderSessionPane: React.FC<ProviderSessionPaneProps> = ({
           onSplitPane={onSplitPane}
           onClosePane={onClosePane}
           canClosePane={resolveCanClosePane(canClosePane)}
+          onPaneActivate={onPaneActivate}
           onRunningChange={setNativeTerminalCommandActive}
           className="h-full min-h-0"
         />

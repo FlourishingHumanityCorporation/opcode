@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Toast, ToastContainer } from "@/components/ui/toast";
 import { api, type ClaudeMdFile } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { logger } from '@/lib/logger';
 
 interface ClaudeFileEditorProps {
   /**
@@ -58,7 +59,7 @@ export const ClaudeFileEditor: React.FC<ClaudeFileEditorProps> = ({
       setContent(fileContent);
       setOriginalContent(fileContent);
     } catch (err) {
-      console.error("Failed to load file:", err);
+      logger.error('ui', 'Failed to load file:', { error: err });
       setError("Failed to load CLAUDE.md file");
     } finally {
       setLoading(false);
@@ -74,7 +75,7 @@ export const ClaudeFileEditor: React.FC<ClaudeFileEditorProps> = ({
       setOriginalContent(content);
       setToast({ message: "File saved successfully", type: "success" });
     } catch (err) {
-      console.error("Failed to save file:", err);
+      logger.error('ui', 'Failed to save file:', { error: err });
       setError("Failed to save CLAUDE.md file");
       setToast({ message: "Failed to save file", type: "error" });
     } finally {

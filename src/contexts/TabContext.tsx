@@ -19,6 +19,7 @@ import {
   mobileSyncBridge,
 } from '@/services/mobileSyncBridge';
 import { api } from '@/lib/api';
+import { logger } from '@/lib/logger';
 
 export type UtilityOverlayType =
   | 'agents'
@@ -1233,7 +1234,7 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               break;
           }
         } catch (error) {
-          console.error('[mobileSync] Failed to execute mobile action', actionType, error);
+          logger.error('mobile-sync', 'Failed to execute mobile action', { actionType, error });
         }
       })();
     };

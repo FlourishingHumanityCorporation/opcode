@@ -8,6 +8,7 @@ import {
   isInteractiveTarget,
   resolveTerminalStatusFromStreaming,
 } from "@/components/TerminalPaneSurface";
+import { api } from "@/lib/api";
 
 const capturedProviderSessionProps = vi.hoisted(() => ({
   value: null as any,
@@ -81,6 +82,7 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
   let updatePaneStateSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    vi.restoreAllMocks();
     capturedProviderSessionProps.value = null;
     splitPaneSpy = vi.fn();
     closePaneSpy = vi.fn();
@@ -136,17 +138,24 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
   it("detects interactive targets for pane activation guard", () => {
     const root = document.createElement("div");
     const button = document.createElement("button");
+    const textarea = document.createElement("textarea");
+    const xtermHelper = document.createElement("textarea");
+    xtermHelper.className = "xterm-helper-textarea";
     const plain = document.createElement("div");
     const roleButton = document.createElement("span");
     roleButton.setAttribute("role", "button");
     const noActivate = document.createElement("span");
     noActivate.setAttribute("data-no-pane-activate", "true");
     root.appendChild(button);
+    root.appendChild(textarea);
+    root.appendChild(xtermHelper);
     root.appendChild(plain);
     root.appendChild(roleButton);
     root.appendChild(noActivate);
 
     expect(isInteractiveTarget(button)).toBe(true);
+    expect(isInteractiveTarget(textarea)).toBe(true);
+    expect(isInteractiveTarget(xtermHelper)).toBe(false);
     expect(isInteractiveTarget(roleButton)).toBe(true);
     expect(isInteractiveTarget(noActivate)).toBe(true);
     expect(isInteractiveTarget(plain)).toBe(false);
@@ -174,9 +183,28 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
     expect(capturedProviderSessionProps.value.currentTerminalTitle).toBe("Terminal 1");
     expect(capturedProviderSessionProps.value.isTerminalTitleLocked).toBe(false);
     expect(capturedProviderSessionProps.value.canClosePane).toBe(false);
+    expect(typeof capturedProviderSessionProps.value.onPaneActivate).toBe("function");
 
     capturedProviderSessionProps.value.onAutoRenameTerminalTitle("Renamed from test");
     expect(updateTabSpy).toHaveBeenCalledWith("terminal-1", { title: "Renamed from test" });
+  });
+
+  it("activates the current pane when onPaneActivate is invoked", () => {
+    const { workspace, terminal } = makeWorkspaceAndTerminal();
+
+    renderToStaticMarkup(
+      React.createElement(TerminalPaneSurface, {
+        workspace,
+        terminal,
+        paneId: "pane-1",
+        isActive: false,
+        isPaneVisible: true,
+      })
+    );
+
+    expect(capturedProviderSessionProps.value).toBeTruthy();
+    capturedProviderSessionProps.value.onPaneActivate();
+    expect(activatePaneSpy).toHaveBeenCalledWith("workspace-1", "terminal-1", "pane-1");
   });
 
   it("marks inactive panes as non-interactive candidates", () => {
@@ -265,6 +293,9 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
   });
 
   it("auto-renames default workspace title on first project path registration", () => {
+    const closeEmbeddedTerminalSpy = vi
+      .spyOn(api, "closeEmbeddedTerminal")
+      .mockResolvedValue(undefined);
     const { workspace, terminal } = makeWorkspaceAndTerminal();
     const workspaceWithDefaultTitle: Tab = {
       ...workspace,
@@ -275,11 +306,14 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
       ...terminal,
       sessionState: {
         ...terminal.sessionState,
+        sessionId: "session-123",
         projectPath: "",
         initialProjectPath: "",
       },
       paneStates: {
         "pane-1": {
+          sessionId: "session-123",
+          embeddedTerminalId: "term-abc",
           projectPath: "",
         },
       },
@@ -297,6 +331,21 @@ describe("TerminalPaneSurface pane activity plumbing", () => {
 
     capturedProviderSessionProps.value.onProjectPathChange("/Users/paulrohde/CodeProjects/apps/VideoProcessor");
 
+    expect(closeEmbeddedTerminalSpy).toHaveBeenCalledWith("term-abc");
+    expect(updateTabSpy).toHaveBeenCalledWith("terminal-1", {
+      sessionState: expect.objectContaining({
+        sessionId: undefined,
+        sessionData: undefined,
+        projectPath: "/Users/paulrohde/CodeProjects/apps/VideoProcessor",
+        initialProjectPath: "/Users/paulrohde/CodeProjects/apps/VideoProcessor",
+      }),
+    });
+    expect(updatePaneStateSpy).toHaveBeenCalledWith("workspace-1", "terminal-1", "pane-1", {
+      projectPath: "/Users/paulrohde/CodeProjects/apps/VideoProcessor",
+      embeddedTerminalId: undefined,
+      sessionId: undefined,
+      restorePreference: "start_fresh",
+    });
     expect(updateTabSpy).toHaveBeenCalledWith("workspace-1", {
       projectPath: "/Users/paulrohde/CodeProjects/apps/VideoProcessor",
       title: "VideoProcessor",

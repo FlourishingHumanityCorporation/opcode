@@ -23,6 +23,7 @@ import { api, type Checkpoint, type TimelineNode, type SessionTimeline, type Che
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useTrackEvent } from "@/hooks";
+import { logger } from '@/lib/logger';
 
 interface TimelineNavigatorProps {
   sessionId: string;
@@ -92,7 +93,7 @@ export const TimelineNavigator: React.FC<TimelineNavigatorProps> = ({
         setExpandedNodes(new Set(pathToNode));
       }
     } catch (err) {
-      console.error("Failed to load timeline:", err);
+      logger.error('ui', 'Failed to load timeline:', { error: err });
       setError("Failed to load timeline");
     } finally {
       setIsLoading(false);
@@ -145,7 +146,7 @@ export const TimelineNavigator: React.FC<TimelineNavigatorProps> = ({
       setShowCreateDialog(false);
       await loadTimeline();
     } catch (err) {
-      console.error("Failed to create checkpoint:", err);
+      logger.error('ui', 'Failed to create checkpoint:', { error: err });
       setError("Failed to create checkpoint");
     } finally {
       setIsLoading(false);
@@ -185,7 +186,7 @@ export const TimelineNavigator: React.FC<TimelineNavigatorProps> = ({
       await loadTimeline();
       onCheckpointSelect(checkpoint);
     } catch (err) {
-      console.error("Failed to restore checkpoint:", err);
+      logger.error('ui', 'Failed to restore checkpoint:', { error: err });
       setError("Failed to restore checkpoint");
     } finally {
       setIsLoading(false);
@@ -227,7 +228,7 @@ export const TimelineNavigator: React.FC<TimelineNavigatorProps> = ({
       setCompareCheckpoint(checkpoint);
       setShowDiffDialog(true);
     } catch (err) {
-      console.error("Failed to get diff:", err);
+      logger.error('ui', 'Failed to get diff:', { error: err });
       setError("Failed to compare checkpoints");
     } finally {
       setIsLoading(false);

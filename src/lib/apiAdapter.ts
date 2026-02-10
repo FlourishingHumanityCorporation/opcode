@@ -8,19 +8,12 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { logger } from "@/lib/logger";
 import {
   normalizeProviderSessionCompletionPayload,
   type ProviderSessionCompletionPayload,
 } from "@/lib/providerSessionProtocol";
 
-const ENABLE_DEBUG_LOGS =
-  Boolean((globalThis as any)?.__OPCODE_DEBUG_LOGS__) &&
-  Boolean(import.meta.env?.DEV);
-
-function debugLog(...args: unknown[]) {
-  if (!ENABLE_DEBUG_LOGS) return;
-  console.log(...args);
-}
 
 // Extend Window interface for Tauri
 declare global {
@@ -57,7 +50,7 @@ function detectEnvironment(): boolean {
     navigator.userAgent.includes('Tauri')
   );
 
-  debugLog('[detectEnvironment] isTauri:', isTauri, 'userAgent:', navigator.userAgent);
+  logger.debug('ipc', '[detectEnvironment] isTauri detected', { isTauri, userAgent: navigator.userAgent });
   
   isTauriEnvironment = isTauri;
   return isTauri;
@@ -78,7 +71,7 @@ interface ApiResponse<T> {
 async function restApiCall<T>(endpoint: string, params?: any): Promise<T> {
   // First handle path parameters in the endpoint string
   let processedEndpoint = endpoint;
-  debugLog(`[REST API] Original endpoint: ${endpoint}, params:`, params);
+  logger.debug('ipc', `[REST API] Original endpoint: ${endpoint}, params:`, params);
   
   if (params) {
     Object.keys(params).forEach(key => {
@@ -91,14 +84,14 @@ async function restApiCall<T>(endpoint: string, params?: any): Promise<T> {
       
       placeholders.forEach(placeholder => {
         if (processedEndpoint.includes(placeholder)) {
-          debugLog(`[REST API] Replacing ${placeholder} with ${params[key]}`);
+          logger.debug('ipc', `[REST API] Replacing ${placeholder} with ${params[key]}`);
           processedEndpoint = processedEndpoint.replace(placeholder, encodeURIComponent(String(params[key])));
         }
       });
     });
   }
   
-  debugLog(`[REST API] Processed endpoint: ${processedEndpoint}`);
+  logger.debug('ipc', `[REST API] Processed endpoint: ${processedEndpoint}`);
   
   const url = new URL(processedEndpoint, window.location.origin);
   
@@ -136,7 +129,7 @@ async function restApiCall<T>(endpoint: string, params?: any): Promise<T> {
 
     return result.data as T;
   } catch (error) {
-    console.error(`REST API call failed for ${endpoint}:`, error);
+    logger.error('ipc', `REST API call failed for ${endpoint}:`, { error });
     throw error;
   }
 }
@@ -149,17 +142,17 @@ export async function apiCall<T>(command: string, params?: any): Promise<T> {
   
   if (!isWeb) {
     // Tauri environment - try invoke
-    debugLog(`[Tauri] Calling: ${command}`, params);
+    logger.debug('ipc', `[Tauri] Calling: ${command}`, params);
     try {
       return await invoke<T>(command, params);
     } catch (error) {
-      console.warn(`[Tauri] invoke failed, falling back to web mode:`, error);
+      logger.warn('ipc', `[Tauri] invoke failed, falling back to web mode:`, { error });
       // Fall through to web mode
     }
   }
   
   // Web environment - use REST API
-  debugLog(`[Web] Calling: ${command}`, params);
+  logger.debug('ipc', `[Web] Calling: ${command}`, params);
   
   // Special handling for commands that use streaming/events
   const streamingCommands = ['execute_provider_session', 'continue_provider_session', 'resume_provider_session'];
@@ -300,7 +293,7 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
 
   const endpoint = commandToEndpoint[command];
   if (!endpoint) {
-    console.warn(`Unknown command: ${command}, falling back to generic endpoint`);
+    logger.warn('ipc', `Unknown command: ${command}, falling back to generic endpoint`);
     return `/api/unknown/${command}`;
   }
 
@@ -326,10 +319,10 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
     // Use wss:// for HTTPS connections (e.g., ngrok), ws:// for HTTP (localhost)
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${window.location.host}/ws/provider-session`;
-    debugLog(`[TRACE] handleStreamingCommand called:`);
-    debugLog(`[TRACE]   command: ${command}`);
-    debugLog(`[TRACE]   params:`, params);
-    debugLog(`[TRACE]   WebSocket URL: ${wsUrl}`);
+    logger.debug('ipc', `[TRACE] handleStreamingCommand called:`);
+    logger.debug('ipc', `[TRACE]   command: ${command}`);
+    logger.debug('ipc', `[TRACE]   params:`, params);
+    logger.debug('ipc', `[TRACE]   WebSocket URL: ${wsUrl}`);
     
     const ws = new WebSocket(wsUrl);
     // Session ID selection order:
@@ -373,7 +366,7 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
     };
     
     ws.onopen = () => {
-      debugLog(`[TRACE] WebSocket opened successfully`);
+      logger.debug('ipc', `[TRACE] WebSocket opened successfully`);
       
       // Send execution request
       const request = {
@@ -384,24 +377,24 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
         session_id: params?.sessionId,
       };
       
-      debugLog(`[TRACE] Sending WebSocket request:`, request);
-      debugLog(`[TRACE] Request JSON:`, JSON.stringify(request));
+      logger.debug('ipc', '[TRACE] Sending WebSocket request', { request });
+      logger.debug('ipc', '[TRACE] Request JSON', { json: JSON.stringify(request) });
       
       ws.send(JSON.stringify(request));
-      debugLog(`[TRACE] WebSocket request sent`);
+      logger.debug('ipc', `[TRACE] WebSocket request sent`);
     };
     
     ws.onmessage = (event) => {
-      debugLog(`[TRACE] WebSocket message received:`, event.data);
+      logger.debug('ipc', '[TRACE] WebSocket message received', { data: event.data });
       try {
         const message = JSON.parse(event.data);
-        debugLog(`[TRACE] Parsed WebSocket message:`, message);
+        logger.debug('ipc', '[TRACE] Parsed WebSocket message', { message });
         
         if (message.type === 'start') {
-          debugLog(`[TRACE] Start message: ${message.message}`);
+          logger.debug('ipc', `[TRACE] Start message: ${message.message}`);
         } else if (message.type === 'output') {
-          debugLog(`[TRACE] Output message, content length: ${message.content?.length || 0}`);
-          debugLog(`[TRACE] Raw content:`, message.content);
+          logger.debug('ipc', `[TRACE] Output message, content length: ${message.content?.length || 0}`);
+          logger.debug('ipc', '[TRACE] Raw content', { content: message.content });
           
           // The backend sends provider output as a JSON string in the content field.
           // Parse it to recover the structured stream message.
@@ -410,7 +403,7 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
               ? JSON.parse(message.content) 
               : message.content;
             maybeUpdateActiveSessionId(providerSessionMessage);
-            debugLog(`[TRACE] Parsed provider session message:`, providerSessionMessage);
+            logger.debug('ipc', '[TRACE] Parsed provider session message', { message: providerSessionMessage });
             
             // Simulate Tauri event for compatibility with existing UI.
             dispatchProviderSessionEvent(
@@ -419,11 +412,11 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
               activeSessionId
             );
           } catch (e) {
-            console.error(`[TRACE] Failed to parse provider session output content:`, e);
-            console.error(`[TRACE] Content that failed to parse:`, message.content);
+            logger.error('ipc', '[TRACE] Failed to parse provider session output content', { error: e });
+            logger.error('ipc', '[TRACE] Content that failed to parse', { content: message.content });
           }
         } else if (message.type === 'completion') {
-          debugLog(`[TRACE] Completion message:`, message);
+          logger.debug('ipc', '[TRACE] Completion message', { message });
           maybeUpdateActiveSessionId(message);
           const completion = normalizeProviderSessionCompletionPayload({
             status: message.status,
@@ -444,16 +437,16 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
           
           ws.close();
           if (completionStatus === 'success') {
-            debugLog(`[TRACE] Resolving promise with success`);
+            logger.debug('ipc', `[TRACE] Resolving promise with success`);
             settleResolve({} as T); // Return empty object for now
           } else if (completionStatus === 'cancelled') {
             settleReject(new Error(message.error || 'Execution cancelled'));
           } else {
-            debugLog(`[TRACE] Rejecting promise with error: ${message.error}`);
+            logger.debug('ipc', `[TRACE] Rejecting promise with error: ${message.error}`);
             settleReject(new Error(message.error || 'Execution failed'));
           }
         } else if (message.type === 'error') {
-          debugLog(`[TRACE] Error message:`, message);
+          logger.debug('ipc', '[TRACE] Error message', { message });
           maybeUpdateActiveSessionId(message);
           
           dispatchProviderSessionEvent(
@@ -464,16 +457,16 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
           
           settleReject(new Error(message.message || 'Unknown error'));
         } else {
-          debugLog(`[TRACE] Unknown message type: ${message.type}`);
+          logger.debug('ipc', `[TRACE] Unknown message type: ${message.type}`);
         }
       } catch (e) {
-        console.error('[TRACE] Failed to parse WebSocket message:', e);
-        console.error('[TRACE] Raw message:', event.data);
+        logger.error('ipc', '[TRACE] Failed to parse WebSocket message', { error: e });
+        logger.error('ipc', '[TRACE] Raw message', { rawMessage: event.data });
       }
     };
     
     ws.onerror = (error) => {
-      console.error('[TRACE] WebSocket error:', error);
+      logger.error('ipc', '[TRACE] WebSocket error:', { error });
       
       dispatchProviderSessionEvent(
         'provider-session-error',
@@ -485,7 +478,7 @@ async function handleStreamingCommand<T>(command: string, params?: any): Promise
     };
     
     ws.onclose = (event) => {
-      debugLog(`[TRACE] WebSocket closed - code: ${event.code}, reason: ${event.reason}`);
+      logger.debug('ipc', `[TRACE] WebSocket closed - code: ${event.code}, reason: ${event.reason}`);
       
       // If connection closed unexpectedly (not a normal close), dispatch cancelled event
       if (event.code !== 1000 && event.code !== 1001) {

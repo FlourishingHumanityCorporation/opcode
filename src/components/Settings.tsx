@@ -43,6 +43,7 @@ import {
   saveHotRefreshWatchPathsPreference,
   type HotRefreshScope,
 } from "@/lib/hotRefreshPreferences";
+import { logger } from '@/lib/logger';
 import {
   loadNativeTerminalStartCommandPreference,
   saveNativeTerminalStartCommandPreference,
@@ -157,7 +158,7 @@ export const Settings: React.FC<SettingsProps> = ({
       setHotRefreshScope(preferences.scope);
       setHotRefreshWatchPathsInput(formatWatchPathsInput(preferences.watchPaths));
     } catch (error) {
-      console.error("Failed to load hot refresh settings:", error);
+      logger.error('ui', 'Failed to load hot refresh settings:', { error: error });
     }
   };
 
@@ -168,7 +169,7 @@ export const Settings: React.FC<SettingsProps> = ({
       trackEvent.settingsChanged('native_terminal_start_command', nativeTerminalStartCommand);
       setToast({ message: "In-app terminal startup command saved", type: "success" });
     } catch (error) {
-      console.error("Failed to save in-app terminal startup command:", error);
+      logger.error('ui', 'Failed to save in-app terminal startup command:', { error: error });
       setToast({ message: "Failed to save startup command", type: "error" });
     } finally {
       setSavingNativeTerminalStartCommand(false);
@@ -183,7 +184,7 @@ export const Settings: React.FC<SettingsProps> = ({
       const path = await api.getClaudeBinaryPath();
       setCurrentBinaryPath(path);
     } catch (err) {
-      console.error("Failed to load Claude binary path:", err);
+      logger.error('ui', 'Failed to load Claude binary path:', { error: err });
     }
   };
 
@@ -196,7 +197,7 @@ export const Settings: React.FC<SettingsProps> = ({
       const agents = await api.listDetectedAgents();
       setDetectedAgents(agents);
     } catch (err) {
-      console.error("Failed to detect agents:", err);
+      logger.error('ui', 'Failed to detect agents:', { error: err });
     } finally {
       setDetectingAgents(false);
     }
@@ -213,7 +214,7 @@ export const Settings: React.FC<SettingsProps> = ({
       setMobileSyncHostInput(status.publicHost || "");
       setMobileSyncDevices(devices);
     } catch (err) {
-      console.error("Failed to load mobile sync status:", err);
+      logger.error('ui', 'Failed to load mobile sync status:', { error: err });
     } finally {
       setLoadingMobileSync(false);
     }
@@ -229,7 +230,7 @@ export const Settings: React.FC<SettingsProps> = ({
         setToast({ message: "Mobile sync disabled", type: "success" });
       }
     } catch (err) {
-      console.error("Failed to toggle mobile sync:", err);
+      logger.error('ui', 'Failed to toggle mobile sync:', { error: err });
       setToast({ message: "Failed to update mobile sync", type: "error" });
     }
   };
@@ -246,7 +247,7 @@ export const Settings: React.FC<SettingsProps> = ({
       setMobileSyncStatus(status);
       setToast({ message: "Mobile host updated", type: "success" });
     } catch (err) {
-      console.error("Failed to set public host:", err);
+      logger.error('ui', 'Failed to set public host:', { error: err });
       setToast({ message: "Failed to set mobile host", type: "error" });
     }
   };
@@ -258,7 +259,7 @@ export const Settings: React.FC<SettingsProps> = ({
       setMobileSyncPairing(payload);
       setToast({ message: "Pairing code generated", type: "success" });
     } catch (err) {
-      console.error("Failed to start pairing:", err);
+      logger.error('ui', 'Failed to start pairing:', { error: err });
       setToast({ message: "Failed to create pairing code", type: "error" });
     } finally {
       setStartingPairing(false);
@@ -271,7 +272,7 @@ export const Settings: React.FC<SettingsProps> = ({
       await loadMobileSyncStatus();
       setToast({ message: "Device revoked", type: "success" });
     } catch (err) {
-      console.error("Failed to revoke mobile device:", err);
+      logger.error('ui', 'Failed to revoke mobile device:', { error: err });
       setToast({ message: "Failed to revoke device", type: "error" });
     }
   };
@@ -287,7 +288,7 @@ export const Settings: React.FC<SettingsProps> = ({
       
       // Ensure loadedSettings is an object
       if (!loadedSettings || typeof loadedSettings !== 'object') {
-        console.warn("Loaded settings is not an object:", loadedSettings);
+        logger.warn('ui', 'Loaded settings is not an object:', { value: loadedSettings });
         setSettings({});
         return;
       }
@@ -325,7 +326,7 @@ export const Settings: React.FC<SettingsProps> = ({
         );
       }
     } catch (err) {
-      console.error("Failed to load settings:", err);
+      logger.error('ui', 'Failed to load settings:', { error: err });
       setError("Failed to load settings. Please ensure ~/.claude directory exists.");
       setSettings({});
     } finally {
@@ -382,7 +383,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
       setToast({ message: "Settings saved successfully!", type: "success" });
     } catch (err) {
-      console.error("Failed to save settings:", err);
+      logger.error('ui', 'Failed to save settings:', { error: err });
       setError("Failed to save settings.");
       setToast({ message: "Failed to save settings", type: "error" });
     } finally {
@@ -486,7 +487,7 @@ export const Settings: React.FC<SettingsProps> = ({
         type: "success",
       });
     } catch (error) {
-      console.error("Failed to save hot refresh toggle:", error);
+      logger.error('ui', 'Failed to save hot refresh toggle:', { error: error });
       setToast({ message: "Failed to update hot refresh setting", type: "error" });
     }
   };
@@ -503,7 +504,7 @@ export const Settings: React.FC<SettingsProps> = ({
         type: "success",
       });
     } catch (error) {
-      console.error("Failed to save hot refresh scope:", error);
+      logger.error('ui', 'Failed to save hot refresh scope:', { error: error });
       setToast({ message: "Failed to update hot refresh scope", type: "error" });
     }
   };
@@ -525,7 +526,7 @@ export const Settings: React.FC<SettingsProps> = ({
       await saveHotRefreshWatchPathsPreference(parsed);
       setToast({ message: "Hot refresh watch paths updated", type: "success" });
     } catch (error) {
-      console.error("Failed to save hot refresh watch paths:", error);
+      logger.error('ui', 'Failed to save hot refresh watch paths:', { error: error });
       setToast({ message: "Failed to update hot refresh watch paths", type: "error" });
     }
   };

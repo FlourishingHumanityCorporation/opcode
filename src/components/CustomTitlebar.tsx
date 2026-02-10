@@ -4,6 +4,7 @@ import { Settings, Minus, Square, X, Bot, BarChart3, FileText, Network, Info, Mo
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { TooltipProvider, TooltipSimple } from '@/components/ui/tooltip-modern';
 import { logWorkspaceEvent } from '@/services/workspaceDiagnostics';
+import { logger } from '@/lib/logger';
 
 interface CustomTitlebarProps {
   onSettingsClick?: () => void;
@@ -45,9 +46,9 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
     try {
       const window = getCurrentWindow();
       await window.minimize();
-      console.log('Window minimized successfully');
+      logger.debug('ui', 'Window minimized successfully');
     } catch (error) {
-      console.error('Failed to minimize window:', error);
+      logger.error('ui', 'Failed to minimize window:', { error: error });
     }
   };
 
@@ -57,13 +58,13 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
       const isMaximized = await window.isMaximized();
       if (isMaximized) {
         await window.unmaximize();
-        console.log('Window unmaximized successfully');
+        logger.debug('ui', 'Window unmaximized successfully');
       } else {
         await window.maximize();
-        console.log('Window maximized successfully');
+        logger.debug('ui', 'Window maximized successfully');
       }
     } catch (error) {
-      console.error('Failed to maximize/unmaximize window:', error);
+      logger.error('ui', 'Failed to maximize/unmaximize window:', { error: error });
     }
   };
 
@@ -71,9 +72,9 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
     try {
       const window = getCurrentWindow();
       await window.close();
-      console.log('Window closed successfully');
+      logger.debug('ui', 'Window closed successfully');
     } catch (error) {
-      console.error('Failed to close window:', error);
+      logger.error('ui', 'Failed to close window:', { error: error });
     }
   };
 

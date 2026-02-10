@@ -77,6 +77,41 @@ const STALE_RECOVERY_STAGE2_GRACE_MS = 900;
 const RECOVERY_NOTICE_AUTO_CLEAR_MS = 2_400;
 const WHEEL_OBSERVATION_THROTTLE_MS = 1_000;
 const VIEWPORT_SCROLL_EPSILON_PX = 0.5;
+const TERMINAL_REPLAY_CACHE_LIMIT_BYTES = 64_000;
+
+const terminalReplayCacheById = new Map<string, string>();
+
+export function mergeTerminalReplayBuffer(
+  existing: string,
+  chunk: string,
+  limitBytes = TERMINAL_REPLAY_CACHE_LIMIT_BYTES
+): string {
+  if (!chunk) {
+    return existing;
+  }
+
+  const merged = `${existing}${chunk}`;
+  if (merged.length <= limitBytes) {
+    return merged;
+  }
+  return merged.slice(merged.length - limitBytes);
+}
+
+function appendTerminalReplayChunk(terminalId: string, chunk: string): void {
+  const existing = terminalReplayCacheById.get(terminalId) || "";
+  terminalReplayCacheById.set(
+    terminalId,
+    mergeTerminalReplayBuffer(existing, chunk, TERMINAL_REPLAY_CACHE_LIMIT_BYTES)
+  );
+}
+
+function getTerminalReplaySnapshot(terminalId: string): string {
+  return terminalReplayCacheById.get(terminalId) || "";
+}
+
+function clearTerminalReplaySnapshot(terminalId: string): void {
+  terminalReplayCacheById.delete(terminalId);
+}
 
 export interface CommandActivityOutputAnalysis {
   nextTail: string;
@@ -203,9 +238,9 @@ export function shouldEscalateStaleRecoveryFromSignals(
 
 export function shouldReattachUsingExistingTerminalId(
   existingTerminalId: string | undefined,
-  persistentSessionId: string | undefined
+  _persistentSessionId: string | undefined
 ): boolean {
-  return Boolean(existingTerminalId) && !persistentSessionId;
+  return Boolean(existingTerminalId);
 }
 
 export function shouldAutoClearReusedSessionOnAttach(
@@ -960,6 +995,7 @@ export function useEmbeddedTerminalController({
         setRecoveryNoticeWithTimeout(null);
         const chunk = String(event.payload ?? "");
         handleCommandActivityFromOutput(chunk);
+        appendTerminalReplayChunk(id, chunk);
         terminalInstance.write(chunk);
         const now = Date.now();
         if (now - lastOutputEventEmitAtRef.current > 2000) {
@@ -988,6 +1024,7 @@ export function useEmbeddedTerminalController({
         clearStreamingActivity();
         clearCommandActivity("process-exit");
         terminalIdRef.current = null;
+        clearTerminalReplaySnapshot(id);
         setTerminalId(null);
         setRecoveryNoticeWithTimeout(null);
         onTerminalIdChangeRef.current?.(undefined);
@@ -1028,15 +1065,6 @@ export function useEmbeddedTerminalController({
       scheduleTerminalAutoFocusRetry("startup");
       return true;
     };
-
-    const waitForAnimationFrame = async (): Promise<void> =>
-      new Promise((resolve) => {
-        if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
-          window.requestAnimationFrame(() => resolve());
-          return;
-        }
-        setTimeout(() => resolve(), 0);
-      });
 
     const start = async () => {
       setIsStarting(true);
@@ -1161,13 +1189,12 @@ export function useEmbeddedTerminalController({
       };
 
       fitAddon.fit();
-      await waitForAnimationFrame();
-      if (isCurrentStartup()) {
-        fitAddon.fit();
-      }
-      await waitForAnimationFrame();
-      if (isCurrentStartup()) {
-        fitAddon.fit();
+      if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(() => {
+          if (isCurrentStartup()) {
+            fitAddon.fit();
+          }
+        });
       }
       applyTerminalInteractivity(term as unknown as InteractiveTerminal, isInteractiveRef.current);
 
@@ -1183,26 +1210,28 @@ export function useEmbeddedTerminalController({
           persistentSessionId
         );
 
-        if (previousTerminalId && persistentSessionId) {
-          emitTerminalEvent("reattach_via_persistent_session", { previousTerminalId });
-          await closeEmbeddedTerminalForLifecycle(previousTerminalId, "stale-startup").catch(
-            () => undefined
-          );
-          existingTerminalIdRef.current = undefined;
-          terminalIdRef.current = null;
-          setTerminalId(null);
-          setIsRunning(false);
-          isRunningRef.current = false;
-          clearStreamingActivity();
-          clearCommandActivity();
-          onTerminalIdChangeRef.current?.(undefined);
-        }
-
         if (shouldReuseExistingTerminalId && previousTerminalId) {
+          if (persistentSessionId) {
+            emitTerminalEvent("reattach_via_persistent_session", { previousTerminalId });
+          }
+          const replaySnapshot = getTerminalReplaySnapshot(previousTerminalId);
           emitTerminalEvent("reattach_attempt", { previousTerminalId });
           try {
             const didReattach = await wireTerminalSession(previousTerminalId, false);
             if (didReattach) {
+              if (replaySnapshot) {
+                window.setTimeout(() => {
+                  if (!isCurrentStartup()) {
+                    return;
+                  }
+                  term.write(replaySnapshot);
+                  term.scrollToBottom();
+                  emitTerminalEvent("reattach_replay_cache_applied", {
+                    previousTerminalId,
+                    bytes: replaySnapshot.length,
+                  });
+                }, 0);
+              }
               emitTerminalEvent("reattach_success", { previousTerminalId });
               return;
             }

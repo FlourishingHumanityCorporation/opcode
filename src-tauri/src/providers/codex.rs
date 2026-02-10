@@ -22,7 +22,7 @@ fn build_args(request: &ProviderCommandRequest) -> Result<Vec<String>, String> {
     if let Some(effort) = sanitize_reasoning_effort(request.reasoning_effort.as_deref()) {
         args.extend(["-c".to_string(), format!("model_reasoning_effort=\"{}\"", effort)]);
     } else if request.reasoning_effort.is_some() {
-        log::warn!(
+        tracing::warn!(
             "Ignoring invalid codex reasoning effort: {:?}",
             request.reasoning_effort
         );

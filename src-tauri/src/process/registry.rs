@@ -237,7 +237,6 @@ impl ProcessRegistry {
 
     /// Kill a running process with proper cleanup
     pub async fn kill_process(&self, run_id: i64) -> Result<bool, String> {
-        use log::{error, info, warn};
 
         // First check if the process exists and get its PID
         let (pid, child_arc) = {
@@ -245,12 +244,12 @@ impl ProcessRegistry {
             if let Some(handle) = processes.get(&run_id) {
                 (handle.info.pid, handle.child.clone())
             } else {
-                warn!("Process {} not found in registry", run_id);
+                tracing::warn!("Process {} not found in registry", run_id);
                 return Ok(false); // Process not found
             }
         };
 
-        info!(
+        tracing::info!(
             "Attempting graceful shutdown of process {} (PID: {})",
             run_id, pid
         );
@@ -261,17 +260,17 @@ impl ProcessRegistry {
             if let Some(child) = child_guard.as_mut() {
                 match child.start_kill() {
                     Ok(_) => {
-                        info!("Successfully sent kill signal to process {}", run_id);
+                        tracing::info!("Successfully sent kill signal to process {}", run_id);
                         true
                     }
                     Err(e) => {
-                        error!("Failed to send kill signal to process {}: {}", run_id, e);
+                        tracing::error!("Failed to send kill signal to process {}: {}", run_id, e);
                         // Don't return error here, try fallback method
                         false
                     }
                 }
             } else {
-                warn!(
+                tracing::warn!(
                     "No child handle available for process {} (PID: {}), attempting system kill",
                     run_id, pid
                 );
@@ -281,17 +280,17 @@ impl ProcessRegistry {
 
         // If direct kill didn't work, try system command as fallback
         if !kill_sent {
-            info!(
+            tracing::info!(
                 "Attempting fallback kill for process {} (PID: {})",
                 run_id, pid
             );
             match self.kill_process_by_pid(run_id, pid) {
                 Ok(true) => return Ok(true),
-                Ok(false) => warn!(
+                Ok(false) => tracing::warn!(
                     "Fallback kill also failed for process {} (PID: {})",
                     run_id, pid
                 ),
-                Err(e) => error!("Error during fallback kill: {}", e),
+                Err(e) => tracing::error!("Error during fallback kill: {}", e),
             }
             // Continue with the rest of the cleanup even if fallback failed
         }
@@ -305,7 +304,7 @@ impl ProcessRegistry {
                     if let Some(child) = child_guard.as_mut() {
                         match child.try_wait() {
                             Ok(Some(status)) => {
-                                info!("Process {} exited with status: {:?}", run_id, status);
+                                tracing::info!("Process {} exited with status: {:?}", run_id, status);
                                 *child_guard = None; // Clear the child handle
                                 Some(Ok::<(), String>(()))
                             }
@@ -314,7 +313,7 @@ impl ProcessRegistry {
                                 None
                             }
                             Err(e) => {
-                                error!("Error checking process status: {}", e);
+                                tracing::error!("Error checking process status: {}", e);
                                 Some(Err(e.to_string()))
                             }
                         }
@@ -337,13 +336,13 @@ impl ProcessRegistry {
 
         match wait_result {
             Ok(Ok(_)) => {
-                info!("Process {} exited gracefully", run_id);
+                tracing::info!("Process {} exited gracefully", run_id);
             }
             Ok(Err(e)) => {
-                error!("Error waiting for process {}: {}", run_id, e);
+                tracing::error!("Error waiting for process {}: {}", run_id, e);
             }
             Err(_) => {
-                warn!("Process {} didn't exit within 5 seconds after kill", run_id);
+                tracing::warn!("Process {} didn't exit within 5 seconds after kill", run_id);
                 // Force clear the handle
                 if let Ok(mut child_guard) = child_arc.lock() {
                     *child_guard = None;
@@ -361,9 +360,8 @@ impl ProcessRegistry {
 
     /// Kill a process by PID using system commands (fallback method)
     pub fn kill_process_by_pid(&self, run_id: i64, pid: u32) -> Result<bool, String> {
-        use log::{error, info, warn};
 
-        info!("Attempting to kill process {} by PID {}", run_id, pid);
+        tracing::info!("Attempting to kill process {} by PID {}", run_id, pid);
 
         let kill_result = if cfg!(target_os = "windows") {
             std::process::Command::new("taskkill")
@@ -377,7 +375,7 @@ impl ProcessRegistry {
 
             match &term_result {
                 Ok(output) if output.status.success() => {
-                    info!("Sent SIGTERM to PID {}", pid);
+                    tracing::info!("Sent SIGTERM to PID {}", pid);
                     // Give it 2 seconds to exit gracefully
                     std::thread::sleep(std::time::Duration::from_secs(2));
 
@@ -389,7 +387,7 @@ impl ProcessRegistry {
                     if let Ok(output) = check_result {
                         if output.status.success() {
                             // Still running, send SIGKILL
-                            warn!(
+                            tracing::warn!(
                                 "Process {} still running after SIGTERM, sending SIGKILL",
                                 pid
                             );
@@ -405,7 +403,7 @@ impl ProcessRegistry {
                 }
                 _ => {
                     // SIGTERM failed, try SIGKILL directly
-                    warn!("SIGTERM failed for PID {}, trying SIGKILL", pid);
+                    tracing::warn!("SIGTERM failed for PID {}, trying SIGKILL", pid);
                     std::process::Command::new("kill")
                         .args(["-KILL", &pid.to_string()])
                         .output()
@@ -416,18 +414,18 @@ impl ProcessRegistry {
         match kill_result {
             Ok(output) => {
                 if output.status.success() {
-                    info!("Successfully killed process with PID {}", pid);
+                    tracing::info!("Successfully killed process with PID {}", pid);
                     // Remove from registry
                     self.unregister_process(run_id)?;
                     Ok(true)
                 } else {
                     let error_msg = String::from_utf8_lossy(&output.stderr);
-                    warn!("Failed to kill PID {}: {}", pid, error_msg);
+                    tracing::warn!("Failed to kill PID {}: {}", pid, error_msg);
                     Ok(false)
                 }
             }
             Err(e) => {
-                error!("Failed to execute kill command for PID {}: {}", pid, e);
+                tracing::error!("Failed to execute kill command for PID {}: {}", pid, e);
                 Err(format!("Failed to execute kill command: {}", e))
             }
         }

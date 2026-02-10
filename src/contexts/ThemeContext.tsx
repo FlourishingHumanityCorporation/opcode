@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useCallback, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
+import { logger } from '@/lib/logger';
 
 export type ThemeMode = 'dark' | 'gray' | 'light' | 'custom';
 export type ThemePreference = ThemeMode | 'system';
@@ -133,7 +134,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           try {
             nextCustomColors = JSON.parse(savedColors) as CustomThemeColors;
           } catch (parseError) {
-            console.error('Failed to parse custom theme settings:', parseError);
+            logger.error('misc', 'Failed to parse custom theme settings:', { error: parseError });
           }
         }
 
@@ -159,7 +160,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           await api.saveSetting(THEME_STORAGE_KEY, 'system');
         }
       } catch (error) {
-        console.error('Failed to load theme settings:', error);
+        logger.error('misc', 'Failed to load theme settings:', { error: error });
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -220,7 +221,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Save to storage
       await api.saveSetting(THEME_STORAGE_KEY, newThemePreference);
     } catch (error) {
-      console.error('Failed to save theme preference:', error);
+      logger.error('misc', 'Failed to save theme preference:', { error: error });
     } finally {
       setIsLoading(false);
     }
@@ -243,7 +244,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Save to storage
       await api.saveSetting(CUSTOM_COLORS_STORAGE_KEY, JSON.stringify(newColors));
     } catch (error) {
-      console.error('Failed to save custom colors:', error);
+      logger.error('misc', 'Failed to save custom colors:', { error: error });
     } finally {
       setIsLoading(false);
     }

@@ -42,6 +42,7 @@ interface EmbeddedTerminalProps {
   onSplitPane?: () => void;
   onClosePane?: () => void;
   canClosePane?: boolean;
+  onPaneActivate?: () => void;
   onRunningChange?: (isRunning: boolean) => void;
 }
 
@@ -52,6 +53,7 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = (props) => {
     onSplitPane,
     onClosePane,
     canClosePane = true,
+    onPaneActivate,
     onRunningChange,
   } = props;
 
@@ -180,6 +182,7 @@ export const EmbeddedTerminal: React.FC<EmbeddedTerminalProps> = (props) => {
         ref={containerRef}
         className="min-h-0 flex-1 bg-[#0b0f14] pl-1 pr-0.5"
         tabIndex={0}
+        onMouseDownCapture={onPaneActivate}
         onMouseDown={recoverPointerFocus}
         onClick={recoverPointerFocus}
       />

@@ -219,7 +219,7 @@ impl CheckpointStorage {
                 .context("Invalid UTF-8 in file content")?
             } else {
                 // Handle missing content gracefully
-                log::warn!("Content file missing for hash: {}", hash);
+                tracing::warn!("Content file missing for hash: {}", hash);
                 String::new()
             };
 
@@ -366,10 +366,10 @@ impl CheckpointStorage {
         if removed_count > 0 {
             match self.garbage_collect_content(project_id, session_id) {
                 Ok(gc_count) => {
-                    log::info!("Garbage collected {} orphaned content files", gc_count);
+                    tracing::info!("Garbage collected {} orphaned content files", gc_count);
                 }
                 Err(e) => {
-                    log::warn!("Failed to garbage collect content: {}", e);
+                    tracing::warn!("Failed to garbage collect content: {}", e);
                 }
             }
         }

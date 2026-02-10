@@ -9,6 +9,7 @@ import {
   extractLastMeaningfulTerminalLine,
   getTerminalAutoFocusRetryDecision,
   isPromptLikeTerminalLine,
+  mergeTerminalReplayBuffer,
   resolveCommandActivityFromOutput,
   shouldAutoClearReusedSessionOnAttach,
   shouldApplyWheelScrollFallback,
@@ -18,21 +19,21 @@ import {
 } from "@/components/embedded-terminal/useEmbeddedTerminalController";
 
 describe("useEmbeddedTerminalController reattach policy", () => {
-  it("reuses existing terminal id only when persistent session restore is not active", () => {
+  it("reuses existing terminal id whenever one is available", () => {
     expect(shouldReattachUsingExistingTerminalId("term-1", undefined)).toBe(true);
     expect(
       shouldReattachUsingExistingTerminalId("term-1", "opcode_workspace_terminal_pane")
-    ).toBe(false);
+    ).toBe(true);
     expect(shouldReattachUsingExistingTerminalId(undefined, undefined)).toBe(false);
     expect(
       shouldReattachUsingExistingTerminalId(undefined, "opcode_workspace_terminal_pane")
     ).toBe(false);
   });
 
-  it("prevents stale terminal id reuse during persistent-session attach", () => {
+  it("allows reuse even during persistent-session attach", () => {
     expect(
       shouldReattachUsingExistingTerminalId("stale-terminal-id", "opcode_workspace_terminal_pane")
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("auto-clears only for reused sessions in clear-on-attach mode without startup command", () => {
@@ -144,6 +145,18 @@ describe("useEmbeddedTerminalController command activity heuristics", () => {
   it("deactivates command activity when prompt completion appears", () => {
     const analysis = analyzeTerminalOutputForCommandActivity("Running...\n", "\u276f ");
     expect(resolveCommandActivityFromOutput(true, analysis)).toBe(false);
+  });
+});
+
+describe("useEmbeddedTerminalController terminal replay cache buffer", () => {
+  it("appends chunks while preserving order", () => {
+    const merged = mergeTerminalReplayBuffer("hello", " world", 1024);
+    expect(merged).toBe("hello world");
+  });
+
+  it("trims oldest bytes when the replay buffer exceeds limit", () => {
+    const merged = mergeTerminalReplayBuffer("abcdef", "ghijkl", 8);
+    expect(merged).toBe("efghijkl");
   });
 });
 

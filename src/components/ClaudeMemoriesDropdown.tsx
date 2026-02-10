@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { api, type ClaudeMdFile } from "@/lib/api";
 import { formatUnixTimestamp } from "@/lib/date-utils";
+import { logger } from "@/lib/logger";
 
 interface ClaudeMemoriesDropdownProps {
   /**
@@ -55,7 +56,7 @@ export const ClaudeMemoriesDropdown: React.FC<ClaudeMemoriesDropdownProps> = ({
       const foundFiles = await api.findClaudeMdFiles(projectPath);
       setFiles(foundFiles);
     } catch (err) {
-      console.error("Failed to load CLAUDE.md files:", err);
+      logger.error("ui", "Failed to load CLAUDE.md files", { err });
       setError("Failed to load CLAUDE.md files");
     } finally {
       setLoading(false);

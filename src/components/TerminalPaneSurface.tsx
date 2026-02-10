@@ -14,6 +14,7 @@ import type { PaneNode, Tab, TerminalTab } from '@/contexts/TabContext';
 import { ProviderSessionPane } from '@/components/ProviderSessionPane';
 import { AgentExecution } from '@/components/AgentExecution';
 import { AgentRunOutputViewer } from '@/components/AgentRunOutputViewer';
+import { isXtermHelperTextareaTarget } from '@/components/embedded-terminal/input';
 import { useTabState } from '@/hooks/useTabState';
 
 interface TerminalPaneSurfaceProps {
@@ -59,6 +60,9 @@ const INTERACTIVE_TARGET_SELECTOR = [
 
 export function isInteractiveTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) {
+    return false;
+  }
+  if (isXtermHelperTextareaTarget(target)) {
     return false;
   }
   return Boolean(target.closest(INTERACTIVE_TARGET_SELECTOR));
@@ -141,18 +145,30 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
       return;
     }
 
+    const nextSessionState = shouldResetTerminal
+      ? {
+          ...terminal.sessionState,
+          sessionId: undefined,
+          sessionData: undefined,
+          projectPath: nextCanonicalPath,
+          initialProjectPath: nextCanonicalPath,
+        }
+      : {
+          ...terminal.sessionState,
+          projectPath: nextCanonicalPath,
+          initialProjectPath: terminal.sessionState?.initialProjectPath || nextCanonicalPath,
+        };
+
     updateTab(terminal.id, {
-      sessionState: {
-        ...terminal.sessionState,
-        projectPath: nextCanonicalPath,
-        initialProjectPath: terminal.sessionState?.initialProjectPath || nextCanonicalPath,
-      },
+      sessionState: nextSessionState,
     });
 
     if (shouldUpdatePanePath || shouldResetTerminal) {
       const nextPaneState: {
         projectPath?: string;
         embeddedTerminalId?: string;
+        sessionId?: string;
+        restorePreference?: 'resume_latest' | 'start_fresh';
       } = {};
 
       if (shouldUpdatePanePath) {
@@ -164,6 +180,8 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
           api.closeEmbeddedTerminal(paneRuntime.embeddedTerminalId).catch(() => undefined);
         }
         nextPaneState.embeddedTerminalId = undefined;
+        nextPaneState.sessionId = undefined;
+        nextPaneState.restorePreference = 'start_fresh';
       }
 
       updatePaneState(workspace.id, terminal.id, paneId, nextPaneState);
@@ -267,6 +285,10 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
     [tabs, terminal, updateTab, workspace.id]
   );
 
+  const handleActivateCurrentPane = React.useCallback(() => {
+    activatePane(workspace.id, terminal.id, paneId);
+  }, [activatePane, paneId, terminal.id, workspace.id]);
+
   return (
     <div
       className={cn(
@@ -278,7 +300,7 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
         if (isInteractiveTarget(event.target)) {
           return;
         }
-        activatePane(workspace.id, terminal.id, paneId);
+        handleActivateCurrentPane();
       }}
     >
       {terminal.kind === "agent" && (
@@ -378,6 +400,7 @@ export const TerminalPaneSurface: React.FC<TerminalPaneSurfaceProps> = ({
             onClosePane={canClosePane ? () => closePane(workspace.id, terminal.id, paneId) : undefined}
             canClosePane={canClosePane}
             onStreamingChange={handleStreamingChange}
+            onPaneActivate={handleActivateCurrentPane}
             onBack={() => {}}
             className="h-full"
           />

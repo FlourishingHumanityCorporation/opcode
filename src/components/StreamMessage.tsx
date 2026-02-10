@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { 
-  Terminal, 
-  User, 
-  Bot, 
-  AlertCircle, 
+import {
+  Terminal,
+  User,
+  Bot,
+  AlertCircle,
   CheckCircle2
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { getClaudeSyntaxTheme } from "@/lib/claudeSyntaxTheme";
 import { useTheme } from "@/hooks";
 import type { ProviderSessionMessage } from "@/lib/providerSessionProtocol";
+import { logger } from "@/lib/logger";
 import {
   TodoWidget,
   TodoReadWidget,
@@ -717,7 +718,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
     return null;
   } catch (error) {
     // If any error occurs during rendering, show a safe error message
-    console.error("Error rendering stream message:", error, message);
+    logger.error("ui", "Error rendering stream message", { error, message });
     return (
       <Card className={cn("border-destructive/20 bg-destructive/5", className)}>
         <CardContent className="p-4">

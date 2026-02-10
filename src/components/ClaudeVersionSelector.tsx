@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { api, type ClaudeInstallation } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { CheckCircle, HardDrive, Settings, Terminal, Info } from "lucide-react";
+import { logger } from '@/lib/logger';
 
 interface ClaudeVersionSelectorProps {
   /**
@@ -96,7 +97,7 @@ export const ClaudeVersionSelector: React.FC<ClaudeVersionSelectorProps> = ({
         onSelect(foundInstallations[0]);
       }
     } catch (err) {
-      console.error("Failed to load Claude installations:", err);
+      logger.error('ui', 'Failed to load Claude installations:', { error: err });
       setError(err instanceof Error ? err.message : "Failed to load Claude installations");
     } finally {
       setLoading(false);

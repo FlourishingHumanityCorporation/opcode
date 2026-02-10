@@ -8,6 +8,7 @@ import { api, type MCPServer } from "@/lib/api";
 import { MCPServerList } from "./MCPServerList";
 import { MCPAddServer } from "./MCPAddServer";
 import { MCPImportExport } from "./MCPImportExport";
+import { logger } from "@/lib/logger";
 
 interface MCPManagerProps {
   /**
@@ -46,13 +47,13 @@ export const MCPManager: React.FC<MCPManagerProps> = ({
     try {
       setLoading(true);
       setError(null);
-      console.log("MCPManager: Loading servers...");
+      logger.debug("ui", "Loading MCP servers");
       const serverList = await api.mcpList();
-      console.log("MCPManager: Received server list:", serverList);
-      console.log("MCPManager: Server count:", serverList.length);
+      logger.debug("ui", "Received server list", { serverList });
+      logger.debug("ui", "Server count", { count: serverList.length });
       setServers(serverList);
     } catch (err) {
-      console.error("MCPManager: Failed to load MCP servers:", err);
+      logger.error("ui", "Failed to load MCP servers", { err });
       setError("Failed to load MCP servers. Make sure Claude Code is installed.");
     } finally {
       setLoading(false);

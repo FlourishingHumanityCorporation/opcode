@@ -26,6 +26,7 @@ import { getModelDisplayName } from '@/lib/providerModels';
 import { open as openDialog, save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { GitHubAgentBrowser } from '@/components/GitHubAgentBrowser';
+import { logger } from '@/lib/logger';
 
 interface AgentsModalProps {
   open: boolean;
@@ -68,7 +69,7 @@ export const AgentsModal: React.FC<AgentsModalProps> = ({ open, onOpenChange }) 
       const agentList = await api.listAgents();
       setAgents(agentList);
     } catch (error) {
-      console.error('Failed to load agents:', error);
+      logger.error('ui', 'Failed to load agents:', { error: error });
     } finally {
       setLoading(false);
     }
@@ -83,7 +84,7 @@ export const AgentsModal: React.FC<AgentsModalProps> = ({ open, onOpenChange }) 
       
       setRunningAgents(agentRuns);
     } catch (error) {
-      console.error('Failed to load running agents:', error);
+      logger.error('ui', 'Failed to load running agents:', { error: error });
     }
   };
 
@@ -114,7 +115,7 @@ export const AgentsModal: React.FC<AgentsModalProps> = ({ open, onOpenChange }) 
         detail: { agent, tabId, projectPath } 
       }));
     } catch (error) {
-      console.error('Failed to run agent:', error);
+      logger.error('ui', 'Failed to run agent:', { error: error });
       setToast({ message: `Failed to run agent: ${agent.name}`, type: 'error' });
     }
   };
@@ -132,7 +133,7 @@ export const AgentsModal: React.FC<AgentsModalProps> = ({ open, onOpenChange }) 
       setShowDeleteDialog(false);
       setAgentToDelete(null);
     } catch (error) {
-      console.error('Failed to delete agent:', error);
+      logger.error('ui', 'Failed to delete agent:', { error: error });
     }
   };
 
@@ -164,7 +165,7 @@ export const AgentsModal: React.FC<AgentsModalProps> = ({ open, onOpenChange }) 
         setToast({ message: `Agent "${agent.name}" imported successfully`, type: "success" });
       }
     } catch (error) {
-      console.error('Failed to import agent:', error);
+      logger.error('ui', 'Failed to import agent:', { error: error });
       setToast({ message: "Failed to import agent", type: "error" });
     }
   };
@@ -189,7 +190,7 @@ export const AgentsModal: React.FC<AgentsModalProps> = ({ open, onOpenChange }) 
         setToast({ message: "Agent exported successfully", type: "success" });
       }
     } catch (error) {
-      console.error('Failed to export agent:', error);
+      logger.error('ui', 'Failed to export agent:', { error: error });
       setToast({ message: "Failed to export agent", type: "error" });
     }
   };

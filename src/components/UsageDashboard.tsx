@@ -5,8 +5,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { api, type UsageStats, type ProjectUsage, type UsageIndexStatus } from "@/lib/api";
 import { logWorkspaceEvent } from "@/services/workspaceDiagnostics";
-import { 
-  Calendar, 
+import { logger } from '@/lib/logger';
+import {
+  Calendar,
   Filter,
   Info,
   Loader2,
@@ -251,7 +252,7 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
       // Cache the data
       setCachedData(`${cacheKey}-stats`, statsData);
     } catch (err: any) {
-      console.error("Failed to load usage stats:", err);
+      logger.error('ui', 'Failed to load usage stats:', { error: err });
       logWorkspaceEvent({
         category: 'error',
         action: 'usage_dashboard_load_failed',
@@ -320,7 +321,7 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
         payload: { selectedDateRange, sessions: result.length },
       });
     } catch (err: any) {
-      console.error("Failed to load session stats:", err);
+      logger.error('ui', 'Failed to load session stats:', { error: err });
       const message = err instanceof Error ? err.message : String(err);
       setSessionStatsError("Failed to load session statistics. Please try again.");
       logWorkspaceEvent({

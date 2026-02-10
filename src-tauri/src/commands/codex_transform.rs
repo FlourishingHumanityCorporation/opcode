@@ -34,7 +34,7 @@ pub fn transform_codex_line(line: &str) -> Option<String> {
     };
 
     let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
-    log::info!("codex event type: {}", event_type);
+    tracing::info!("codex event type: {}", event_type);
 
     match event_type {
         // ── Codex SDK format ────────────────────────────────────────────
@@ -140,14 +140,14 @@ pub fn transform_codex_line(line: &str) -> Option<String> {
         _ => {
             // Try to extract ANY text from the event before giving up
             if let Some(text) = try_extract_text_from_value(&event) {
-                log::info!(
+                tracing::info!(
                     "Extracted text from unknown codex event '{}': {}",
                     event_type,
                     &text[..text.len().min(100)]
                 );
                 Some(wrap_as_text(&text))
             } else {
-                log::debug!("Skipping codex event with no extractable text: {}", event_type);
+                tracing::debug!("Skipping codex event with no extractable text: {}", event_type);
                 None
             }
         }

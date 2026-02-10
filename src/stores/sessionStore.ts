@@ -3,6 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import type { StateCreator } from 'zustand';
 import { api } from '@/lib/api';
 import type { Session, Project } from '@/lib/api';
+import { logger } from '@/lib/logger';
 
 interface SessionState {
   // Projects and sessions data
@@ -125,7 +126,7 @@ const sessionStore: StateCreator<
     deleteSession: async (sessionId: string, projectId: string) => {
       try {
         // Note: API doesn't have a deleteSession method, so this is a placeholder
-        console.warn('deleteSession not implemented in API');
+        logger.warn('misc', 'deleteSession not implemented in API');
         
         // Update local state
         set((state) => ({

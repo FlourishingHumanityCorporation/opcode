@@ -5,6 +5,7 @@ mod agent_binary;
 mod checkpoint;
 mod claude_binary;
 mod commands;
+mod logging;
 mod mobile_sync;
 mod process;
 mod providers;
@@ -54,6 +55,7 @@ use commands::mcp::{
     mcp_serve, mcp_test_connection,
 };
 
+use commands::logging::log_frontend_event;
 use commands::proxy::{apply_proxy_settings, get_proxy_settings, save_proxy_settings};
 use commands::storage::{
     storage_delete_row, storage_execute_sql, storage_insert_row, storage_list_tables,
@@ -93,7 +95,7 @@ fn ensure_dev_server_reachable() -> Result<(), String> {
         match std::net::TcpStream::connect((host.as_str(), port)) {
             Ok(stream) => {
                 drop(stream);
-                log::info!(
+                tracing::info!(
                     "Dev server reachable at http://{}:{} (attempt {}/{})",
                     host,
                     port,
@@ -156,7 +158,7 @@ fn persist_window_size(app: &tauri::AppHandle, width: u32, height: u32) {
 
     let db = app.state::<AgentDb>();
     let Ok(conn) = db.0.lock() else {
-        log::warn!("Failed to lock database while saving window size");
+        tracing::warn!("Failed to lock database while saving window size");
         return;
     };
 
@@ -164,24 +166,24 @@ fn persist_window_size(app: &tauri::AppHandle, width: u32, height: u32) {
         "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
         params![WINDOW_WIDTH_KEY, width.to_string()],
     ) {
-        log::warn!("Failed to persist window width: {}", err);
+        tracing::warn!("Failed to persist window width: {}", err);
     }
 
     if let Err(err) = conn.execute(
         "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
         params![WINDOW_HEIGHT_KEY, height.to_string()],
     ) {
-        log::warn!("Failed to persist window height: {}", err);
+        tracing::warn!("Failed to persist window height: {}", err);
     }
 }
 
 fn main() {
     // Initialize logger
-    env_logger::init();
+    logging::init();
 
     #[cfg(debug_assertions)]
     if let Err(err) = ensure_dev_server_reachable() {
-        log::error!("{}", err);
+        tracing::error!("{}", err);
         eprintln!("{}", err);
         std::process::exit(1);
     }
@@ -229,7 +231,7 @@ fn main() {
                     }
                 }
 
-                log::info!("Loaded proxy settings: enabled={}", settings.enabled);
+                tracing::info!("Loaded proxy settings: enabled={}", settings.enabled);
                 (settings, load_persisted_window_size(&conn))
             };
 
@@ -275,7 +277,7 @@ fn main() {
                 if let Some(window) = app.get_webview_window("main") {
                     if let Err(err) = window.set_size(Size::Logical(LogicalSize::new(width, height)))
                     {
-                        log::warn!("Failed to restore persisted window size: {}", err);
+                        tracing::warn!("Failed to restore persisted window size: {}", err);
                     }
                 }
             }
@@ -295,7 +297,7 @@ fn main() {
                             match window.inner_size() {
                                 Ok(size) => persist_window_size(&app_handle, size.width, size.height),
                                 Err(err) => {
-                                    log::warn!("Failed to read window size for persistence: {}", err)
+                                    tracing::warn!("Failed to read window size for persistence: {}", err)
                                 }
                             }
                         }
@@ -477,6 +479,7 @@ fn main() {
             hot_refresh_start,
             hot_refresh_stop,
             hot_refresh_update_paths,
+            log_frontend_event,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

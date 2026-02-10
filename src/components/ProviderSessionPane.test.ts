@@ -6,6 +6,7 @@ vi.mock("@/components/EmbeddedTerminal", () => ({
 import {
   resolveCanClosePane,
   resolveStreamingState,
+  shouldResetNativeBootStateOnProjectSwitch,
   shouldEmitNeedsInputAttention,
   shouldShowProjectPathHeader,
   shouldShowProviderSelectorInHeader,
@@ -123,6 +124,18 @@ describe("ProviderSessionPane header behavior", () => {
         isLoading: true,
         nativeTerminalStreaming: false,
       })
+    ).toBe(true);
+  });
+
+  it("resets native boot state only on real canonical project path change", () => {
+    expect(
+      shouldResetNativeBootStateOnProjectSwitch("/tmp/project-a", "/tmp/project-a/")
+    ).toBe(false);
+    expect(
+      shouldResetNativeBootStateOnProjectSwitch("/tmp/project-a", "/tmp/project-b")
+    ).toBe(true);
+    expect(
+      shouldResetNativeBootStateOnProjectSwitch("", "/tmp/project-b")
     ).toBe(true);
   });
 });

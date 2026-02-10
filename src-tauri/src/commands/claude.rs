@@ -225,13 +225,13 @@ pub async fn get_home_directory() -> Result<String, String> {
 /// Lists all projects in the ~/.claude/projects directory
 #[tauri::command]
 pub async fn list_projects() -> Result<Vec<Project>, String> {
-    log::info!("Listing projects from ~/.claude/projects");
+    tracing::info!("Listing projects from ~/.claude/projects");
 
     let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
     let projects_dir = claude_dir.join("projects");
 
     if !projects_dir.exists() {
-        log::warn!("Projects directory does not exist: {:?}", projects_dir);
+        tracing::warn!("Projects directory does not exist: {:?}", projects_dir);
         return Ok(Vec::new());
     }
 
@@ -267,7 +267,7 @@ pub async fn list_projects() -> Result<Vec<Project>, String> {
             let project_path = match get_project_path_from_sessions(&path) {
                 Ok(path) => path,
                 Err(e) => {
-                    log::warn!("Failed to get project path from sessions for {}: {}, falling back to decode", dir_name, e);
+                    tracing::warn!("Failed to get project path from sessions for {}: {}, falling back to decode", dir_name, e);
                     decode_project_path(dir_name)
                 }
             };
@@ -326,14 +326,14 @@ pub async fn list_projects() -> Result<Vec<Project>, String> {
         }
     });
 
-    log::info!("Found {} projects", projects.len());
+    tracing::info!("Found {} projects", projects.len());
     Ok(projects)
 }
 
 /// Creates a new project for the given directory path
 #[tauri::command]
 pub async fn create_project(path: String) -> Result<Project, String> {
-    log::info!("Creating project for path: {}", path);
+    tracing::info!("Creating project for path: {}", path);
 
     // Encode the path to create a project ID
     let project_id = path.replace('/', "-");
@@ -380,7 +380,7 @@ pub async fn create_project(path: String) -> Result<Project, String> {
 /// Gets sessions for a specific project
 #[tauri::command]
 pub async fn get_project_sessions(project_id: String) -> Result<Vec<Session>, String> {
-    log::info!("Getting sessions for project: {}", project_id);
+    tracing::info!("Getting sessions for project: {}", project_id);
 
     let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
     let project_dir = claude_dir.join("projects").join(&project_id);
@@ -394,7 +394,7 @@ pub async fn get_project_sessions(project_id: String) -> Result<Vec<Session>, St
     let project_path = match get_project_path_from_sessions(&project_dir) {
         Ok(path) => path,
         Err(e) => {
-            log::warn!(
+            tracing::warn!(
                 "Failed to get project path from sessions for {}: {}, falling back to decode",
                 project_id,
                 e
@@ -456,7 +456,7 @@ pub async fn get_project_sessions(project_id: String) -> Result<Vec<Session>, St
     // Sort sessions by creation time (newest first)
     sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-    log::info!(
+    tracing::info!(
         "Found {} sessions for project {}",
         sessions.len(),
         project_id
@@ -467,13 +467,13 @@ pub async fn get_project_sessions(project_id: String) -> Result<Vec<Session>, St
 /// Reads the Claude settings file
 #[tauri::command]
 pub async fn get_claude_settings() -> Result<ClaudeSettings, String> {
-    log::info!("Reading Claude settings");
+    tracing::info!("Reading Claude settings");
 
     let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
     let settings_path = claude_dir.join("settings.json");
 
     if !settings_path.exists() {
-        log::warn!("Settings file not found, returning empty settings");
+        tracing::warn!("Settings file not found, returning empty settings");
         return Ok(ClaudeSettings {
             data: serde_json::json!({}),
         });
@@ -491,7 +491,7 @@ pub async fn get_claude_settings() -> Result<ClaudeSettings, String> {
 /// Opens a new Claude Code session by executing the claude command
 #[tauri::command]
 pub async fn open_provider_session(app: AppHandle, path: Option<String>) -> Result<String, String> {
-    log::info!("Opening new Claude Code session at path: {:?}", path);
+    tracing::info!("Opening new Claude Code session at path: {:?}", path);
 
     #[cfg(not(debug_assertions))]
     let _claude_path = find_claude_binary(&app)?;
@@ -503,7 +503,7 @@ pub async fn open_provider_session(app: AppHandle, path: Option<String>) -> Resu
     // The user should launch Claude Code through other means or use the execute_provider_session command
     #[cfg(not(debug_assertions))]
     {
-        log::error!("Cannot spawn processes directly in production builds");
+        tracing::error!("Cannot spawn processes directly in production builds");
         return Err("Direct process spawning is not available in production builds. Please use Claude Code directly or use the integrated execution commands.".to_string());
     }
 
@@ -519,11 +519,11 @@ pub async fn open_provider_session(app: AppHandle, path: Option<String>) -> Resu
         // Execute the command
         match cmd.spawn() {
             Ok(_) => {
-                log::info!("Successfully launched Claude Code");
+                tracing::info!("Successfully launched Claude Code");
                 Ok("Claude Code session started".to_string())
             }
             Err(e) => {
-                log::error!("Failed to launch Claude Code: {}", e);
+                tracing::error!("Failed to launch Claude Code: {}", e);
                 Err(format!("Failed to launch Claude Code: {}", e))
             }
         }
@@ -533,13 +533,13 @@ pub async fn open_provider_session(app: AppHandle, path: Option<String>) -> Resu
 /// Reads the CLAUDE.md system prompt file
 #[tauri::command]
 pub async fn get_system_prompt() -> Result<String, String> {
-    log::info!("Reading CLAUDE.md system prompt");
+    tracing::info!("Reading CLAUDE.md system prompt");
 
     let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
     let claude_md_path = claude_dir.join("CLAUDE.md");
 
     if !claude_md_path.exists() {
-        log::warn!("CLAUDE.md not found");
+        tracing::warn!("CLAUDE.md not found");
         return Ok(String::new());
     }
 
@@ -549,7 +549,7 @@ pub async fn get_system_prompt() -> Result<String, String> {
 /// Checks if Claude Code is installed and gets its version
 #[tauri::command]
 pub async fn check_claude_version(app: AppHandle) -> Result<ClaudeVersionStatus, String> {
-    log::info!("Checking Claude Code version");
+    tracing::info!("Checking Claude Code version");
 
     let claude_path = match find_claude_binary(&app) {
         Ok(path) => path,
@@ -562,13 +562,12 @@ pub async fn check_claude_version(app: AppHandle) -> Result<ClaudeVersionStatus,
         }
     };
 
-    use log::debug;
-    debug!("Claude path: {}", claude_path);
+    tracing::debug!("Claude path: {}", claude_path);
 
     // In production builds, we can't check the version directly
     #[cfg(not(debug_assertions))]
     {
-        log::warn!("Cannot check claude version in production build");
+        tracing::warn!("Cannot check claude version in production build");
         // If we found a path (either stored or in common locations), assume it's installed
         if claude_path != "claude" && PathBuf::from(&claude_path).exists() {
             return Ok(ClaudeVersionStatus {
@@ -627,7 +626,7 @@ pub async fn check_claude_version(app: AppHandle) -> Result<ClaudeVersionStatus,
                 })
             }
             Err(e) => {
-                log::error!("Failed to run claude command: {}", e);
+                tracing::error!("Failed to run claude command: {}", e);
                 Ok(ClaudeVersionStatus {
                     is_installed: false,
                     version: None,
@@ -641,7 +640,7 @@ pub async fn check_claude_version(app: AppHandle) -> Result<ClaudeVersionStatus,
 /// Saves the CLAUDE.md system prompt file
 #[tauri::command]
 pub async fn save_system_prompt(content: String) -> Result<String, String> {
-    log::info!("Saving CLAUDE.md system prompt");
+    tracing::info!("Saving CLAUDE.md system prompt");
 
     let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
     let claude_md_path = claude_dir.join("CLAUDE.md");
@@ -654,7 +653,7 @@ pub async fn save_system_prompt(content: String) -> Result<String, String> {
 /// Saves the Claude settings file
 #[tauri::command]
 pub async fn save_claude_settings(settings: serde_json::Value) -> Result<String, String> {
-    log::info!("Saving Claude settings");
+    tracing::info!("Saving Claude settings");
 
     let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
     let settings_path = claude_dir.join("settings.json");
@@ -672,7 +671,7 @@ pub async fn save_claude_settings(settings: serde_json::Value) -> Result<String,
 /// Recursively finds all CLAUDE.md files in a project directory
 #[tauri::command]
 pub async fn find_claude_md_files(project_path: String) -> Result<Vec<ClaudeMdFile>, String> {
-    log::info!("Finding CLAUDE.md files in project: {}", project_path);
+    tracing::info!("Finding CLAUDE.md files in project: {}", project_path);
 
     let path = PathBuf::from(&project_path);
     if !path.exists() {
@@ -685,7 +684,7 @@ pub async fn find_claude_md_files(project_path: String) -> Result<Vec<ClaudeMdFi
     // Sort by relative path
     claude_files.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
-    log::info!("Found {} CLAUDE.md files", claude_files.len());
+    tracing::info!("Found {} CLAUDE.md files", claude_files.len());
     Ok(claude_files)
 }
 
@@ -758,7 +757,7 @@ fn find_claude_md_recursive(
 /// Reads a specific CLAUDE.md file by its absolute path
 #[tauri::command]
 pub async fn read_claude_md_file(file_path: String) -> Result<String, String> {
-    log::info!("Reading CLAUDE.md file: {}", file_path);
+    tracing::info!("Reading CLAUDE.md file: {}", file_path);
 
     let path = PathBuf::from(&file_path);
     if !path.exists() {
@@ -771,7 +770,7 @@ pub async fn read_claude_md_file(file_path: String) -> Result<String, String> {
 /// Saves a specific CLAUDE.md file by its absolute path
 #[tauri::command]
 pub async fn save_claude_md_file(file_path: String, content: String) -> Result<String, String> {
-    log::info!("Saving CLAUDE.md file: {}", file_path);
+    tracing::info!("Saving CLAUDE.md file: {}", file_path);
 
     let path = PathBuf::from(&file_path);
 
@@ -858,11 +857,13 @@ pub async fn save_clipboard_image_attachment(
     let file_path = attachment_dir.join(filename);
     fs::write(&file_path, bytes).map_err(|e| format!("Failed to write attachment: {}", e))?;
 
-    let relative_path = file_path
-        .strip_prefix(&project_dir)
-        .unwrap_or(&file_path)
-        .to_string_lossy()
-        .to_string();
+    let relative_path = match file_path.strip_prefix(&project_dir) {
+        Ok(rel) => rel.to_string_lossy().to_string(),
+        Err(e) => {
+            tracing::warn!("Could not compute relative path for attachment, using absolute path: {}", e);
+            file_path.to_string_lossy().to_string()
+        }
+    };
 
     Ok(relative_path)
 }
@@ -873,7 +874,7 @@ pub async fn load_provider_session_history(
     session_id: String,
     project_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    log::info!(
+    tracing::info!(
         "Loading session history for session: {} in project: {}",
         session_id,
         project_id
@@ -909,24 +910,24 @@ pub async fn load_provider_session_history(
 /// Lists files and directories in a given path
 #[tauri::command]
 pub async fn list_directory_contents(directory_path: String) -> Result<Vec<FileEntry>, String> {
-    log::info!("Listing directory contents: '{}'", directory_path);
+    tracing::info!("Listing directory contents: '{}'", directory_path);
 
     // Check if path is empty
     if directory_path.trim().is_empty() {
-        log::error!("Directory path is empty or whitespace");
+        tracing::error!("Directory path is empty or whitespace");
         return Err("Directory path cannot be empty".to_string());
     }
 
     let path = PathBuf::from(&directory_path);
-    log::debug!("Resolved path: {:?}", path);
+    tracing::debug!("Resolved path: {:?}", path);
 
     if !path.exists() {
-        log::error!("Path does not exist: {:?}", path);
+        tracing::error!("Path does not exist: {:?}", path);
         return Err(format!("Path does not exist: {}", directory_path));
     }
 
     if !path.is_dir() {
-        log::error!("Path is not a directory: {:?}", path);
+        tracing::error!("Path is not a directory: {:?}", path);
         return Err(format!("Path is not a directory: {}", directory_path));
     }
 
@@ -986,25 +987,25 @@ pub async fn list_directory_contents(directory_path: String) -> Result<Vec<FileE
 /// Search for files and directories matching a pattern
 #[tauri::command]
 pub async fn search_files(base_path: String, query: String) -> Result<Vec<FileEntry>, String> {
-    log::info!("Searching files in '{}' for: '{}'", base_path, query);
+    tracing::info!("Searching files in '{}' for: '{}'", base_path, query);
 
     // Check if path is empty
     if base_path.trim().is_empty() {
-        log::error!("Base path is empty or whitespace");
+        tracing::error!("Base path is empty or whitespace");
         return Err("Base path cannot be empty".to_string());
     }
 
     // Check if query is empty
     if query.trim().is_empty() {
-        log::warn!("Search query is empty, returning empty results");
+        tracing::warn!("Search query is empty, returning empty results");
         return Ok(Vec::new());
     }
 
     let path = PathBuf::from(&base_path);
-    log::debug!("Resolved search base path: {:?}", path);
+    tracing::debug!("Resolved search base path: {:?}", path);
 
     if !path.exists() {
-        log::error!("Base path does not exist: {:?}", path);
+        tracing::error!("Base path does not exist: {:?}", path);
         return Err(format!("Path does not exist: {}", base_path));
     }
 
@@ -1110,7 +1111,7 @@ pub async fn create_checkpoint(
     message_index: Option<usize>,
     description: Option<String>,
 ) -> Result<crate::checkpoint::CheckpointResult, String> {
-    log::info!(
+    tracing::info!(
         "Creating checkpoint for session: {} in project: {}",
         session_id,
         project_id
@@ -1169,7 +1170,7 @@ pub async fn restore_checkpoint(
     project_id: String,
     project_path: String,
 ) -> Result<crate::checkpoint::CheckpointResult, String> {
-    log::info!(
+    tracing::info!(
         "Restoring checkpoint: {} for session: {}",
         checkpoint_id,
         session_id
@@ -1217,7 +1218,7 @@ pub async fn list_checkpoints(
     project_id: String,
     project_path: String,
 ) -> Result<Vec<crate::checkpoint::Checkpoint>, String> {
-    log::info!(
+    tracing::info!(
         "Listing checkpoints for session: {} in project: {}",
         session_id,
         project_id
@@ -1242,7 +1243,7 @@ pub async fn fork_from_checkpoint(
     new_session_id: String,
     description: Option<String>,
 ) -> Result<crate::checkpoint::CheckpointResult, String> {
-    log::info!(
+    tracing::info!(
         "Forking from checkpoint: {} to new session: {}",
         checkpoint_id,
         new_session_id
@@ -1289,7 +1290,7 @@ pub async fn get_session_timeline(
     project_id: String,
     project_path: String,
 ) -> Result<crate::checkpoint::SessionTimeline, String> {
-    log::info!(
+    tracing::info!(
         "Getting timeline for session: {} in project: {}",
         session_id,
         project_id
@@ -1315,7 +1316,7 @@ pub async fn update_checkpoint_settings(
 ) -> Result<(), String> {
     use crate::checkpoint::CheckpointStrategy;
 
-    log::info!("Updating checkpoint settings for session: {}", session_id);
+    tracing::info!("Updating checkpoint settings for session: {}", session_id);
 
     let strategy = match checkpoint_strategy.as_str() {
         "manual" => CheckpointStrategy::Manual,
@@ -1351,7 +1352,7 @@ pub async fn get_checkpoint_diff(
 ) -> Result<crate::checkpoint::CheckpointDiff, String> {
     use crate::checkpoint::storage::CheckpointStorage;
 
-    log::info!(
+    tracing::info!(
         "Getting diff between checkpoints: {} -> {}",
         from_checkpoint_id,
         to_checkpoint_id
@@ -1437,7 +1438,7 @@ pub async fn track_checkpoint_message(
     project_path: String,
     message: String,
 ) -> Result<(), String> {
-    log::info!("Tracking message for session: {}", session_id);
+    tracing::info!("Tracking message for session: {}", session_id);
 
     let manager = app
         .get_or_create_manager(session_id, project_id, PathBuf::from(project_path))
@@ -1459,7 +1460,7 @@ pub async fn check_auto_checkpoint(
     project_path: String,
     message: String,
 ) -> Result<bool, String> {
-    log::info!("Checking auto-checkpoint for session: {}", session_id);
+    tracing::info!("Checking auto-checkpoint for session: {}", session_id);
 
     let manager = app
         .get_or_create_manager(session_id.clone(), project_id, PathBuf::from(project_path))
@@ -1478,7 +1479,7 @@ pub async fn cleanup_old_checkpoints(
     project_path: String,
     keep_count: usize,
 ) -> Result<usize, String> {
-    log::info!(
+    tracing::info!(
         "Cleaning up old checkpoints for session: {}, keeping {}",
         session_id,
         keep_count
@@ -1507,7 +1508,7 @@ pub async fn get_checkpoint_settings(
     project_id: String,
     project_path: String,
 ) -> Result<serde_json::Value, String> {
-    log::info!("Getting checkpoint settings for session: {}", session_id);
+    tracing::info!("Getting checkpoint settings for session: {}", session_id);
 
     let manager = app
         .get_or_create_manager(session_id, project_id, PathBuf::from(project_path))
@@ -1530,7 +1531,7 @@ pub async fn clear_checkpoint_manager(
     app: tauri::State<'_, crate::checkpoint::state::CheckpointState>,
     session_id: String,
 ) -> Result<(), String> {
-    log::info!("Clearing checkpoint manager for session: {}", session_id);
+    tracing::info!("Clearing checkpoint manager for session: {}", session_id);
 
     app.remove_manager(&session_id).await;
     Ok(())
@@ -1561,7 +1562,7 @@ pub async fn get_recently_modified_files(
 ) -> Result<Vec<String>, String> {
     use chrono::{Duration, Utc};
 
-    log::info!(
+    tracing::info!(
         "Getting files modified in the last {} minutes for session: {}",
         minutes,
         session_id
@@ -1577,7 +1578,7 @@ pub async fn get_recently_modified_files(
 
     // Also log the last modification time
     if let Some(last_mod) = manager.get_last_modification_time().await {
-        log::info!("Last file modification was at: {}", last_mod);
+        tracing::info!("Last file modification was at: {}", last_mod);
     }
 
     Ok(modified_files
@@ -1595,7 +1596,7 @@ pub async fn track_session_messages(
     project_path: String,
     messages: Vec<String>,
 ) -> Result<(), String> {
-    log::info!(
+    tracing::info!(
         "Tracking {} messages for session {}",
         messages.len(),
         session_id
@@ -1626,7 +1627,7 @@ pub async fn get_hooks_config(
     scope: String,
     project_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log::info!(
+    tracing::info!(
         "Getting hooks config for scope: {}, project: {:?}",
         scope,
         project_path
@@ -1650,7 +1651,7 @@ pub async fn get_hooks_config(
     };
 
     if !settings_path.exists() {
-        log::info!(
+        tracing::info!(
             "Settings file does not exist at {:?}, returning empty hooks",
             settings_path
         );
@@ -1676,7 +1677,7 @@ pub async fn update_hooks_config(
     hooks: serde_json::Value,
     project_path: Option<String>,
 ) -> Result<String, String> {
-    log::info!(
+    tracing::info!(
         "Updating hooks config for scope: {}, project: {:?}",
         scope,
         project_path
@@ -1728,7 +1729,7 @@ pub async fn update_hooks_config(
 /// Validates a hook command by dry-running it
 #[tauri::command]
 pub async fn validate_hook_command(command: String) -> Result<serde_json::Value, String> {
-    log::info!("Validating hook command syntax");
+    tracing::info!("Validating hook command syntax");
 
     // Validate syntax without executing
     let mut cmd = std::process::Command::new("bash");

@@ -42,8 +42,10 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "5"
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
-log = "0.4"
-env_logger = "0.11"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+tracing-log = "0.2"
 regex = "1"
 glob = "0.3"
 base64 = "0.22"
@@ -67,6 +69,7 @@ portable-pty = "0.8"
 # Pin image to avoid edition2024 requirement
 image = "=0.25.1"
 notify = "6"
+wait-timeout = "0.2"
 
 
 [target.'cfg(target_os = "macos")'.dependencies]

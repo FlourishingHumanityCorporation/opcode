@@ -38,6 +38,7 @@ import {
   type HotRefreshDiagnosticDetail,
 } from "@/services/hotRefresh";
 import { HOT_REFRESH_STALE_RUNTIME_ACTION } from "@/lib/hotRefreshPreferences";
+import { logger } from '@/lib/logger';
 
 type View = 
   | "welcome" 
@@ -120,7 +121,7 @@ function AppContent() {
         teardownHotRefresh = teardown;
       })
       .catch((error) => {
-        console.error("Failed to initialize hot refresh:", error);
+        logger.error('misc', 'Failed to initialize hot refresh:', { error: error });
         setToast({
           message: "Automatic hot refresh failed to initialize.",
           type: "error",
@@ -287,7 +288,7 @@ function AppContent() {
       const projectList = await api.listProjects();
       setProjects(projectList);
     } catch (err) {
-      console.error("Failed to load projects:", err);
+      logger.error('misc', 'Failed to load projects:', { error: err });
       setError("Failed to load projects. Please ensure ~/.claude directory exists.");
     } finally {
       setLoading(false);
@@ -305,7 +306,7 @@ function AppContent() {
       setSessions(sessionList);
       setSelectedProject(project);
     } catch (err) {
-      console.error("Failed to load sessions:", err);
+      logger.error('misc', 'Failed to load sessions:', { error: err });
       setError("Failed to load sessions for this project.");
     } finally {
       setLoading(false);
@@ -565,7 +566,7 @@ function AppContent() {
                     await loadProjects();
                     await handleProjectClick(project);
                   } catch (err) {
-                    console.error('Failed to create project:', err);
+                    logger.error('misc', 'Failed to create project:', { error: err });
                     setError('Failed to create project for the selected directory.');
                   }
                 }
@@ -603,7 +604,7 @@ function AppContent() {
                     // Load sessions for the selected project
                     await handleProjectClick(project);
                   } catch (err) {
-                    console.error('Failed to create project:', err);
+                    logger.error('misc', 'Failed to create project:', { error: err });
                     setError('Failed to create project for the selected directory.');
                   }
                 }

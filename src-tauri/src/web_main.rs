@@ -4,6 +4,7 @@ mod agent_binary;
 mod checkpoint;
 mod claude_binary;
 mod commands;
+mod logging;
 mod process;
 mod providers;
 mod usage_index;
@@ -24,7 +25,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
+    logging::init();
 
     let args = Args::parse();
 

@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { SelectComponent } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { logger } from '@/lib/logger';
 
 interface MCPImportExportProps {
   /**
@@ -61,7 +62,7 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
         onImportCompleted(result.imported_count, result.failed_count);
       }
     } catch (error: any) {
-      console.error("Failed to import from Claude Desktop:", error);
+      logger.error('ui', 'Failed to import from Claude Desktop:', { error: error });
       onError(error.toString() || "Failed to import from Claude Desktop");
     } finally {
       setImportingDesktop(false);
@@ -130,7 +131,7 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
         onError("Unrecognized JSON format. Expected MCP server configuration.");
       }
     } catch (error) {
-      console.error("Failed to import JSON:", error);
+      logger.error('ui', 'Failed to import JSON:', { error: error });
       onError("Failed to import JSON file");
     } finally {
       setImportingJson(false);
@@ -155,7 +156,7 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
       await api.mcpServe();
       onError("Claude Code MCP server started. You can now connect to it from other applications.");
     } catch (error) {
-      console.error("Failed to start MCP server:", error);
+      logger.error('ui', 'Failed to start MCP server:', { error: error });
       onError("Failed to start Claude Code as MCP server");
     }
   };

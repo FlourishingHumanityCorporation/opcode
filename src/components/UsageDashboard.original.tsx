@@ -5,8 +5,9 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { api, type UsageStats, type ProjectUsage } from "@/lib/api";
-import { 
-  Calendar, 
+import { logger } from '@/lib/logger';
+import {
+  Calendar,
   Filter,
   Loader2,
   Briefcase
@@ -75,7 +76,7 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ }) => {
       setStats(statsData);
       setSessionStats(sessionData);
     } catch (err) {
-      console.error("Failed to load usage stats:", err);
+      logger.error('ui', 'Failed to load usage stats:', { error: err });
       setError("Failed to load usage statistics. Please try again.");
     } finally {
       setLoading(false);

@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import { logger } from '@/lib/logger';
 
 export const NATIVE_TERMINAL_START_COMMAND_KEY = "native_terminal_start_command";
 export const NATIVE_TERMINAL_START_COMMAND_EVENT = "opcode:native-terminal-start-command-changed";
@@ -31,7 +32,7 @@ export async function loadNativeTerminalStartCommandPreference(): Promise<string
     }
     return stored;
   } catch (error) {
-    console.warn("[uiPreferences] Failed to load native terminal startup command setting:", error);
+    logger.warn('misc', '[uiPreferences] Failed to load native terminal startup command setting:', { value: error });
     return cached;
   }
 }
@@ -52,6 +53,6 @@ export async function saveNativeTerminalStartCommandPreference(command: string):
   try {
     await api.saveSetting(NATIVE_TERMINAL_START_COMMAND_KEY, value);
   } catch (error) {
-    console.warn("[uiPreferences] Failed to save native terminal startup command setting:", error);
+    logger.warn('misc', '[uiPreferences] Failed to save native terminal startup command setting:', { value: error });
   }
 }

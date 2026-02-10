@@ -1,4 +1,5 @@
 import { api } from '@/lib/api';
+import { logger } from '@/lib/logger';
 
 export interface WorkspaceMirrorState {
   tabs: unknown[];
@@ -206,7 +207,7 @@ class MobileSyncBridge {
         unlisten();
       };
     } catch (error) {
-      console.warn('[mobileSyncBridge] Failed to initialize action bridge:', error);
+      logger.warn('mobile-sync', '[mobileSyncBridge] Failed to initialize action bridge:', { value: error });
     }
   }
 
@@ -230,7 +231,7 @@ class MobileSyncBridge {
       });
       await api.mobileSyncPublishSnapshot(snapshot as Record<string, any>);
     } catch (error) {
-      console.warn('[mobileSyncBridge] Failed to publish snapshot:', error);
+      logger.warn('mobile-sync', '[mobileSyncBridge] Failed to publish snapshot:', { value: error });
     } finally {
       this.snapshotInFlight = false;
     }
@@ -248,7 +249,7 @@ class MobileSyncBridge {
         }))
       );
     } catch (error) {
-      console.warn('[mobileSyncBridge] Failed to publish events:', error);
+      logger.warn('mobile-sync', '[mobileSyncBridge] Failed to publish events:', { value: error });
     }
   }
 }

@@ -161,7 +161,7 @@ fn flush_pending_event(app: &AppHandle, pending_paths: &mut HashSet<String>) {
     };
 
     if let Err(error) = app.emit(HOT_REFRESH_BACKEND_EVENT, payload) {
-        log::warn!("Failed to emit hot-refresh event: {}", error);
+        tracing::warn!("Failed to emit hot-refresh event: {}", error);
     }
 }
 
@@ -186,7 +186,7 @@ fn run_watcher_worker(
                 }
             }
             Ok(Err(error)) => {
-                log::warn!("Hot-refresh watcher error: {}", error);
+                tracing::warn!("Hot-refresh watcher error: {}", error);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,

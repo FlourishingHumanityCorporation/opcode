@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { logger } from '@/lib/logger';
 
 interface ApiCallOptions {
   onSuccess?: (data: any) => void;
@@ -63,7 +64,7 @@ export function useApiCall<T>(
         
         if (showSuccessToast) {
           // TODO: Implement toast notification
-          console.log('Success:', successMessage);
+          logger.debug('ipc', 'Success', { message: successMessage });
         }
 
         onSuccess?.(result);
@@ -82,7 +83,7 @@ export function useApiCall<T>(
 
         if (showErrorToast) {
           // TODO: Implement toast notification
-          console.error('Error:', errorMessage || error.message);
+          logger.error('ipc', 'Error', { message: errorMessage || error.message });
         }
 
         onError?.(error);

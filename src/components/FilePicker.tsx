@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { 
-  X, 
-  Folder, 
-  File, 
+import {
+  X,
+  Folder,
+  File,
   ArrowLeft,
   FileCode,
   FileText,
@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import type { FileEntry } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { logger } from "@/lib/logger";
 
 // Global caches that persist across component instances
 const globalDirectoryCache = new Map<string, FileEntry[]>();
@@ -155,7 +156,7 @@ export const FilePicker: React.FC<FilePickerProps> = ({
       
       // Immediately show cached results if available
       if (globalSearchCache.has(cacheKey)) {
-        console.log('[FilePicker] Immediately showing cached search results for:', searchQuery);
+        logger.debug('ui', 'Showing cached search results', { searchQuery });
         setSearchResults(globalSearchCache.get(cacheKey) || []);
         setIsShowingCached(true);
         setError(null);
@@ -248,11 +249,11 @@ export const FilePicker: React.FC<FilePickerProps> = ({
 
   const loadDirectory = async (path: string) => {
     try {
-      console.log('[FilePicker] Loading directory:', path);
-      
+      logger.debug('ui', 'Loading directory', { path });
+
       // Check cache first and show immediately
       if (globalDirectoryCache.has(path)) {
-        console.log('[FilePicker] Showing cached contents for:', path);
+        logger.debug('ui', 'Showing cached directory contents', { path });
         setEntries(globalDirectoryCache.get(path) || []);
         setIsShowingCached(true);
         setError(null);
@@ -260,21 +261,20 @@ export const FilePicker: React.FC<FilePickerProps> = ({
         // Only show loading if we don't have cached data
         setIsLoading(true);
       }
-      
+
       // Always fetch fresh data in background
       const contents = await api.listDirectoryContents(path);
-      console.log('[FilePicker] Loaded fresh contents:', contents.length, 'items');
-      
+      logger.debug('ui', 'Loaded fresh directory contents', { path, count: contents.length });
+
       // Cache the results
       globalDirectoryCache.set(path, contents);
-      
+
       // Update with fresh data
       setEntries(contents);
       setIsShowingCached(false);
       setError(null);
     } catch (err) {
-      console.error('[FilePicker] Failed to load directory:', path, err);
-      console.error('[FilePicker] Error details:', err);
+      logger.error('ui', 'Failed to load directory', { path, err });
       // Only set error if we don't have cached data to show
       if (!globalDirectoryCache.has(path)) {
         setError(err instanceof Error ? err.message : 'Failed to load directory');
@@ -286,14 +286,14 @@ export const FilePicker: React.FC<FilePickerProps> = ({
 
   const performSearch = async (query: string) => {
     try {
-      console.log('[FilePicker] Searching for:', query, 'in:', basePath);
-      
+      logger.debug('ui', 'Searching for files', { query, basePath });
+
       // Create cache key that includes both query and basePath
       const cacheKey = `${basePath}:${query}`;
-      
+
       // Check cache first and show immediately
       if (globalSearchCache.has(cacheKey)) {
-        console.log('[FilePicker] Showing cached search results for:', query);
+        logger.debug('ui', 'Showing cached search results', { query });
         setSearchResults(globalSearchCache.get(cacheKey) || []);
         setIsShowingCached(true);
         setError(null);
@@ -301,20 +301,20 @@ export const FilePicker: React.FC<FilePickerProps> = ({
         // Only show loading if we don't have cached data
         setIsLoading(true);
       }
-      
+
       // Always fetch fresh results in background
       const results = await api.searchFiles(basePath, query);
-      console.log('[FilePicker] Fresh search results:', results.length, 'items');
-      
+      logger.debug('ui', 'Fresh search results', { query, count: results.length });
+
       // Cache the results
       globalSearchCache.set(cacheKey, results);
-      
+
       // Update with fresh results
       setSearchResults(results);
       setIsShowingCached(false);
       setError(null);
     } catch (err) {
-      console.error('[FilePicker] Search failed:', query, err);
+      logger.error('ui', 'Search failed', { query, err });
       // Only set error if we don't have cached data to show
       const cacheKey = `${basePath}:${query}`;
       if (!globalSearchCache.has(cacheKey)) {

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ExternalLink, FileQuestion, Terminal, AlertCircle, Loader2 } from "lucide-react";
 import { ClaudeVersionSelector } from "./ClaudeVersionSelector";
+import { logger } from '@/lib/logger';
 
 interface ClaudeBinaryDialogProps {
   open: boolean;
@@ -49,7 +50,7 @@ export function ClaudeBinaryDialog({ open, onOpenChange, onSuccess, onError }: C
       onSuccess();
       onOpenChange(false);
     } catch (error) {
-      console.error("Failed to save Claude binary path:", error);
+      logger.error('ui', 'Failed to save Claude binary path:', { error: error });
       onError(error instanceof Error ? error.message : "Failed to save Claude binary path");
     } finally {
       setIsValidating(false);

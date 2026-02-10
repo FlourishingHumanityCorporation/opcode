@@ -1,5 +1,6 @@
 import { analytics, eventBuilders } from '@/lib/analytics';
 import type { ResourceUsageProperties } from './types';
+import { logger } from '@/lib/logger';
 
 /**
  * Resource monitoring utility for tracking system resource usage and performance
@@ -31,7 +32,7 @@ export class ResourceMonitor {
    */
   startMonitoring(intervalMs: number = 60000): void {
     if (this.isMonitoring) {
-      console.warn('Resource monitoring is already active');
+      logger.warn('analytics', 'Resource monitoring is already active');
       return;
     }
     
@@ -46,7 +47,7 @@ export class ResourceMonitor {
       this.collectAndReportMetrics();
     }, intervalMs);
     
-    console.log(`Resource monitoring started with ${intervalMs}ms interval`);
+    logger.debug('analytics', `Resource monitoring started with ${intervalMs}ms interval`);
   }
   
   /**
@@ -58,7 +59,7 @@ export class ResourceMonitor {
       this.monitoringInterval = null;
     }
     this.isMonitoring = false;
-    console.log('Resource monitoring stopped');
+    logger.debug('analytics', 'Resource monitoring stopped');
   }
   
   /**
@@ -111,7 +112,7 @@ export class ResourceMonitor {
         analytics.track(event.event, event.properties);
       }
     } catch (error) {
-      console.error('Failed to collect resource metrics:', error);
+      logger.error('analytics', 'Failed to collect resource metrics', { error });
     }
   }
   

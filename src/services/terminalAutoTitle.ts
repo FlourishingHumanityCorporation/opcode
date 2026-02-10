@@ -1,5 +1,6 @@
 import { api } from "@/lib/api";
 import { canonicalizeProjectPath, projectNameFromPath } from "@/lib/terminalPaneState";
+import { logger } from '@/lib/logger';
 
 const INITIAL_CHECKPOINTS_MINUTES = [2, 10, 15] as const;
 const FOLLOW_UP_INTERVAL_MINUTES = 5;
@@ -495,7 +496,7 @@ export async function resolveLatestSessionSnapshot(
       transcript,
     };
   } catch (error) {
-    console.warn("[terminalAutoTitle] Failed to resolve latest session snapshot", error);
+    logger.warn('misc', '[terminalAutoTitle] Failed to resolve latest session snapshot', { value: error });
     return null;
   }
 }

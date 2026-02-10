@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Toast, ToastContainer } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { logger } from '@/lib/logger';
 
 interface MarkdownEditorProps {
   /**
@@ -49,7 +50,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       setContent(prompt);
       setOriginalContent(prompt);
     } catch (err) {
-      console.error("Failed to load system prompt:", err);
+      logger.error('ui', 'Failed to load system prompt:', { error: err });
       setError("Failed to load CLAUDE.md file");
     } finally {
       setLoading(false);
@@ -65,7 +66,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       setOriginalContent(content);
       setToast({ message: "CLAUDE.md saved successfully", type: "success" });
     } catch (err) {
-      console.error("Failed to save system prompt:", err);
+      logger.error('ui', 'Failed to save system prompt:', { error: err });
       setError("Failed to save CLAUDE.md file");
       setToast({ message: "Failed to save CLAUDE.md", type: "error" });
     } finally {

@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { eventBuilders, analytics } from '@/lib/analytics';
+import { logger } from '@/lib/logger';
 
 interface Props {
   children: ReactNode;
@@ -33,9 +34,9 @@ export class AnalyticsErrorBoundary extends Component<Props, State> {
     });
     
     analytics.track(event.event, event.properties);
-    
+
     // Log to console for debugging
-    console.error('UI Error caught by boundary:', error, errorInfo);
+    logger.error('ui', 'UI Error caught by boundary', { error, errorInfo });
   }
 
   reset = () => {

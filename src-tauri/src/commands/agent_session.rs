@@ -96,7 +96,7 @@ async fn run_agent_session(
     reasoning_effort: Option<String>,
     requested_kind: ProviderCommandKind,
 ) -> Result<(), String> {
-    log::info!(
+    tracing::info!(
         "Starting agent session: provider={}, kind={:?}, project={}, model={}",
         provider_id,
         requested_kind,
@@ -166,14 +166,14 @@ async fn run_non_claude_provider_session(
 
     let effective_kind = match requested_kind {
         ProviderCommandKind::Continue if !runtime.capabilities.supports_continue => {
-            log::warn!(
+            tracing::warn!(
                 "Provider '{}' does not support continue; falling back to execute",
                 provider_id
             );
             ProviderCommandKind::Execute
         }
         ProviderCommandKind::Resume if !runtime.capabilities.supports_resume => {
-            log::warn!(
+            tracing::warn!(
                 "Provider '{}' does not support resume; falling back to execute",
                 provider_id
             );
@@ -182,10 +182,8 @@ async fn run_non_claude_provider_session(
         _ => requested_kind,
     };
 
-    let agents = crate::agent_binary::discover_all_agents(&app).await;
-    let agent = agents
-        .iter()
-        .find(|a| a.provider_id == provider_id)
+    let agent = crate::agent_binary::discover_agent(&app, &provider_id)
+        .await
         .ok_or_else(|| format!("Provider '{}' not found on system", provider_id))?;
 
     let request = ProviderCommandRequest {
@@ -329,7 +327,7 @@ async fn spawn_agent_process(
     let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
 
     let pid = child.id().unwrap_or(0);
-    log::info!("Spawned {} process with PID: {}", provider_id, pid);
+    tracing::info!("Spawned {} process with PID: {}", provider_id, pid);
 
     let run_id = format!(
         "{}_{}_{}",
@@ -351,11 +349,11 @@ async fn spawn_agent_process(
         model.clone(),
     ) {
         Ok(rid) => {
-            log::info!("Registered {} session with registry id: {}", provider_id, rid);
+            tracing::info!("Registered {} session with registry id: {}", provider_id, rid);
             Some(rid)
         }
         Err(error) => {
-            log::error!("Failed to register {} session: {}", provider_id, error);
+            tracing::error!("Failed to register {} session: {}", provider_id, error);
             None
         }
     };
@@ -380,7 +378,7 @@ async fn spawn_agent_process(
     let stdout_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            log::info!(
+            tracing::info!(
                 "{} stdout ({}): {}",
                 run_id_stdout,
                 provider_stdout,

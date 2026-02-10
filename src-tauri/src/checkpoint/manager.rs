@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use log;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -505,7 +504,7 @@ impl CheckpointManager {
                 match fs::remove_file(&full_path) {
                     Ok(_) => {
                         files_processed += 1;
-                        log::info!("Deleted file not in checkpoint: {:?}", current_file);
+                        tracing::info!("Deleted file not in checkpoint: {:?}", current_file);
                     }
                     Err(e) => {
                         warnings.push(format!(

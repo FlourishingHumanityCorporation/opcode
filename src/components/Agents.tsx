@@ -18,6 +18,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { GitHubAgentBrowser } from '@/components/GitHubAgentBrowser';
 import { CreateAgent } from '@/components/CreateAgent';
 import { useTabState } from '@/hooks/useTabState';
+import { logger } from '@/lib/logger';
 
 export const Agents: React.FC = () => {
   const [activeTab, setActiveTab] = useState('agents');
@@ -54,7 +55,7 @@ export const Agents: React.FC = () => {
       const agents = await api.listAgents();
       setAgents(agents);
     } catch (error) {
-      console.error('Failed to load agents:', error);
+      logger.error('ui', 'Failed to load agents:', { error: error });
       setToast({ message: 'Failed to load agents', type: 'error' });
     } finally {
       setLoading(false);
@@ -66,7 +67,7 @@ export const Agents: React.FC = () => {
       const runs = await api.listAgentRunsWithMetrics();
       setRunningAgents(runs);
     } catch (error) {
-      console.error('Failed to load running agents:', error);
+      logger.error('ui', 'Failed to load running agents:', { error: error });
     }
   };
 
@@ -112,7 +113,7 @@ export const Agents: React.FC = () => {
       
       setToast({ message: `Opening agent: ${agent.name}`, type: 'success' });
     } catch (error) {
-      console.error('Failed to open agent:', error);
+      logger.error('ui', 'Failed to open agent:', { error: error });
       setToast({ message: `Failed to open agent: ${agent.name}`, type: 'error' });
     }
   };
@@ -127,7 +128,7 @@ export const Agents: React.FC = () => {
       setShowDeleteDialog(false);
       setAgentToDelete(null);
     } catch (error) {
-      console.error('Failed to delete agent:', error);
+      logger.error('ui', 'Failed to delete agent:', { error: error });
       setToast({ message: `Failed to delete agent: ${agentToDelete.name}`, type: 'error' });
     }
   };
@@ -148,7 +149,7 @@ export const Agents: React.FC = () => {
         loadAgents();
       }
     } catch (error) {
-      console.error('Failed to import agent:', error);
+      logger.error('ui', 'Failed to import agent:', { error: error });
       setToast({ message: 'Failed to import agent', type: 'error' });
     }
   };
@@ -167,7 +168,7 @@ export const Agents: React.FC = () => {
         setToast({ message: `Exported agent: ${agent.name}`, type: 'success' });
       }
     } catch (error) {
-      console.error('Failed to export agent:', error);
+      logger.error('ui', 'Failed to export agent:', { error: error });
       setToast({ message: 'Failed to export agent', type: 'error' });
     }
   };

@@ -1,4 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { logger } from '@/lib/logger';
 
 export const OPCODE_AGENT_ATTENTION_EVENT = "opcode-agent-attention";
 export const OPCODE_AGENT_ATTENTION_FALLBACK_EVENT =
@@ -167,7 +168,7 @@ async function setBadgeCountSafely(count: number): Promise<void> {
     }
     await appWindow.setBadgeCount();
   } catch (error) {
-    console.warn("[agentAttention] Failed to set badge count:", error);
+    logger.warn('misc', '[agentAttention] Failed to set badge count:', { value: error });
   }
 }
 
@@ -201,7 +202,7 @@ async function maybeShowDesktopNotification(
     );
     return { attempted: true, delivered: true };
   } catch (error) {
-    console.warn("[agentAttention] Failed to send desktop notification:", error);
+    logger.warn('misc', '[agentAttention] Failed to send desktop notification:', { value: error });
     return { attempted: true, delivered: false };
   }
 }
@@ -226,7 +227,7 @@ async function ensureFocusTracking(): Promise<void> {
     focusTrackingReady = true;
   } catch (error) {
     windowFocused = inferDocumentFocus();
-    console.warn("[agentAttention] Failed to initialize focus tracking:", error);
+    logger.warn('misc', '[agentAttention] Failed to initialize focus tracking:', { value: error });
   } finally {
     focusTrackingInFlight = false;
   }

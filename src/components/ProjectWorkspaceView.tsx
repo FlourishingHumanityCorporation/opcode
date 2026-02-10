@@ -3,16 +3,19 @@ import { motion } from 'framer-motion';
 import { Files, FolderOpen, Lock, LockOpen, Plus, Terminal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api';
 import type { Tab, TerminalTab } from '@/contexts/TabContext';
 import { WorkspacePaneTree } from '@/components/WorkspacePaneTree';
 import { ProjectExplorerPanel } from '@/components/ProjectExplorerPanel';
 import { SplitPane } from '@/components/ui/split-pane';
 import { useTabState } from '@/hooks/useTabState';
+import { canonicalizeProjectPath } from '@/lib/terminalPaneState';
 import {
   getStatusIndicator,
   renderTabStatusMarker,
   type TabStatusIndicator,
 } from '@/components/tabStatusIndicator';
+import { logger } from '@/lib/logger';
 import {
   getExplorerOpen,
   getExplorerWidth,
@@ -65,6 +68,76 @@ export function persistExplorerSplitWidth(workspaceId: string, width: number): n
   return width;
 }
 
+export interface ProjectSwitchResolution {
+  didProjectSwitch: boolean;
+  nextCanonicalPath: string;
+  nextWorkspaceTitle: string;
+  activePaneId?: string;
+  embeddedTerminalIdToClose?: string;
+  nextPaneState?: {
+    projectPath: string;
+    embeddedTerminalId?: string;
+    sessionId?: string;
+    restorePreference?: 'resume_latest' | 'start_fresh';
+  };
+  nextSessionState?: TerminalTab['sessionState'];
+}
+
+export function resolveProjectSwitchForActiveTerminal(
+  workspace: Tab,
+  terminal: TerminalTab | undefined,
+  selectedPath: string
+): ProjectSwitchResolution {
+  const nextCanonicalPath = canonicalizeProjectPath(selectedPath);
+  const nextWorkspaceTitle = nextCanonicalPath.split(/[\\/]/).filter(Boolean).pop() || workspace.title;
+
+  if (!terminal) {
+    return {
+      didProjectSwitch: false,
+      nextCanonicalPath,
+      nextWorkspaceTitle,
+    };
+  }
+
+  const activePaneId = terminal.activePaneId;
+  const activePaneState = terminal.paneStates[activePaneId] || {};
+  const currentPanePath =
+    activePaneState.projectPath ||
+    terminal.sessionState?.projectPath ||
+    terminal.sessionState?.initialProjectPath ||
+    workspace.projectPath ||
+    '';
+  const currentPaneCanonicalPath = canonicalizeProjectPath(currentPanePath);
+  const didProjectSwitch = nextCanonicalPath !== currentPaneCanonicalPath;
+
+  const nextSessionState = {
+    ...terminal.sessionState,
+    sessionId: didProjectSwitch ? undefined : terminal.sessionState?.sessionId,
+    sessionData: didProjectSwitch ? undefined : terminal.sessionState?.sessionData,
+    projectPath: nextCanonicalPath,
+    initialProjectPath: didProjectSwitch
+      ? nextCanonicalPath
+      : terminal.sessionState?.initialProjectPath || nextCanonicalPath,
+  };
+
+  return {
+    didProjectSwitch,
+    nextCanonicalPath,
+    nextWorkspaceTitle,
+    activePaneId,
+    embeddedTerminalIdToClose: didProjectSwitch ? activePaneState.embeddedTerminalId : undefined,
+    nextPaneState: didProjectSwitch
+      ? {
+          projectPath: nextCanonicalPath,
+          embeddedTerminalId: undefined,
+          sessionId: undefined,
+          restorePreference: 'start_fresh',
+        }
+      : undefined,
+    nextSessionState,
+  };
+}
+
 export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
   workspace,
   isVisible = true,
@@ -74,6 +147,7 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
     closeTerminalTab,
     setActiveTerminalTab,
     updateTab,
+    updatePaneState,
   } = useTabState();
   const [explorerOpen, setExplorerPanelOpen] = React.useState<boolean>(() => getExplorerOpen(workspace.id));
   const [explorerSplit, setExplorerSplit] = React.useState<number>(() => getExplorerWidth(workspace.id));
@@ -98,7 +172,7 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
             selected = result;
           }
         } catch (dialogError) {
-          console.error('Failed to open native directory picker:', dialogError);
+          logger.error('ui', 'Failed to open native directory picker:', { error: dialogError });
         }
       }
 
@@ -117,22 +191,32 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
         return;
       }
 
+      const resolution = resolveProjectSwitchForActiveTerminal(
+        workspace,
+        activeTerminal,
+        selected
+      );
+
       updateTab(workspace.id, {
-        projectPath: selected,
-        title: selected.split(/[\\/]/).filter(Boolean).pop() || workspace.title,
+        projectPath: resolution.nextCanonicalPath,
+        title: resolution.nextWorkspaceTitle,
       });
 
       if (activeTerminal) {
+        if (resolution.didProjectSwitch && resolution.embeddedTerminalIdToClose) {
+          api.closeEmbeddedTerminal(resolution.embeddedTerminalIdToClose).catch(() => undefined);
+        }
+
+        if (resolution.didProjectSwitch && resolution.activePaneId && resolution.nextPaneState) {
+          updatePaneState(workspace.id, activeTerminal.id, resolution.activePaneId, resolution.nextPaneState);
+        }
+
         updateTab(activeTerminal.id, {
-          sessionState: {
-            ...activeTerminal.sessionState,
-            projectPath: selected,
-            initialProjectPath: activeTerminal.sessionState?.initialProjectPath || selected,
-          },
+          sessionState: resolution.nextSessionState,
         });
       }
     } catch (error) {
-      console.error('Failed to open project picker:', error);
+      logger.error('ui', 'Failed to open project picker:', { error: error });
     }
   };
 

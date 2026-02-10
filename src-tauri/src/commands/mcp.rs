@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use dirs;
-use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -97,7 +96,7 @@ pub struct ImportServerResult {
 
 /// Executes a claude mcp command
 fn execute_claude_mcp_command(app_handle: &AppHandle, args: Vec<&str>) -> Result<String> {
-    info!("Executing claude mcp command with args: {:?}", args);
+    tracing::info!("Executing claude mcp command with args: {:?}", args);
 
     let claude_path = find_claude_binary(app_handle)?;
     let mut cmd = create_command_with_env(&claude_path);
@@ -128,7 +127,7 @@ pub async fn mcp_add(
     url: Option<String>,
     scope: String,
 ) -> Result<AddServerResult, String> {
-    info!("Adding MCP server: {} with transport: {}", name, transport);
+    tracing::info!("Adding MCP server: {} with transport: {}", name, transport);
 
     // Prepare owned strings for environment variables
     let env_args: Vec<String> = env
@@ -190,7 +189,7 @@ pub async fn mcp_add(
 
     match execute_claude_mcp_command(&app, cmd_args) {
         Ok(output) => {
-            info!("Successfully added MCP server: {}", name);
+            tracing::info!("Successfully added MCP server: {}", name);
             Ok(AddServerResult {
                 success: true,
                 message: output.trim().to_string(),
@@ -198,7 +197,7 @@ pub async fn mcp_add(
             })
         }
         Err(e) => {
-            error!("Failed to add MCP server: {}", e);
+            tracing::error!("Failed to add MCP server: {}", e);
             Ok(AddServerResult {
                 success: false,
                 message: e.to_string(),
@@ -211,59 +210,59 @@ pub async fn mcp_add(
 /// Lists all configured MCP servers
 #[tauri::command]
 pub async fn mcp_list(app: AppHandle) -> Result<Vec<MCPServer>, String> {
-    info!("Listing MCP servers");
+    tracing::info!("Listing MCP servers");
 
     match execute_claude_mcp_command(&app, vec!["list"]) {
         Ok(output) => {
-            info!("Raw output from 'claude mcp list': {:?}", output);
+            tracing::info!("Raw output from 'claude mcp list': {:?}", output);
             let trimmed = output.trim();
-            info!("Trimmed output: {:?}", trimmed);
+            tracing::info!("Trimmed output: {:?}", trimmed);
 
             // Check if no servers are configured
             if trimmed.contains("No MCP servers configured") || trimmed.is_empty() {
-                info!("No servers found - empty or 'No MCP servers' message");
+                tracing::info!("No servers found - empty or 'No MCP servers' message");
                 return Ok(vec![]);
             }
 
             // Parse the text output, handling multi-line commands
             let mut servers = Vec::new();
             let lines: Vec<&str> = trimmed.lines().collect();
-            info!("Total lines in output: {}", lines.len());
+            tracing::info!("Total lines in output: {}", lines.len());
             for (idx, line) in lines.iter().enumerate() {
-                info!("Line {}: {:?}", idx, line);
+                tracing::info!("Line {}: {:?}", idx, line);
             }
 
             let mut i = 0;
 
             while i < lines.len() {
                 let line = lines[i];
-                info!("Processing line {}: {:?}", i, line);
+                tracing::info!("Processing line {}: {:?}", i, line);
 
                 // Check if this line starts a new server entry
                 if let Some(colon_pos) = line.find(':') {
-                    info!("Found colon at position {} in line: {:?}", colon_pos, line);
+                    tracing::info!("Found colon at position {} in line: {:?}", colon_pos, line);
                     // Make sure this is a server name line (not part of a path)
                     // Server names typically don't contain '/' or '\'
                     let potential_name = line[..colon_pos].trim();
-                    info!("Potential server name: {:?}", potential_name);
+                    tracing::info!("Potential server name: {:?}", potential_name);
 
                     if !potential_name.contains('/') && !potential_name.contains('\\') {
-                        info!("Valid server name detected: {:?}", potential_name);
+                        tracing::info!("Valid server name detected: {:?}", potential_name);
                         let name = potential_name.to_string();
                         let mut command_parts = vec![line[colon_pos + 1..].trim().to_string()];
-                        info!("Initial command part: {:?}", command_parts[0]);
+                        tracing::info!("Initial command part: {:?}", command_parts[0]);
 
                         // Check if command continues on next lines
                         i += 1;
                         while i < lines.len() {
                             let next_line = lines[i];
-                            info!("Checking next line {} for continuation: {:?}", i, next_line);
+                            tracing::info!("Checking next line {} for continuation: {:?}", i, next_line);
 
                             // If the next line starts with a server name pattern, break
                             if next_line.contains(':') {
                                 let potential_next_name =
                                     next_line.split(':').next().unwrap_or("").trim();
-                                info!(
+                                tracing::info!(
                                     "Found colon in next line, potential name: {:?}",
                                     potential_next_name
                                 );
@@ -271,19 +270,19 @@ pub async fn mcp_list(app: AppHandle) -> Result<Vec<MCPServer>, String> {
                                     && !potential_next_name.contains('/')
                                     && !potential_next_name.contains('\\')
                                 {
-                                    info!("Next line is a new server, breaking");
+                                    tracing::info!("Next line is a new server, breaking");
                                     break;
                                 }
                             }
                             // Otherwise, this line is a continuation of the command
-                            info!("Line {} is a continuation", i);
+                            tracing::info!("Line {} is a continuation", i);
                             command_parts.push(next_line.trim().to_string());
                             i += 1;
                         }
 
                         // Join all command parts
                         let full_command = command_parts.join(" ");
-                        info!("Full command for server '{}': {:?}", name, full_command);
+                        tracing::info!("Full command for server '{}': {:?}", name, full_command);
 
                         // For now, we'll create a basic server entry
                         servers.push(MCPServer {
@@ -301,22 +300,22 @@ pub async fn mcp_list(app: AppHandle) -> Result<Vec<MCPServer>, String> {
                                 last_checked: None,
                             },
                         });
-                        info!("Added server: {:?}", name);
+                        tracing::info!("Added server: {:?}", name);
 
                         continue;
                     } else {
-                        info!("Skipping line - name contains path separators");
+                        tracing::info!("Skipping line - name contains path separators");
                     }
                 } else {
-                    info!("No colon found in line {}", i);
+                    tracing::info!("No colon found in line {}", i);
                 }
 
                 i += 1;
             }
 
-            info!("Found {} MCP servers total", servers.len());
+            tracing::info!("Found {} MCP servers total", servers.len());
             for (idx, server) in servers.iter().enumerate() {
-                info!(
+                tracing::info!(
                     "Server {}: name='{}', command={:?}",
                     idx, server.name, server.command
                 );
@@ -324,7 +323,7 @@ pub async fn mcp_list(app: AppHandle) -> Result<Vec<MCPServer>, String> {
             Ok(servers)
         }
         Err(e) => {
-            error!("Failed to list MCP servers: {}", e);
+            tracing::error!("Failed to list MCP servers: {}", e);
             Err(e.to_string())
         }
     }
@@ -333,7 +332,7 @@ pub async fn mcp_list(app: AppHandle) -> Result<Vec<MCPServer>, String> {
 /// Gets details for a specific MCP server
 #[tauri::command]
 pub async fn mcp_get(app: AppHandle, name: String) -> Result<MCPServer, String> {
-    info!("Getting MCP server details for: {}", name);
+    tracing::info!("Getting MCP server details for: {}", name);
 
     match execute_claude_mcp_command(&app, vec!["get", &name]) {
         Ok(output) => {
@@ -393,7 +392,7 @@ pub async fn mcp_get(app: AppHandle, name: String) -> Result<MCPServer, String> 
             })
         }
         Err(e) => {
-            error!("Failed to get MCP server: {}", e);
+            tracing::error!("Failed to get MCP server: {}", e);
             Err(e.to_string())
         }
     }
@@ -402,15 +401,15 @@ pub async fn mcp_get(app: AppHandle, name: String) -> Result<MCPServer, String> 
 /// Removes an MCP server
 #[tauri::command]
 pub async fn mcp_remove(app: AppHandle, name: String) -> Result<String, String> {
-    info!("Removing MCP server: {}", name);
+    tracing::info!("Removing MCP server: {}", name);
 
     match execute_claude_mcp_command(&app, vec!["remove", &name]) {
         Ok(output) => {
-            info!("Successfully removed MCP server: {}", name);
+            tracing::info!("Successfully removed MCP server: {}", name);
             Ok(output.trim().to_string())
         }
         Err(e) => {
-            error!("Failed to remove MCP server: {}", e);
+            tracing::error!("Failed to remove MCP server: {}", e);
             Err(e.to_string())
         }
     }
@@ -424,7 +423,7 @@ pub async fn mcp_add_json(
     json_config: String,
     scope: String,
 ) -> Result<AddServerResult, String> {
-    info!(
+    tracing::info!(
         "Adding MCP server from JSON: {} with scope: {}",
         name, scope
     );
@@ -439,7 +438,7 @@ pub async fn mcp_add_json(
 
     match execute_claude_mcp_command(&app, cmd_args) {
         Ok(output) => {
-            info!("Successfully added MCP server from JSON: {}", name);
+            tracing::info!("Successfully added MCP server from JSON: {}", name);
             Ok(AddServerResult {
                 success: true,
                 message: output.trim().to_string(),
@@ -447,7 +446,7 @@ pub async fn mcp_add_json(
             })
         }
         Err(e) => {
-            error!("Failed to add MCP server from JSON: {}", e);
+            tracing::error!("Failed to add MCP server from JSON: {}", e);
             Ok(AddServerResult {
                 success: false,
                 message: e.to_string(),
@@ -463,7 +462,7 @@ pub async fn mcp_add_from_claude_desktop(
     app: AppHandle,
     scope: String,
 ) -> Result<ImportResult, String> {
-    info!(
+    tracing::info!(
         "Importing MCP servers from Claude Desktop with scope: {}",
         scope
     );
@@ -515,7 +514,7 @@ pub async fn mcp_add_from_claude_desktop(
 
     // Import each server using add-json
     for (name, server_config) in mcp_servers {
-        info!("Importing server: {}", name);
+        tracing::info!("Importing server: {}", name);
 
         // Convert Claude Desktop format to add-json format
         let mut json_config = serde_json::Map::new();
@@ -573,7 +572,7 @@ pub async fn mcp_add_from_claude_desktop(
                         success: true,
                         error: None,
                     });
-                    info!("Successfully imported server: {}", name);
+                    tracing::info!("Successfully imported server: {}", name);
                 } else {
                     failed_count += 1;
                     let error_msg = result.message.clone();
@@ -582,7 +581,7 @@ pub async fn mcp_add_from_claude_desktop(
                         success: false,
                         error: Some(result.message),
                     });
-                    error!("Failed to import server {}: {}", name, error_msg);
+                    tracing::error!("Failed to import server {}: {}", name, error_msg);
                 }
             }
             Err(e) => {
@@ -593,12 +592,12 @@ pub async fn mcp_add_from_claude_desktop(
                     success: false,
                     error: Some(e),
                 });
-                error!("Error importing server {}: {}", name, error_msg);
+                tracing::error!("Error importing server {}: {}", name, error_msg);
             }
         }
     }
 
-    info!(
+    tracing::info!(
         "Import complete: {} imported, {} failed",
         imported_count, failed_count
     );
@@ -613,13 +612,13 @@ pub async fn mcp_add_from_claude_desktop(
 /// Starts Claude Code as an MCP server
 #[tauri::command]
 pub async fn mcp_serve(app: AppHandle) -> Result<String, String> {
-    info!("Starting Claude Code as MCP server");
+    tracing::info!("Starting Claude Code as MCP server");
 
     // Start the server in a separate process
     let claude_path = match find_claude_binary(&app) {
         Ok(path) => path,
         Err(e) => {
-            error!("Failed to find claude binary: {}", e);
+            tracing::error!("Failed to find claude binary: {}", e);
             return Err(e.to_string());
         }
     };
@@ -629,11 +628,11 @@ pub async fn mcp_serve(app: AppHandle) -> Result<String, String> {
 
     match cmd.spawn() {
         Ok(_) => {
-            info!("Successfully started Claude Code MCP server");
+            tracing::info!("Successfully started Claude Code MCP server");
             Ok("Claude Code MCP server started".to_string())
         }
         Err(e) => {
-            error!("Failed to start MCP server: {}", e);
+            tracing::error!("Failed to start MCP server: {}", e);
             Err(e.to_string())
         }
     }
@@ -642,7 +641,7 @@ pub async fn mcp_serve(app: AppHandle) -> Result<String, String> {
 /// Tests connection to an MCP server
 #[tauri::command]
 pub async fn mcp_test_connection(app: AppHandle, name: String) -> Result<String, String> {
-    info!("Testing connection to MCP server: {}", name);
+    tracing::info!("Testing connection to MCP server: {}", name);
 
     // For now, we'll use the get command to test if the server exists
     match execute_claude_mcp_command(&app, vec!["get", &name]) {
@@ -654,15 +653,15 @@ pub async fn mcp_test_connection(app: AppHandle, name: String) -> Result<String,
 /// Resets project-scoped server approval choices
 #[tauri::command]
 pub async fn mcp_reset_project_choices(app: AppHandle) -> Result<String, String> {
-    info!("Resetting MCP project choices");
+    tracing::info!("Resetting MCP project choices");
 
     match execute_claude_mcp_command(&app, vec!["reset-project-choices"]) {
         Ok(output) => {
-            info!("Successfully reset MCP project choices");
+            tracing::info!("Successfully reset MCP project choices");
             Ok(output.trim().to_string())
         }
         Err(e) => {
-            error!("Failed to reset project choices: {}", e);
+            tracing::error!("Failed to reset project choices: {}", e);
             Err(e.to_string())
         }
     }
@@ -671,7 +670,7 @@ pub async fn mcp_reset_project_choices(app: AppHandle) -> Result<String, String>
 /// Gets the status of MCP servers
 #[tauri::command]
 pub async fn mcp_get_server_status() -> Result<HashMap<String, ServerStatus>, String> {
-    info!("Getting MCP server status");
+    tracing::info!("Getting MCP server status");
 
     // TODO: Implement actual status checking
     // For now, return empty status
@@ -681,7 +680,7 @@ pub async fn mcp_get_server_status() -> Result<HashMap<String, ServerStatus>, St
 /// Reads .mcp.json from the current project
 #[tauri::command]
 pub async fn mcp_read_project_config(project_path: String) -> Result<MCPProjectConfig, String> {
-    info!("Reading .mcp.json from project: {}", project_path);
+    tracing::info!("Reading .mcp.json from project: {}", project_path);
 
     let mcp_json_path = PathBuf::from(&project_path).join(".mcp.json");
 
@@ -695,12 +694,12 @@ pub async fn mcp_read_project_config(project_path: String) -> Result<MCPProjectC
         Ok(content) => match serde_json::from_str::<MCPProjectConfig>(&content) {
             Ok(config) => Ok(config),
             Err(e) => {
-                error!("Failed to parse .mcp.json: {}", e);
+                tracing::error!("Failed to parse .mcp.json: {}", e);
                 Err(format!("Failed to parse .mcp.json: {}", e))
             }
         },
         Err(e) => {
-            error!("Failed to read .mcp.json: {}", e);
+            tracing::error!("Failed to read .mcp.json: {}", e);
             Err(format!("Failed to read .mcp.json: {}", e))
         }
     }
@@ -712,7 +711,7 @@ pub async fn mcp_save_project_config(
     project_path: String,
     config: MCPProjectConfig,
 ) -> Result<String, String> {
-    info!("Saving .mcp.json to project: {}", project_path);
+    tracing::info!("Saving .mcp.json to project: {}", project_path);
 
     let mcp_json_path = PathBuf::from(&project_path).join(".mcp.json");
 

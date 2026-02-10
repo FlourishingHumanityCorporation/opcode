@@ -1,4 +1,5 @@
 import type { AnalyticsSettings } from './types';
+import { logger } from '@/lib/logger';
 
 const ANALYTICS_STORAGE_KEY = 'opcode-analytics-settings';
 
@@ -45,7 +46,7 @@ export class ConsentManager {
         hasConsented: true,
       };
     } catch (error) {
-      console.error('Failed to initialize consent manager:', error);
+      logger.error('analytics', 'Failed to initialize consent manager:', { error: error });
       // Return default settings on error
       return {
         enabled: true,
@@ -117,7 +118,7 @@ export class ConsentManager {
     try {
       localStorage.setItem(ANALYTICS_STORAGE_KEY, JSON.stringify(this.settings));
     } catch (error) {
-      console.error('Failed to save analytics settings:', error);
+      logger.error('analytics', 'Failed to save analytics settings:', { error: error });
     }
   }
   
