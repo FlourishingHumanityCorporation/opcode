@@ -105,7 +105,7 @@ async function getWorkspaceAndTerminalIds(page: Page): Promise<{
 async function dispatchAgentAttention(page: Page, detail: AttentionDetail) {
   await page.evaluate((eventDetail) => {
     window.dispatchEvent(
-      new CustomEvent("opcode-agent-attention", {
+      new CustomEvent("codeinterfacex-agent-attention", {
         detail: eventDetail,
       })
     );
@@ -118,7 +118,7 @@ test.describe("Agent attention smoke", () => {
     await page.addInitScript(() => {
       localStorage.removeItem("opcode_workspace_v3");
       localStorage.removeItem("opcode_tabs_v2");
-      localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+      localStorage.setItem("codeinterfacex.smoke.projectPath", "/tmp/codeinterfacex-smoke-project");
     });
     await page.goto("/");
     await page.addStyleTag({

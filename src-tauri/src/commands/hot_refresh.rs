@@ -8,7 +8,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
 
-pub const HOT_REFRESH_BACKEND_EVENT: &str = "opcode://hot-refresh-file-changed";
+pub const HOT_REFRESH_BACKEND_EVENT: &str = "codeinterfacex://hot-refresh-file-changed";
 const DEBOUNCE_MS: u64 = 650;
 
 #[derive(Default)]

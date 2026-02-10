@@ -7,12 +7,13 @@ mod commands;
 mod logging;
 mod process;
 mod providers;
+mod rebrand;
 mod usage_index;
 mod web_server;
 
 #[derive(Parser)]
-#[command(name = "opcode-web")]
-#[command(about = "Opcode Web Server - Access Opcode from your phone")]
+#[command(name = "codeinterfacex-web")]
+#[command(about = "CodeInterfaceX Web Server - Access CodeInterfaceX from your phone")]
 struct Args {
     /// Port to run the web server on
     #[arg(short, long, default_value = "8080")]
@@ -26,10 +27,11 @@ struct Args {
 #[tokio::main]
 async fn main() {
     logging::init();
+    rebrand::archive_legacy_opcode_state();
 
     let args = Args::parse();
 
-    println!("🚀 Starting Opcode Web Server...");
+    println!("🚀 Starting CodeInterfaceX Web Server...");
     println!(
         "📱 Will be accessible from phones at: http://{}:{}",
         args.host, args.port

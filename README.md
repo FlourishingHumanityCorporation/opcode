@@ -42,12 +42,10 @@ Think of CodeInterfaceX as your command center for Claude Code - bridging the ga
 
 ## 🧬 Project Lineage
 
-CodeInterfaceX is an actively evolved internal fork/rebrand of the original opcode project.
+CodeInterfaceX is maintained as an internal fork/rebrand while preserving lineage to the original open-source project.
 
-- Active development remote: `origin` (`https://github.com/FlourishingHumanityCorporation/opcode.git`)
-- Original upstream reference: `upstream` (`https://github.com/winfunc/opcode.git`)
-
-This lineage is preserved intentionally so you can trace original architecture/history while continuing independent product direction in CodeInterfaceX.
+- Active development remote (`origin`): `https://github.com/FlourishingHumanityCorporation/opcode.git`
+- Original upstream reference (`upstream`): `https://github.com/winfunc/opcode.git`
 
 ## 📋 Table of Contents
 
@@ -251,7 +249,7 @@ brew install pkg-config
 1. **Clone the Repository**
    ```bash
    git clone https://github.com/FlourishingHumanityCorporation/opcode.git
-   cd opcode
+   cd CodeInterfaceX
    ```
 
 2. **Install Frontend Dependencies**
@@ -330,10 +328,10 @@ After building, you can verify the application works:
 ```bash
 # Run the built executable directly
 # Linux/macOS
-./src-tauri/target/release/opcode
+./src-tauri/target/release/codeinterfacex
 
 # Windows
-./src-tauri/target/release/opcode.exe
+./src-tauri/target/release/codeinterfacex.exe
 ```
 
 ### Build Artifacts
@@ -363,7 +361,7 @@ All artifacts are located in `src-tauri/target/release/`.
 ### Project Structure
 
 ```
-opcode/
+codeinterfacex/
 ├── src/                   # React frontend
 │   ├── components/        # UI components
 │   ├── lib/               # API client & utilities

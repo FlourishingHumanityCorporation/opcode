@@ -1,0 +1,12 @@
+# Paths allowed to contain legacy opcode identifiers intentionally.
+README.md
+CONTRIBUTING.md
+src/lib/rebrand.ts
+src/main.tsx
+src-tauri/src/rebrand.rs
+scripts/check-legacy-identity.sh
+scripts/rebrand-legacy-allowlist.txt
+src/lib/rebrand.test.ts
+src/components/NFOCredits.tsx
+src/components/GitHubAgentBrowser.tsx
+src-tauri/src/commands/agents.rs

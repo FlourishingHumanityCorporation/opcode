@@ -84,7 +84,7 @@ export async function runTerminalStressTest(
       const embeddedTerminalId = terminal.paneStates[paneId]?.embeddedTerminalId;
       if (embeddedTerminalId) {
         try {
-          await api.writeEmbeddedTerminalInput(embeddedTerminalId, "echo opcode-health\n");
+          await api.writeEmbeddedTerminalInput(embeddedTerminalId, "echo codeinterfacex-health\n");
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
           const context: TerminalIncidentContext = {

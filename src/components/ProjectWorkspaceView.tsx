@@ -177,7 +177,7 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({
       }
 
       if (!selected) {
-        selected = window.localStorage.getItem('opcode.smoke.projectPath') || '';
+        selected = window.localStorage.getItem('codeinterfacex.smoke.projectPath') || '';
       }
 
       if (!selected) {

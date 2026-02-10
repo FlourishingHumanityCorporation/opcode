@@ -849,7 +849,7 @@ pub async fn save_clipboard_image_attachment(
     }
 
     let (bytes, extension) = decode_clipboard_image_data_url(&data_url)?;
-    let attachment_dir = project_dir.join(".opcode").join("attachments");
+    let attachment_dir = project_dir.join(".codeinterfacex").join("attachments");
     fs::create_dir_all(&attachment_dir)
         .map_err(|e| format!("Failed to create attachment directory: {}", e))?;
 

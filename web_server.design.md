@@ -1,6 +1,6 @@
-# Opcode Web Server Design
+# CodeInterfaceX Web Server Design
 
-This document describes the implementation of Opcode's web server mode, which allows access to provider sessions from mobile devices and browsers while maintaining full functionality.
+This document describes the implementation of CodeInterfaceX's web server mode, which allows access to provider sessions from mobile devices and browsers while maintaining full functionality.
 
 ## Overview
 
@@ -99,7 +99,7 @@ Provider Process → Rust Backend → WebSocket → Browser DOM Events → UI Up
 ## File Structure
 
 ```
-opcode/
+codeinterfacex/
 ├── src-tauri/src/
 │   └── web_server.rs           # Main web server implementation
 ├── src/

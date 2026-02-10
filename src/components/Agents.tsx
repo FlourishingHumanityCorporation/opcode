@@ -79,7 +79,7 @@ export const Agents: React.FC = () => {
 
     try {
       if (!isRealTauri) {
-        const projectPath = localStorage.getItem('opcode.smoke.projectPath') || '/tmp';
+        const projectPath = localStorage.getItem('codeinterfacex.smoke.projectPath') || '/tmp';
         const tabId = `agent-exec-${agent.id}-${Date.now()}`;
         window.dispatchEvent(new CustomEvent('open-agent-execution', {
           detail: { agent, tabId, projectPath }
@@ -137,7 +137,7 @@ export const Agents: React.FC = () => {
     try {
       const selected = await openDialog({
         filters: [
-          { name: 'opcode Agent', extensions: ['opcode.json', 'json'] },
+          { name: 'codeinterfacex Agent', extensions: ['codeinterfacex.json', 'json'] },
           { name: 'All Files', extensions: ['*'] }
         ],
         multiple: false,
@@ -157,9 +157,9 @@ export const Agents: React.FC = () => {
   const handleExportAgent = async (agent: Agent) => {
     try {
       const path = await save({
-        defaultPath: `${agent.name.toLowerCase().replace(/\s+/g, '-')}.opcode.json`,
+        defaultPath: `${agent.name.toLowerCase().replace(/\s+/g, '-')}.codeinterfacex.json`,
         filters: [
-          { name: 'opcode Agent', extensions: ['opcode.json'] }
+          { name: 'codeinterfacex Agent', extensions: ['codeinterfacex.json'] }
         ]
       });
 

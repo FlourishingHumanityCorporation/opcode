@@ -201,7 +201,7 @@ test.describe("Multiprovider agent smoke", () => {
   test("create -> run -> cancel -> history works for Claude/Codex/Gemini", async ({ page }) => {
     await setupApiMock(page);
     await page.addInitScript(() => {
-      localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+      localStorage.setItem("codeinterfacex.smoke.projectPath", "/tmp/codeinterfacex-smoke-project");
     });
 
     await page.goto("/");

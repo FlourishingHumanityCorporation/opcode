@@ -13,7 +13,7 @@
   <key>CFBundleDisplayName</key>
   <string>CodeInterfaceX</string>
   <key>CFBundleIdentifier</key>
-  <string>opcode.asterisk.so</string>
+  <string>com.flourishinghumanity.codeinterfacex</string>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
@@ -23,7 +23,7 @@
       <string>Editor</string>
       <key>CFBundleTypeExtensions</key>
       <array>
-        <string>opcode.json</string>
+        <string>codeinterfacex.json</string>
       </array>
       <key>CFBundleTypeIconFile</key>
       <string>icon.icns</string>

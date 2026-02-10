@@ -1,8 +1,8 @@
 import { logger } from '@/lib/logger';
 
-const EXPLORER_OPEN_PREFIX = "opcode:explorer:open:";
-const EXPLORER_WIDTH_PREFIX = "opcode:explorer:width:";
-const EXPLORER_EXPANDED_PREFIX = "opcode:explorer:expanded:";
+const EXPLORER_OPEN_PREFIX = "codeinterfacex:explorer:open:";
+const EXPLORER_WIDTH_PREFIX = "codeinterfacex:explorer:width:";
+const EXPLORER_EXPANDED_PREFIX = "codeinterfacex:explorer:expanded:";
 
 const DEFAULT_EXPLORER_OPEN = true;
 const DEFAULT_EXPLORER_WIDTH = 24;

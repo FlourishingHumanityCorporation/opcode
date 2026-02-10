@@ -5,9 +5,12 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AnalyticsErrorBoundary } from "./components/AnalyticsErrorBoundary";
 import { analytics, resourceMonitor } from "./lib/analytics";
 import { PostHogProvider } from "posthog-js/react";
+import { archiveLegacyOpcodeLocalStorageState } from "./lib/rebrand";
 import "./assets/shimmer.css";
 import "./styles.css";
 import AppIcon from "./assets/nfo/asterisk-logo.png";
+
+archiveLegacyOpcodeLocalStorageState();
 
 // Initialize analytics before rendering
 analytics.initialize();

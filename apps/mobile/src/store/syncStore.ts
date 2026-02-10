@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import type { EventEnvelopeV1, SnapshotV1 } from '../../../../packages/mobile-sync-protocol/src';
 import type { MobileSyncCredentials } from '../protocol/client';
 
-const CREDENTIALS_KEY = 'opcode.mobile.credentials.v1';
+const CREDENTIALS_KEY = 'codeinterfacex.mobile.credentials.v1';
 
 export interface MirrorPaneState {
   embeddedTerminalId?: string;

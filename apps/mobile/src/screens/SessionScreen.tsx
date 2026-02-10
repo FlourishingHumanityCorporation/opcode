@@ -150,7 +150,7 @@ export function SessionScreen({
           value={prompt}
           onChangeText={setPrompt}
           autoCorrect={false}
-          placeholder="Ask Opcode to run or modify something..."
+          placeholder="Ask CodeInterfaceX to run or modify something..."
           placeholderTextColor="#6E7681"
         />
       </View>

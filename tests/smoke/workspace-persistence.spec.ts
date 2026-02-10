@@ -367,7 +367,7 @@ test.describe('Workspace persistence smoke', () => {
         sessionData: {
           id: sessionId,
           project_id: 'smoke-project',
-          project_path: '/tmp/opcode-smoke-project',
+          project_path: '/tmp/codeinterfacex-smoke-project',
           created_at: Date.now(),
         },
       };
@@ -431,7 +431,7 @@ test.describe('Workspace persistence smoke', () => {
       counters,
     });
     await page.addInitScript(() => {
-      localStorage.setItem('opcode.smoke.projectPath', '/definitely/not/a/real/project/path');
+      localStorage.setItem('codeinterfacex.smoke.projectPath', '/definitely/not/a/real/project/path');
     });
     await page.goto('/');
 
@@ -446,7 +446,7 @@ test.describe('Workspace persistence smoke', () => {
   test('exits loading with deterministic error instead of infinite spinner', async ({ page }) => {
     await setupWorkspaceApiMock(page);
     await page.addInitScript(() => {
-      localStorage.setItem('opcode.smoke.projectPath', '/tmp/opcode-smoke-project');
+      localStorage.setItem('codeinterfacex.smoke.projectPath', '/tmp/codeinterfacex-smoke-project');
     });
     await page.goto('/');
 
@@ -510,7 +510,7 @@ test.describe('Workspace persistence smoke', () => {
   test('does not show slow-start warning when first stream arrives quickly', async ({ page }) => {
     await setupWorkspaceApiMock(page);
     await page.addInitScript(() => {
-      localStorage.setItem('opcode.smoke.projectPath', '/tmp/opcode-smoke-project');
+      localStorage.setItem('codeinterfacex.smoke.projectPath', '/tmp/codeinterfacex-smoke-project');
     });
     await page.goto('/');
     await ensureWorkspaceCount(page, 1);

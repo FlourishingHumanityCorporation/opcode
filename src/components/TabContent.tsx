@@ -7,7 +7,7 @@ import { ProjectWorkspaceView } from '@/components/ProjectWorkspaceView';
 import { UtilityOverlayHost } from '@/components/UtilityOverlayHost';
 import { logWorkspaceEvent } from '@/services/workspaceDiagnostics';
 import {
-  OPCODE_AGENT_ATTENTION_EVENT,
+  CODEINTERFACEX_AGENT_ATTENTION_EVENT,
   type AgentAttentionEventDetail,
 } from '@/services/agentAttention';
 import { applyAgentAttentionStatusUpdate } from '@/services/agentAttentionRouting';
@@ -127,7 +127,7 @@ export const TabContent: React.FC = () => {
     window.addEventListener('provider-session-selected', handleProviderSessionSelected as EventListener);
     window.addEventListener('open-utility-overlay', handleOpenUtilityOverlay as EventListener);
     window.addEventListener('close-utility-overlay', handleCloseUtilityOverlay);
-    window.addEventListener(OPCODE_AGENT_ATTENTION_EVENT, handleAgentAttention as EventListener);
+    window.addEventListener(CODEINTERFACEX_AGENT_ATTENTION_EVENT, handleAgentAttention as EventListener);
 
     return () => {
       window.removeEventListener('open-session-in-tab', handleOpenSessionInTab as EventListener);
@@ -139,7 +139,7 @@ export const TabContent: React.FC = () => {
       window.removeEventListener('provider-session-selected', handleProviderSessionSelected as EventListener);
       window.removeEventListener('open-utility-overlay', handleOpenUtilityOverlay as EventListener);
       window.removeEventListener('close-utility-overlay', handleCloseUtilityOverlay);
-      window.removeEventListener(OPCODE_AGENT_ATTENTION_EVENT, handleAgentAttention as EventListener);
+      window.removeEventListener(CODEINTERFACEX_AGENT_ATTENTION_EVENT, handleAgentAttention as EventListener);
     };
   }, [
     closeTab,

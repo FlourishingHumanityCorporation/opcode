@@ -135,8 +135,8 @@ class Logger {
   }
 
   private getInitialLogLevel(): LogLevel {
-    // Check for __OPCODE_DEBUG_LOGS__ flag
-    if (typeof window !== 'undefined' && (window as any).__OPCODE_DEBUG_LOGS__) {
+    // Check for __CODEINTERFACEX_DEBUG_LOGS__ flag
+    if (typeof window !== 'undefined' && (window as any).__CODEINTERFACEX_DEBUG_LOGS__) {
       return 'debug';
     }
 
@@ -144,7 +144,7 @@ class Logger {
     const storage = this.getSafeStorage();
     if (storage) {
       try {
-        const stored = storage.getItem('opcode.log.level');
+        const stored = storage.getItem('codeinterfacex.log.level');
         if (stored && (stored === 'debug' || stored === 'info' || stored === 'warn' || stored === 'error')) {
           return stored;
         }
@@ -162,7 +162,7 @@ class Logger {
     const storage = this.getSafeStorage();
     if (storage) {
       try {
-        storage.setItem('opcode.log.level', level);
+        storage.setItem('codeinterfacex.log.level', level);
       } catch {
         // Ignore storage write failures; runtime level still updates in-memory.
       }

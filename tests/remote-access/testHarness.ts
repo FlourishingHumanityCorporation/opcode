@@ -16,7 +16,7 @@ export interface ScriptSandbox {
 }
 
 export function createSandbox(): ScriptSandbox {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "opcode-remote-access-"));
+  const rootDir = mkdtempSync(path.join(tmpdir(), "codeinterfacex-remote-access-"));
   const homeDir = path.join(rootDir, "home");
   const binDir = path.join(rootDir, "bin");
   const logFile = path.join(rootDir, "commands.log");

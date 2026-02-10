@@ -20,13 +20,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SRC_TAURI_DIR="${REPO_ROOT}/src-tauri"
 
-OPCODE_LABEL="com.opcode.web"
-TAILSCALE_LABEL="com.opcode.tailscaled-userspace"
-OPCODE_PLIST="${HOME}/Library/LaunchAgents/${OPCODE_LABEL}.plist"
+CODEINTERFACEX_LABEL="com.codeinterfacex.web"
+TAILSCALE_LABEL="com.codeinterfacex.tailscaled-userspace"
+CODEINTERFACEX_PLIST="${HOME}/Library/LaunchAgents/${CODEINTERFACEX_LABEL}.plist"
 TAILSCALE_PLIST="${HOME}/Library/LaunchAgents/${TAILSCALE_LABEL}.plist"
 
-OPCODE_BIN="${SRC_TAURI_DIR}/target/debug/opcode-web"
-OPCODE_LOG_DIR="${HOME}/Library/Logs/opcode-web"
+CODEINTERFACEX_BIN="${SRC_TAURI_DIR}/target/debug/codeinterfacex-web"
+CODEINTERFACEX_LOG_DIR="${HOME}/Library/Logs/codeinterfacex-web"
 
 TAILSCALE_STATE_DIR="${HOME}/Library/Application Support/Tailscale"
 TAILSCALE_CACHE_DIR="${HOME}/Library/Caches/Tailscale"
@@ -48,21 +48,21 @@ load_agent() {
 echo "Building frontend assets..."
 (cd "${REPO_ROOT}" && "${NPM_BIN}" run build)
 
-echo "Building opcode-web binary..."
-(cd "${SRC_TAURI_DIR}" && "${CARGO_BIN}" build --bin opcode-web)
+echo "Building codeinterfacex-web binary..."
+(cd "${SRC_TAURI_DIR}" && "${CARGO_BIN}" build --bin codeinterfacex-web)
 
-mkdir -p "${HOME}/Library/LaunchAgents" "${OPCODE_LOG_DIR}"
+mkdir -p "${HOME}/Library/LaunchAgents" "${CODEINTERFACEX_LOG_DIR}"
 
-cat > "${OPCODE_PLIST}" <<PLIST
+cat > "${CODEINTERFACEX_PLIST}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${OPCODE_LABEL}</string>
+  <string>${CODEINTERFACEX_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${OPCODE_BIN}</string>
+    <string>${CODEINTERFACEX_BIN}</string>
     <string>--port</string>
     <string>${PORT}</string>
   </array>
@@ -73,15 +73,15 @@ cat > "${OPCODE_PLIST}" <<PLIST
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>${OPCODE_LOG_DIR}/stdout.log</string>
+  <string>${CODEINTERFACEX_LOG_DIR}/stdout.log</string>
   <key>StandardErrorPath</key>
-  <string>${OPCODE_LOG_DIR}/stderr.log</string>
+  <string>${CODEINTERFACEX_LOG_DIR}/stderr.log</string>
 </dict>
 </plist>
 PLIST
 
-echo "Loading launch agent: ${OPCODE_LABEL}"
-load_agent "${OPCODE_LABEL}" "${OPCODE_PLIST}"
+echo "Loading launch agent: ${CODEINTERFACEX_LABEL}"
+load_agent "${CODEINTERFACEX_LABEL}" "${CODEINTERFACEX_PLIST}"
 
 if ! command -v "${BREW_BIN}" >/dev/null 2>&1; then
   echo "Homebrew is required to install Tailscale. Install Homebrew and rerun."
@@ -135,15 +135,15 @@ LAN_IP="$("${IPCONFIG_BIN}" getifaddr en0 2>/dev/null || "${IPCONFIG_BIN}" getif
 
 echo
 echo "Setup complete."
-echo "Opcode web URL (local): http://127.0.0.1:${PORT}"
+echo "CodeInterfaceX web URL (local): http://127.0.0.1:${PORT}"
 if [[ -n "${LAN_IP}" ]]; then
-  echo "Opcode web URL (LAN):   http://${LAN_IP}:${PORT}"
+  echo "CodeInterfaceX web URL (LAN):   http://${LAN_IP}:${PORT}"
 fi
 
 if "${TAILSCALE_BIN}" --socket="${TAILSCALE_SOCKET}" status >/dev/null 2>&1; then
   TS_IP="$("${TAILSCALE_BIN}" --socket="${TAILSCALE_SOCKET}" ip -4 2>/dev/null | head -n 1 || true)"
   if [[ -n "${TS_IP}" ]]; then
-    echo "Opcode web URL (tailnet): http://${TS_IP}:${PORT}"
+    echo "CodeInterfaceX web URL (tailnet): http://${TS_IP}:${PORT}"
   fi
 else
   echo

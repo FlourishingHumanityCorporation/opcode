@@ -11,7 +11,7 @@ import {
   SnapshotV1Schema,
 } from '../../../../packages/mobile-sync-protocol/src';
 
-const PROTOCOL_HEADER = 'X-Opcode-Sync-Version';
+const PROTOCOL_HEADER = 'X-CodeInterfaceX-Sync-Version';
 const PROTOCOL_VERSION = '1';
 
 interface ApiEnvelope<T> {

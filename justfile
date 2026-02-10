@@ -1,4 +1,4 @@
-# Opcode - NixOS Build & Development Commands
+# CodeInterfaceX - NixOS Build & Development Commands
 
 # Show available commands
 default:
@@ -65,13 +65,13 @@ rebuild: clean build run
 
 # Run web server mode for phone access
 web: build-frontend
-    cd src-tauri && cargo run --bin opcode-web
+    cd src-tauri && cargo run --bin codeinterfacex-web
 
 # Run web server on custom port
 web-port PORT: build-frontend
-    cd src-tauri && cargo run --bin opcode-web -- --port {{PORT}}
+    cd src-tauri && cargo run --bin codeinterfacex-web -- --port {{PORT}}
 
-# Configure persistent macOS remote access (opcode-web + userspace tailscale)
+# Configure persistent macOS remote access (codeinterfacex-web + userspace tailscale)
 remote-access-macos PORT='8090':
     bash scripts/setup-remote-access-macos.sh {{PORT}}
 
@@ -83,7 +83,7 @@ remote-access-status PORT='8090':
 test-remote-access-contracts:
     npm run test:remote-access:contracts
 
-# Run real opcode-web smoke tests
+# Run real codeinterfacex-web smoke tests
 smoke-remote-web:
     npm run smoke:remote-web
 
@@ -96,7 +96,7 @@ ip:
 
 # Show build information
 info:
-    @echo "🚀 Opcode - Claude Code GUI Application"
+    @echo "🚀 CodeInterfaceX - Claude Code GUI Application"
     @echo "Built for NixOS without Docker"
     @echo ""
     @echo "📦 Frontend: React + TypeScript + Vite"

@@ -20,7 +20,7 @@ Internal iOS-only TestFlight release for the mobile sync companion.
 1. Confirm Apple Developer team and bundle ID are set in Expo/EAS config.
 2. Confirm provisioning profile/certificates are valid.
 3. Build command:
-   - `cd /Users/paulrohde/CodeProjects/external/opcode/apps/mobile`
+   - `cd /Users/paulrohde/CodeProjects/external/codeinterfacex/apps/mobile`
    - `npx expo prebuild --platform ios` (if native sync needed)
    - `eas build --platform ios --profile internal`
 4. Verify build metadata:

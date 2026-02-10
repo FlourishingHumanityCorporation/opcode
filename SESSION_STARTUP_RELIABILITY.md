@@ -9,13 +9,13 @@ Make session startup latency measurable and debuggable without relying on manual
 ## What Was Added
 
 1. Real startup probe script:
-   - `/Users/paulrohde/CodeProjects/external/opcode/scripts/measure-session-startup.mjs`
+   - `/Users/paulrohde/CodeProjects/external/codeinterfacex/scripts/measure-session-startup.mjs`
 2. NPM commands:
    - `npm run debug:session-start`
    - `npm run debug:session-start:json`
    - `npm run debug:session-start:gate`
 3. Smoke regression timing assertion:
-   - `/Users/paulrohde/CodeProjects/external/opcode/tests/smoke/workspace-persistence.spec.ts`
+   - `/Users/paulrohde/CodeProjects/external/codeinterfacex/tests/smoke/workspace-persistence.spec.ts`
    - Ensures slow-start warning path appears quickly and spinner does not hang.
 
 ## Measured Results (Real Provider Runs, No Mocked Stream)
@@ -24,7 +24,7 @@ Command shape used:
 
 ```bash
 npm run debug:session-start -- \
-  --project /Users/paulrohde/CodeProjects/external/opcode \
+  --project /Users/paulrohde/CodeProjects/external/codeinterfacex \
   --runs 2 \
   --timeout-ms 90000 \
   --json

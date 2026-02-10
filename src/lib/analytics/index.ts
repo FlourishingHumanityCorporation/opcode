@@ -84,7 +84,7 @@ class AnalyticsService {
             anonymous: true,
             consent_date: settings.consentDate,
             app_type: 'desktop',
-            app_name: 'opcode',
+            app_name: 'codeinterfacex',
           });
           
           // Set initial screen
@@ -235,7 +235,7 @@ class AnalyticsService {
           ...event.properties,
           $session_id: event.sessionId,
           timestamp: event.timestamp,
-          $current_url: `opcode://${event.properties?.screen_name || 'unknown'}`,
+          $current_url: `codeinterfacex://${event.properties?.screen_name || 'unknown'}`,
         });
       }
     });

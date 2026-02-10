@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import asteriskLogo from "@/assets/nfo/asterisk-logo.png";
-import keygennMusic from "@/assets/nfo/opcode-nfo.ogg";
+import keygennMusic from "@/assets/nfo/codeinterfacex-nfo.ogg";
 import { logger } from '@/lib/logger';
 
 interface NFOCreditsProps {

@@ -3,19 +3,19 @@ use tracing_appender::rolling;
 
 /// Initialize the tracing infrastructure with:
 /// 1. fmt layer → stdout (colored, human-readable, respects RUST_LOG)
-/// 2. file appender → ~/.opcode/logs/opcode-YYYY-MM-DD.log (daily rotation)
+/// 2. file appender → ~/.codeinterfacex/logs/codeinterfacex-YYYY-MM-DD.log (daily rotation)
 /// 3. tracing-log::LogTracer → captures log:: from third-party deps (rusqlite, reqwest, etc.)
 pub fn init() {
     // Bridge log:: crate calls from third-party deps into tracing
     tracing_log::LogTracer::init().ok();
 
-    // Determine log directory: OPCODE_LOG_DIR env var or ~/.opcode/logs/
-    let log_dir = std::env::var("OPCODE_LOG_DIR")
+    // Determine log directory: CODEINTERFACEX_LOG_DIR env var or ~/.codeinterfacex/logs/
+    let log_dir = std::env::var("CODEINTERFACEX_LOG_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
             dirs::home_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".opcode")
+                .join(".codeinterfacex")
                 .join("logs")
         });
 
@@ -23,7 +23,7 @@ pub fn init() {
     std::fs::create_dir_all(&log_dir).ok();
 
     // Daily rotating file appender
-    let file_appender = rolling::daily(&log_dir, "opcode");
+    let file_appender = rolling::daily(&log_dir, "codeinterfacex");
 
     // Non-blocking writer for the file appender
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);

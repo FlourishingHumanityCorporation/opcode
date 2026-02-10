@@ -1,12 +1,12 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
-const LOAD_COUNT_KEY = "opcode.hotRefresh.loadCount";
+const LOAD_COUNT_KEY = "codeinterfacex.hotRefresh.loadCount";
 
 async function installLoadCounter(page: Page): Promise<void> {
   await page.addInitScript(({ key }) => {
     const previous = Number(sessionStorage.getItem(key) || "0");
     sessionStorage.setItem(key, String(previous + 1));
-    localStorage.setItem("opcode.smoke.projectPath", "/tmp/opcode-smoke-project");
+    localStorage.setItem("codeinterfacex.smoke.projectPath", "/tmp/codeinterfacex-smoke-project");
   }, { key: LOAD_COUNT_KEY });
 }
 
@@ -22,7 +22,7 @@ async function openApp(page: Page): Promise<void> {
 async function dispatchHotRefreshRequest(page: Page, requestId: string): Promise<void> {
   await page.evaluate((id) => {
     window.dispatchEvent(
-      new CustomEvent("opcode-hot-refresh-requested", {
+      new CustomEvent("codeinterfacex-hot-refresh-requested", {
         detail: {
           requestId: id,
           sourceId: `playwright-${id}`,

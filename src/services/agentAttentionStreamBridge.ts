@@ -53,3 +53,16 @@ export function buildDoneAttentionPayload(
     body: normalizedBody || DEFAULT_DONE_BODY,
   });
 }
+
+const DEFAULT_RUNNING_BODY = "Processing...";
+
+export function buildRunningAttentionPayload(
+  context: AgentAttentionStreamContext,
+  body?: string
+): EmitAgentAttentionInput {
+  const normalizedBody = typeof body === "string" ? body.trim() : "";
+  return withContext(context, {
+    kind: "running",
+    body: normalizedBody || DEFAULT_RUNNING_BODY,
+  });
+}

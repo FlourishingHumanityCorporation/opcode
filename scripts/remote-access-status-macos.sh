@@ -22,11 +22,11 @@ print_agent_status() {
 }
 
 echo "== launchd services =="
-if ! print_agent_status "com.opcode.web"; then
-  print_agent_status "com.paulrohde.opcode-web" || echo "com.opcode.web not loaded"
+if ! print_agent_status "com.codeinterfacex.web"; then
+  print_agent_status "com.paulrohde.codeinterfacex-web" || echo "com.codeinterfacex.web not loaded"
 fi
-if ! print_agent_status "com.opcode.tailscaled-userspace"; then
-  print_agent_status "com.paulrohde.tailscaled-userspace" || echo "com.opcode.tailscaled-userspace not loaded"
+if ! print_agent_status "com.codeinterfacex.tailscaled-userspace"; then
+  print_agent_status "com.paulrohde.tailscaled-userspace" || echo "com.codeinterfacex.tailscaled-userspace not loaded"
 fi
 
 echo
@@ -34,7 +34,7 @@ echo "== listeners =="
 "${LSOF_BIN}" -nP -iTCP:${PORT} -sTCP:LISTEN || true
 
 echo
-echo "== opcode health =="
+echo "== codeinterfacex health =="
 local_response="$("${CURL_BIN}" -sS -m 5 "http://127.0.0.1:${PORT}/api/projects" || true)"
 printf '%s\n' "${local_response:0:200}"
 
